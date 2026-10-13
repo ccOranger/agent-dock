@@ -37,7 +37,7 @@ SEED_TOOLS = [
     },
 ]
 
-# 默认业务 Agent（与 app/agents/registry.py 中的 AGENT_REGISTRY 对齐）
+# 默认业务 Agent（与 app/agents/registry.py 中的 AGENT_REGISTRY 对齐，source=code）
 SEED_AGENTS = [
     {
         "name": "knowledge_qa",
@@ -59,6 +59,19 @@ SEED_AGENTS = [
         "description": "投诉处理：受理客户投诉、安抚情绪、创建工单、升级人工",
         "enabled": True,
         "sort_order": 3,
+    },
+]
+
+# 示例动态 Agent（source=dynamic）：演示后台创建 + MCP 绑定，可在后台继续编辑
+SEED_DYNAMIC_AGENTS = [
+    {
+        "name": "refund_service",
+        "display_name": "退款咨询",
+        "description": "退款咨询：受理退款申请、查询退款进度（示例动态 Agent，绑定退款 MCP）",
+        "enabled": True,
+        "sort_order": 10,
+        "system_prompt": "你是退款咨询助手，负责解答退款政策与进度问题；必要时调用退款相关工具。",
+        "mcp_tool_names": ["mcp_refund"],
     },
 ]
 
@@ -121,7 +134,13 @@ async def main() -> None:
                 await db.execute(select(AgentMeta).where(AgentMeta.name == a["name"]))
             ).scalar_one_or_none()
             if row is None:
-                db.add(AgentMeta(**a))
+                db.add(AgentMeta(source="code", **a))
+        for a in SEED_DYNAMIC_AGENTS:
+            row = (
+                await db.execute(select(AgentMeta).where(AgentMeta.name == a["name"]))
+            ).scalar_one_or_none()
+            if row is None:
+                db.add(AgentMeta(source="dynamic", **a))
         for d in SEED_DOCUMENTS:
             row = (
                 await db.execute(
@@ -134,7 +153,7 @@ async def main() -> None:
                 db.add(Document(**d))
         await db.commit()
     print(
-        "✅ seed 完成：3 用户(admin/alice/service01) + 2 MCP 工具 + 3 Agent + 3 示例文档"
+        "✅ seed 完成：3 用户(admin/alice/service01) + 2 MCP 工具 + 3 代码 Agent + 1 动态 Agent + 3 示例文档"
     )
 
 

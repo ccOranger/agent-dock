@@ -64,6 +64,9 @@ pypdf==5.0.1
 python-docx==1.1.2
 markdown==3.7
 beautifulsoup4==4.12.3
+# hello_agents RAG pipeline 的 PDF/DOCX 增强转换依赖；缺失时会回退到基础 reader 并刷警告。
+# [pdf] 拉取 pdfminer-six/pdfplumber，[docx] 复用已装的 python-docx。
+markitdown[pdf,docx]>=0.1.5
 
 # ============ 监控 ============
 tenacity==9.0.0

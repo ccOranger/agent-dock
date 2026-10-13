@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     app_port: int = 8000
     log_level: str = "INFO"
 
+    # ===== CORS（逗号分隔的允许来源；默认放行客户端前端 5173 与管理后台 5174） =====
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
+
+    @property
+    def allowed_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
     # ===== HelloAgents LLM =====
     llm_model_id: str = "gpt-4o"
     llm_api_key: str = "sk-xxx"
@@ -35,6 +42,8 @@ class Settings(BaseSettings):
 
     # ===== RAG =====
     rag_kb_root: str = "./data/knowledge_bases"
+    # 上传文档原始文件的归档目录（用于后台查看/下载原文，与向量 source_path 解耦）
+    rag_doc_archive_root: str = "./data/doc_archives"
     rag_default_namespace: str = "cs_default"
     rag_chunk_size: int = 512
     rag_chunk_overlap: int = 64

@@ -88,6 +88,7 @@ class Document(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(String(256))
     source: Mapped[str | None] = mapped_column(String(512))
     content_type: Mapped[str | None] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16), default="upload")
     size_bytes: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="pending")
     error_message: Mapped[str | None] = mapped_column(Text)
@@ -95,6 +96,15 @@ class Document(Base, TimestampMixin):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+
+class KnowledgeBase(Base, TimestampMixin):
+    __tablename__ = "knowledge_bases"
+
+    namespace: Mapped[str] = mapped_column(String(64), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class AgentMeta(Base, TimestampMixin):
@@ -106,6 +116,16 @@ class AgentMeta(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # ---- 动态 Agent 支持：区分来源，dynamic 才可在后台增删改 ----
+    # code：代码注册表托管（prompt/工具等在 Python 类里，后台仅能开关）
+    # dynamic：完全由 DB 配置驱动，可在后台创建/编辑并配置 MCP 工具
+    source: Mapped[str] = mapped_column(String(16), default="code")
+    system_prompt: Mapped[str | None] = mapped_column(Text)
+    llm_model: Mapped[str] = mapped_column(String(128), default="")
+    rag_namespace: Mapped[str | None] = mapped_column(String(64))
+    search_all_knowledge_bases: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Agent ↔ MCP 工具绑定（仅存名称，配置见 tools 表 type=mcp）
+    mcp_tool_names: Mapped[list] = mapped_column(JSONB, default=list)
 
 
 class ToolMeta(Base, TimestampMixin):

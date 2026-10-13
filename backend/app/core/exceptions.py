@@ -43,6 +43,12 @@ class NotFound(BizError):
     __doc__ = "资源不存在"
 
 
+class Conflict(BizError):
+    code = 3002
+    http_status = status.HTTP_409_CONFLICT
+    __doc__ = "资源冲突"
+
+
 class ToolParamError(BizError):
     code = 4001
     http_status = status.HTTP_400_BAD_REQUEST

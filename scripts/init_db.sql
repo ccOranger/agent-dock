@@ -75,6 +75,16 @@ CREATE INDEX idx_memories_user_type ON memories(user_id, type);
 CREATE INDEX idx_memories_importance ON memories(importance DESC);
 CREATE INDEX idx_memories_content_trgm ON memories USING gin (content gin_trgm_ops);
 
+-- ========== 知识库命名空间（管理后台维护） ==========
+CREATE TABLE knowledge_bases (
+    namespace     VARCHAR(64) PRIMARY KEY,
+    display_name  VARCHAR(128) NOT NULL,
+    description   TEXT,
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- ========== 知识库文档归档 ==========
 CREATE TABLE documents (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -82,6 +92,8 @@ CREATE TABLE documents (
     source          VARCHAR(512),
     content_type    VARCHAR(64),
     size_bytes      BIGINT,
+    kind              VARCHAR(16) NOT NULL DEFAULT 'upload'
+                    CHECK (kind IN ('upload','manual')),
     status          VARCHAR(16) NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','processing','ready','failed')),
     error_message   TEXT,
@@ -94,8 +106,16 @@ CREATE TABLE documents (
 );
 CREATE INDEX idx_documents_status ON documents(status);
 CREATE INDEX idx_documents_namespace ON documents(rag_namespace);
+CREATE INDEX idx_documents_kind ON documents(kind);
 
--- ========== Agent 元数据注册（仅管理用途） ==========
+-- 知识库命名空间种子（与现有 agent rag_namespace 一致）
+INSERT INTO knowledge_bases (namespace, display_name, description) VALUES
+    ('cs_default', '通用知识库', '默认通用客服知识'),
+    ('cs_order', '订单知识库', '订单相关业务'),
+    ('cs_after_sales', '售后知识库', '售后/投诉相关业务')
+ON CONFLICT (namespace) DO NOTHING;
+
+-- ========== Agent 元数据注册（代码托管 + 动态后台创建） ==========
 CREATE TABLE agents (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(64) UNIQUE NOT NULL,
@@ -103,6 +123,12 @@ CREATE TABLE agents (
     description     TEXT,
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     sort_order      INT DEFAULT 0,
+    source          VARCHAR(16) NOT NULL DEFAULT 'code',   -- code | dynamic
+    system_prompt   TEXT,                                   -- dynamic 必填
+    llm_model       VARCHAR(128) NOT NULL DEFAULT '',       -- 空则用默认 LLM_MODEL_ID
+    rag_namespace   VARCHAR(64),
+    search_all_knowledge_bases BOOLEAN NOT NULL DEFAULT FALSE,
+    mcp_tool_names  JSONB NOT NULL DEFAULT '[]'::jsonb,     -- Agent ↔ MCP 工具绑定
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );

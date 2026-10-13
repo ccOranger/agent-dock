@@ -7,13 +7,12 @@
         <div class="spacer" />
         <el-button size="small" @click="onNew">新建会话</el-button>
         <el-button size="small" @click="router.push('/history')">历史</el-button>
-        <el-button size="small" @click="goAdmin" v-if="isAdminOrAgent">管理</el-button>
+        <el-button size="small" @click="goAdmin" v-if="isAdminOrAgent()">管理后台</el-button>
         <el-button size="small" type="danger" plain @click="onLogout">退出</el-button>
       </el-header>
       <el-main class="main">
         <div class="messages" ref="listRef">
           <MessageBubble v-for="m in store.messages" :key="m.id" :message="m" />
-          <ToolCallCard v-for="t in store.toolCalls" :key="t.id" :tool="t" />
           <el-alert
             v-if="handoverReason"
             type="warning"
@@ -40,14 +39,13 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { streamChat } from '@/api/chat'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import MessageBubble from '@/components/MessageBubble.vue'
-import ToolCallCard from '@/components/ToolCallCard.vue'
 import AgentBadge from '@/components/AgentBadge.vue'
 
 const store = useChatStore()
@@ -66,6 +64,13 @@ function scrollBottom() {
   })
 }
 
+// 打字机每揭示一段文本后自动滚动到底部
+onMounted(() => store.setRevealHook(scrollBottom))
+onBeforeUnmount(() => {
+  store.setRevealHook(null)
+  store.forceFinish()
+})
+
 function send() {
   const text = input.value.trim()
   if (!text || store.streaming) return
@@ -83,7 +88,6 @@ function send() {
     },
     text: (d: any) => {
       store.appendText(d.content)
-      scrollBottom()
     },
     tool_call: (d: any) => {
       store.addToolCall(d)
@@ -100,7 +104,7 @@ function send() {
       store.finishStreaming()
     },
     error: (d: any) => {
-      store.finishStreaming()
+      store.forceFinish()
       ElMessage.error(d?.message || '对话出错')
     },
   })
@@ -108,7 +112,7 @@ function send() {
 
 function abort() {
   controller?.abort()
-  store.finishStreaming()
+  store.forceFinish()
 }
 
 function onNew() {
@@ -123,7 +127,9 @@ function onLogout() {
 }
 
 function goAdmin() {
-  router.push('/admin/knowledge')
+  // 管理功能已迁移至独立后台工程 admin-frontend，此处跳转到外部控制台地址
+  const url = (import.meta.env.VITE_ADMIN_CONSOLE_URL as string) || 'http://localhost:5174'
+  window.open(url, '_blank', 'noopener')
 }
 </script>
 
