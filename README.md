@@ -14,17 +14,21 @@
 
 - 每个业务 = 一个独立 Python 类（继承 `BaseBusinessAgent`）+ 独立 Prompt + 独立工具集
 - 新增业务：新建类文件 + 注册表加一行，路由 Prompt 自动感知，零改路由代码
+- **动态 Agent**：除代码托管 Agent 外，可在管理后台基于数据库配置（system_prompt / 模型 / RAG namespace / MCP 工具）动态创建，注册与路由实时生效（代码 Agent 与动态 Agent 混合注册）
 - 记忆一律走 HelloAgents `MemoryTool`（四层），知识库一律走 `RAGTool`（多 namespace）
 - 对话接口 SSE 流式输出（session / route / text / tool_call / tool_result / handover / done / error）
+- **管理后台**：独立 `admin-frontend` 工程，提供 Agent 管理、知识库命名空间管理、跨客户工单（咨询）查看/CSV 导出、MCP Servers、记忆时序等能力
 
 ## 目录结构
 
 ```
-backend/    FastAPI + HelloAgents（app/{api,core,agents,tools,models,schemas,services,utils}）
-frontend/   Vue 3 + Pinia + Element Plus + Vite（src/{api,stores,router,views,components,types}）
-data/       RAGTool 知识库根目录（cs_default / cs_order / cs_after_sales）
-scripts/    init_db.sql / init_db.sh / seed_data.py
-docs/       spec.md（规范）/ api.md（接口速查）/ runbook.md（运维手册）
+backend/         FastAPI + HelloAgents（app/{api,core,agents,tools,models,schemas,services,utils}）
+frontend/        Vue 3 客户端（客户对话端，src/{api,stores,router,views,components,types}）
+admin-frontend/  Vue 3 管理后台（Agent/知识库/工单/MCP/记忆/登录，独立工程）
+data/            RAGTool 知识库根目录（cs_default / cs_order / cs_after_sales）
+backend/data/    运行时数据：文档归档 doc_archives/、知识库 knowledge_bases/（已 .gitignore 排除，勿入库）
+scripts/         init_db.sql / init_db.sh / seed_data.py；增量迁移 migrate_admin_console.sql / migrate_dynamic_agents.sql
+docs/            spec.md（规范）/ api.md（接口速查）/ runbook.md（运维手册）
 ```
 
 ## 快速开始
@@ -47,6 +51,13 @@ bash scripts/init_db.sh          # 或手动执行 scripts/init_db.sql
 ```
 
 > 若用云托管库（非本机），可直接用 `psql`/客户端执行 `scripts/init_db.sql`（已去除 `uuid-ossp`/`vector` 依赖）；也可跳过此步，由下一步的 `seed_data.py` 自动 `create_all` 建表。
+
+> **已部署库的增量升级**：新增管理后台与动态 Agent 后，`init_db.sql` 加入了 `knowledge_bases` 表、`documents.kind` 列及 `agents` 表的动态 Agent 扩展列。全新库直接跑 `init_db.sql` 即可；**存量库**需执行以下幂等迁移脚本（否则启动会因缺表/缺列报错）：
+>
+> ```bash
+> psql "$DATABASE_URL" -f scripts/migrate_admin_console.sql   # knowledge_bases 表 + documents.kind
+> psql "$DATABASE_URL" -f scripts/migrate_dynamic_agents.sql  # agents 表动态 Agent 列
+> ```
 
 ### 2. 后端
 
@@ -84,7 +95,18 @@ npm run dev                      # http://localhost:5173（/api 已代理到后�
 | alice | Alice@123 | customer |
 | service01 | Agent@123 | agent |
 
-### 4. 测试
+### 4. 管理后台（admin-frontend）
+
+```powershell
+cd admin-frontend
+npm install                      # 或 pnpm install
+npm run dev                      # http://localhost:5174（/api 已代理到后端 8000）
+```
+
+> 管理后台为独立工程，端口 **5174**（与客户前端 5173 分离，共用同一后端）。使用 `admin` 角色账号登录。
+> 功能：Agent 列表与动态 Agent 创建/启停、知识库命名空间与文档管理、跨客户工单查看与 CSV 导出、MCP Servers 配置、记忆时序。
+
+### 5. 测试
 
 ```bash
 cd backend
@@ -110,6 +132,7 @@ npm test              # vitest
 | `/chat/stream` 报 `Future attached to a different loop` | 跨事件循环访问 asyncpg 连接池；MCP 配置已在主 loop 预取 |
 | 前端登录弹窗 `Cannot read properties of undefined (reading 'data')` | `unwrap` 未 `await` Promise（已修复）；前端数据层依赖此函数 |
 | 控制台 `favicon.ico 404` | 无害；`index.html` 已改为引用 `/vite.svg` |
+| 启动报缺列/缺表（如 `agents.source` / `knowledge_bases`） | 存量库未执行迁移；按上文执行 `migrate_admin_console.sql` + `migrate_dynamic_agents.sql`（幂等） |
 
 ## 文档
 
