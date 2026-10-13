@@ -1,0 +1,76 @@
+# ============ HelloAgents 框架（核心） ============
+# 使用 [memory,protocols] 扩展：
+#   - memory    → 四层记忆（episodic 依赖 Qdrant 向量库、semantic 依赖 neo4j/spacy 等）
+#   - protocols → MCPTool / 协议适配（a2a-sdk）
+# 之所以此前冲突：fastapi/httpx 被 "==" 钉死，而 protocols 拉取的 a2a-sdk 要求更高版本；
+# 下方改为宽松下限(>=)后，解析器可自动上探到兼容版本，冲突消除。
+hello-agents[memory,protocols]>=0.2.4,<=0.2.9
+
+# ============ 记忆 / 向量库 / Embedding 运行时依赖 ============
+# hello-agents 0.2.9 的 qdrant_store 仍 import SearchRequest，
+# 而 qdrant-client>=1.10 已移除该类（导致 QDRANT_AVAILABLE=False），故钉上界。
+qdrant-client>=1.9.0,<1.10
+# EMBED_MODEL_TYPE=dashscope 时，DashScopeEmbedding.__init__ 会无条件 import dashscope SDK（即使走 REST）。
+dashscope>=1.20.0
+
+# FastAPI 和相关依赖
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# HTTP 客户端
+httpx>=0.27.0
+aiohttp>=3.10.0
+
+# 环境变量管理
+python-dotenv>=1.0.0
+
+# CORS / 表单支持
+python-multipart>=0.0.9
+
+# 日志（项目实际使用 structlog；loguru 按参考清单保留）
+loguru>=0.7.0
+structlog>=24.4.0
+
+# MCP 相关
+fastmcp>=2.0.0
+uv>=0.8.0
+
+# 其他工具
+python-dateutil>=2.8.2
+huggingface_hub>=0.25.0
+
+# ============ 数据层 ============
+sqlalchemy[asyncio]==2.0.35
+# asyncpg 0.29.x 无 cp312/cp313 预编译 wheel（需本地 MSVC 编译），0.30.0 起提供
+asyncpg>=0.30.0,<0.31
+alembic==1.13.2
+pgvector==0.3.2
+redis==5.0.8
+
+# ============ 鉴权 ============
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+# passlib 1.7.4 仅兼容 bcrypt<4.1；不锁会被拉入 bcrypt 5.x，
+# 导致 hash_password 后端自检报错（password cannot be longer than 72 bytes）。
+bcrypt==4.0.1
+
+# ============ 缓存（MemoryTool / RAGTool 工厂使用） ============
+cachetools==5.5.0
+
+# ============ 文档解析（供 RAGTool 底层使用） ============
+pypdf==5.0.1
+python-docx==1.1.2
+markdown==3.7
+beautifulsoup4==4.12.3
+
+# ============ 监控 ============
+tenacity==9.0.0
+prometheus-client==0.21.0
+
+# ============ 测试 ============
+pytest==8.3.3
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+testcontainers==4.8.2
