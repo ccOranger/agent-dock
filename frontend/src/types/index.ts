@@ -44,10 +44,31 @@ export interface ToolResultEvent {
   error: string | null
 }
 
-export interface RouteEvent {
+export interface RouteIntent {
   agent_name: string
   confidence: number
   reason?: string
+}
+
+export interface RouteEvent {
+  /** 主意图（旧契约字段，向后兼容） */
+  agent_name: string
+  confidence: number
+  reason?: string
+  /** 按主次排序的意图清单（多意图串行应答） */
+  intents?: RouteIntent[]
+  intent_total?: number
+}
+
+export interface AgentStartEvent extends RouteIntent {
+  intent_index: number
+  intent_total: number
+}
+
+export interface AgentEndEvent {
+  agent_name: string
+  intent_index: number
+  intent_total: number
 }
 
 export interface AgentInfo {

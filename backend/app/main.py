@@ -1,4 +1,5 @@
 """FastAPI 应用入口"""
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -11,6 +12,15 @@ from app.core.bootstrap import bootstrap, init_hello_agents, validate_agents_syn
 from app.core.config import settings
 from app.core.constants import API_PREFIX
 from app.core.logging import new_trace_id, setup_logging
+
+# Windows 控制台默认 GBK 编码，而 hello_agents 的 MCP 客户端用裸 print 输出 emoji
+# （📝/🔗/✅ 等），会抛 UnicodeEncodeError 并被工具发现逻辑静默吞掉，导致 MCP 工具列表为空。
+# 统一把标准输出/错误切到 UTF-8（无法编码的字符以 replace 兜底），保证 MCP 注册不受影响。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 
 @asynccontextmanager

@@ -170,3 +170,44 @@ CREATE TABLE audit_logs (
 );
 CREATE INDEX idx_audit_user_created ON audit_logs(user_id, created_at DESC);
 CREATE INDEX idx_audit_action ON audit_logs(action);
+
+-- ========== 请求链路（一轮对话一行，明细存 spans） ==========
+CREATE TABLE IF NOT EXISTS request_traces (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trace_id            VARCHAR(64) NOT NULL,       -- 与 structlog / X-Trace-Id 一致
+    session_id          UUID,
+    user_id             UUID,
+    user_message_id     UUID,
+    assistant_message_id UUID,
+    -- 可过滤的拍平维度
+    intent_count        INT NOT NULL DEFAULT 0,
+    agent_names         TEXT[] DEFAULT '{}',
+    agent_sources       TEXT[] DEFAULT '{}',
+    llm_models          TEXT[] DEFAULT '{}',
+    mcp_server_names    TEXT[] DEFAULT '{}',
+    tool_names          TEXT[] DEFAULT '{}',
+    rag_namespaces      TEXT[] DEFAULT '{}',
+    memory_hit_count    INT NOT NULL DEFAULT 0,
+    rag_chunk_count     INT NOT NULL DEFAULT 0,
+    tool_call_count     INT NOT NULL DEFAULT 0,
+    tool_error_count    INT NOT NULL DEFAULT 0,
+    confidence          REAL,
+    outcome             VARCHAR(16),               -- answered | handover | error
+    handover_reason     VARCHAR(32),
+    error_code          INT,
+    error_message       TEXT,
+    ttft_ms             INT,
+    total_latency_ms    INT,
+    response_chars      INT NOT NULL DEFAULT 0,
+    spans               JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_traces_trace_id ON request_traces(trace_id);
+-- 咨询详情按助手消息 ID 反查链路（messages LEFT JOIN request_traces）
+CREATE INDEX IF NOT EXISTS idx_traces_assistant_msg ON request_traces(assistant_message_id);
+CREATE INDEX IF NOT EXISTS idx_traces_session_created ON request_traces(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_traces_user_created ON request_traces(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_traces_outcome_created ON request_traces(outcome, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_traces_agents ON request_traces USING gin (agent_names);
+CREATE INDEX IF NOT EXISTS idx_traces_tools ON request_traces USING gin (tool_names);
+CREATE INDEX IF NOT EXISTS idx_traces_mcp ON request_traces USING gin (mcp_server_names);

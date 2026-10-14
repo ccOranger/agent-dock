@@ -1,9 +1,10 @@
 """
 Orchestrator：调度器
-  1. 调用 RouterAgent 识别意图
+  1. 调用 RouterAgent 识别意图（可多意图）
   2. 从注册表取出业务 Agent 类
   3. 实例化业务 Agent
-  4. 构建 SimpleAgent 并流式执行（含工具调用循环）
+  4. 构建 SimpleAgent 并流式执行（含工具调用循环）；多意图时按主次串行执行并用
+     agent_start / agent_end 事件分块下发
 """
 import asyncio
 import logging
@@ -13,10 +14,18 @@ from typing import AsyncIterator, Iterator
 from hello_agents import Message
 from hello_agents.agents import SimpleAgent
 
-from app.agents.registry import resolve_business_agent
+from app.agents.registry import AGENT_REGISTRY, resolve_business_agent
 from app.agents.router_agent import RouterAgent
 from app.core.config import settings
 from app.core.context_engineer import ContextEngineer
+from app.core.tracing import (
+    OUTCOME_ANSWERED,
+    OUTCOME_ERROR,
+    OUTCOME_HANDOVER,
+    SPAN_BUILD,
+    SPAN_RESOLVE,
+    SPAN_RUN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +35,9 @@ _SENTINEL = object()
 
 # SimpleAgent 的文本 ReAct 标记前缀
 _TOOL_MARKER = "[TOOL_CALL:"
+
+# 多意图分块之间插入的分隔（markdown 水平线，前端逐字渲染即可分段）
+_INTENT_SEPARATOR = "\n\n---\n\n"
 
 
 def _safe_prefix_len(text: str) -> int | None:
@@ -179,70 +191,231 @@ class Orchestrator:
         session_id: str,
         query: str,
         history: list[dict],
+        last_route_to: str | None = None,
+        max_intents: int | None = None,
+        collector=None,
     ) -> AsyncIterator[dict]:
-        # ---- 1. 路由 ----
-        intent = await self.router.route(query)
-        agent_name = intent.get("agent_name", "knowledge_qa")
-        confidence = float(intent.get("confidence", 0.0))
-        logger.info(f"[route] {agent_name} conf={confidence} reason={intent.get('reason')}")
+        """一轮对话的完整调度。
+
+        - history / last_route_to 一并交给路由，使追问能续接上一轮的 Agent
+        - max_intents：本轮最多执行的意图数，默认取 settings.router_max_intents
+        - collector：链路采集器（app.core.tracing.TraceCollector），为空则不采集
+        """
+        max_intents = max(1, int(max_intents if max_intents is not None else settings.router_max_intents))
+
+        # ---- 1. 路由（可多意图） ----
+        intent_result = await self.router.route(
+            query, history=history, last_route_to=last_route_to, collector=collector
+        )
+        intents: list[dict] = intent_result["intents"]
+        if collector:
+            collector.record_intents(intents, max_intents)
+        primary = intents[0]
+        agent_name = primary["agent_name"]
+        confidence = primary["confidence"]
+        logger.info(
+            f"[route] {agent_name} intents={len(intents)} conf={confidence} reason={primary['reason']}"
+        )
 
         yield {
             "type": "route",
             "data": {
+                # 保留旧契约：agent_name/confidence/reason 均为主意图
                 "agent_name": agent_name,
                 "confidence": confidence,
-                "reason": intent.get("reason", ""),
+                "reason": primary["reason"],
+                "intents": intents[:max_intents],
+                "intent_total": min(len(intents), max_intents),
             },
         }
 
-        # ---- 2. 低置信度 → 转人工 ----
-        if confidence < CONFIDENCE_THRESHOLD:
+        # ---- 2. 低置信度 → 转人工（主意图不达标则整轮转人工；
+        #          仅次要意图不达标则丢弃该分支、主意图照常应答）----
+        qualified = [i for i in intents if i["confidence"] >= CONFIDENCE_THRESHOLD]
+        if not qualified:
+            if collector:
+                collector.record_outcome(OUTCOME_HANDOVER, reason="low_confidence")
+                collector.mark_finished()
             yield {
                 "type": "handover",
                 "data": {"reason": "low_confidence", "confidence": confidence},
             }
             return
 
-        # ---- 3~4. 解析业务 Agent（代码注册表优先，其次 DB 动态 Agent）并实例化 ----
-        business_agent = await resolve_business_agent(
-            agent_name, user_id=user_id, session_id=session_id
-        )
-        if business_agent is None:
-            logger.error(f"未注册的 Agent: {agent_name}")
+        targets = qualified[:max_intents]
+
+        # ---- 3~6. 逐意图串行：解析 Agent → 上下文工程 → 流式执行，分块下发 ----
+        streamed = False
+        handled: list[str] = []
+        for intent in targets:
+            intent_name = intent["agent_name"]
+            # 代码注册表优先，其次 DB 动态 Agent
+            business_agent = await resolve_business_agent(
+                intent_name, user_id=user_id, session_id=session_id
+            )
+            if business_agent is None:
+                logger.error(f"未注册的 Agent: {intent_name}")
+                if collector:
+                    collector.add(
+                        SPAN_RESOLVE, intent_name, status="error", error="agent_not_registered"
+                    )
+                # 多意图时跳过该分支，其余意图照常应答；全部不可用才在循环后上报
+                continue
+
+            index = len(handled)
+            if collector:
+                source = "code" if intent_name in AGENT_REGISTRY else "dynamic"
+                collector.add_unique("agent_names", intent_name)
+                collector.add_unique("agent_sources", source)
+                collector.add(
+                    SPAN_RESOLVE,
+                    intent_name,
+                    agent_source=source,
+                    intent_index=index,
+                    declared_mcp=list(getattr(business_agent, "mcp_tools", []) or []),
+                    rag_namespace=getattr(business_agent, "rag_namespace", None),
+                )
+
+            if streamed:
+                # 第二个及以后意图前插入分隔，避开两段回答粘连
+                yield {"type": "text", "data": {"content": _INTENT_SEPARATOR}}
+
+            yield {
+                "type": "agent_start",
+                "data": {
+                    "agent_name": intent_name,
+                    "intent_index": index,
+                    "intent_total": len(targets),
+                    "confidence": intent["confidence"],
+                    "reason": intent["reason"],
+                },
+            }
+
+            run_key = collector.start(SPAN_RUN, intent_name, intent_index=index) if collector else ""
+            produced = False
+            text_chars = 0
+            open_tools: dict[str, str] = {}
+            async for event in self._run_business_agent(
+                business_agent, user_id, query, collector=collector, intent_index=index
+            ):
+                etype = event.get("type")
+                data = event.get("data") or {}
+                if collector and etype == "tool_call":
+                    open_tools[data.get("id")] = collector.record_tool_call(
+                        name=data.get("name", ""),
+                        args=data.get("args"),
+                        agent_name=intent_name,
+                        iteration=index,
+                    )
+                elif collector and etype == "tool_result":
+                    collector.finish_tool_call(
+                        open_tools.pop(data.get("id"), ""),
+                        result=data.get("result"),
+                        error=data.get("error"),
+                    )
+                elif etype == "text":
+                    text_chars += len(data.get("content") or "")
+                    if collector:
+                        collector.mark_first_token()
+                produced = True
+                yield event
+
+            if collector:
+                collector.end(
+                    run_key,
+                    status="ok" if produced else "empty",
+                    intent_index=index,
+                    response_chars=text_chars,
+                )
+
+            yield {
+                "type": "agent_end",
+                "data": {
+                    "agent_name": intent_name,
+                    "intent_index": index,
+                    "intent_total": len(targets),
+                },
+            }
+            handled.append(intent_name)
+            streamed = streamed or produced
+
+        if not streamed:
+            if collector:
+                collector.record_outcome(OUTCOME_ERROR, code=5006, message="Agent 未注册")
+                collector.mark_finished()
             yield {"type": "error", "data": {"code": 5006, "message": "Agent 未注册"}}
             return
 
-        # ---- 4.1 在主 event loop 上预取 MCP 配置（避免 build() 跨循环访问 DB）----
-        mcp_configs: dict[str, dict | None] = {}
-        if business_agent.mcp_tools:
-            from app.tools.mcp_loader import fetch_mcp_configs
+        if collector:
+            collector.record_outcome(OUTCOME_ANSWERED)
 
-            mcp_configs = await fetch_mcp_configs(business_agent.mcp_tools)
-
-        # ---- 5. 上下文工程 ----
-        rag_namespaces = await self._resolve_rag_namespaces(business_agent)
-        enriched_query = await self.ctx_engineer.build(
-            user_id=user_id,
-            query=query,
-            rag_namespaces=rag_namespaces,
-        )
-
-        # ---- 6. 构建 SimpleAgent 并流式执行（stream_run 为同步生成器，桥接为异步流）----
-        # build() 内部会构造 MCPTool，而 MCPTool.__init__ 的 _discover_tools() 是
-        # 无超时的阻塞网络调用；必须放到工作线程，否则会冻住事件循环导致全部接口挂起。
-        # （MCP 配置已在上面于主循环预取，build 不再触碰 DB，可安全跨线程）
-        simple_agent = await asyncio.to_thread(business_agent.build, mcp_configs)
-        async for event in self._astream(simple_agent, enriched_query):
-            yield event
-
-        # ---- 7. 异步归档记忆 ----
+        # ---- 7. 异步归档记忆（一轮只归档一次，记在主意图名下） ----
         await self.ctx_engineer.persist_after_run(
             user_id=user_id,
             session_id=session_id,
             query=query,
             agent_name=agent_name,
             history=history,
+            collector=collector,
         )
+
+    async def _run_business_agent(
+        self,
+        business_agent,
+        user_id: str,
+        query: str,
+        collector=None,
+        intent_index: int = 0,
+    ) -> AsyncIterator[dict]:
+        """构建并流式执行单个业务 Agent（含 MCP 预取与上下文工程）。"""
+        agent_name = getattr(business_agent, "name", "?")
+        # ---- 在主 event loop 上预取 MCP 配置（避免 build() 跨循环访问 DB）----
+        mcp_configs: dict[str, dict | None] = {}
+        if business_agent.mcp_tools:
+            from app.tools.mcp_loader import fetch_mcp_configs
+
+            mcp_configs = await fetch_mcp_configs(business_agent.mcp_tools)
+            if collector:
+                for name in business_agent.mcp_tools:
+                    collector.add_unique("mcp_server_names", name)
+
+        # ---- 上下文工程 ----
+        rag_namespaces = await self._resolve_rag_namespaces(business_agent)
+        enriched_query = await self.ctx_engineer.build(
+            user_id=user_id,
+            query=query,
+            rag_namespaces=rag_namespaces,
+            collector=collector,
+        )
+
+        # ---- 构建 SimpleAgent 并流式执行（stream_run 为同步生成器，桥接为异步流）----
+        # build() 内部会构造 MCPTool，而 MCPTool.__init__ 的 _discover_tools() 是
+        # 无超时的阻塞网络调用；必须放到工作线程，否则会冻住事件循环导致全部接口挂起。
+        # （MCP 配置已在上面于主循环预取，build 不再触碰 DB，可安全跨线程）
+        # 每个意图新建 SimpleAgent 实例，避免多意图共享 _history 相互污染
+        build_started_ms = collector.now_ms() if collector else 0
+        simple_agent = await asyncio.to_thread(business_agent.build, mcp_configs)
+        if collector:
+            registry = getattr(simple_agent, "tool_registry", None)
+            # available_tools = 模型本轮真正能调的工具（含 MCP 展开后的独立工具）；
+            # 与 declared_mcp 对比即可看出“MCP 连上了但没展开出工具”这类静默失败
+            available = sorted(registry.list_tools()) if registry is not None else []
+            model = getattr(business_agent, "llm_model", "") or settings.llm_model_id
+            collector.add(
+                SPAN_BUILD,
+                agent_name,
+                started_ms=build_started_ms,
+                status="ok" if available or not business_agent.mcp_tools else "empty",
+                intent_index=intent_index,
+                llm_model=model,
+                mcp_connected=sorted(
+                    n for n, cfg in (mcp_configs or {}).items() if cfg is not None
+                ),
+                available_tools=available,
+            )
+            collector.add_unique("llm_models", model)
+        async for event in self._astream(simple_agent, enriched_query):
+            yield event
 
     @staticmethod
     async def _resolve_rag_namespaces(business_agent) -> list[str]:

@@ -86,6 +86,10 @@ function send() {
     route: (d: any) => {
       store.setRoute(d.agent_name)
     },
+    agent_start: (d: any) => {
+      // 多意图串行应答：徽标跟随当前正在服务的业务 Agent
+      store.setRoute(d.agent_name)
+    },
     text: (d: any) => {
       store.appendText(d.content)
     },

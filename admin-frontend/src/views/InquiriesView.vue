@@ -87,6 +87,9 @@
             <el-tag size="small" :type="m.role === 'user' ? 'primary' : 'success'">{{ m.role }}</el-tag>
             <span v-if="m.routed_to" class="route">→ {{ m.routed_to }}</span>
             <span class="time">{{ fmt(m.created_at) }}</span>
+            <el-button v-if="m.trace_id" type="primary" link size="small" @click="openTrace(m)">
+              查看链路
+            </el-button>
           </div>
           <div class="msg-content">{{ m.content }}</div>
         </div>
@@ -98,10 +101,14 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { apiExportInquiries, apiInquiryDetail, apiListAgents, apiListInquiries } from '@/api'
-import type { AgentInfo, InquiryDetail, InquirySession } from '@/types'
+import type { AgentInfo, ChatMessage, InquiryDetail, InquirySession } from '@/types'
+
+const route = useRoute()
+const router = useRouter()
 
 function fmt(v?: string | null) {
   return v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'
@@ -173,6 +180,12 @@ async function openDetail(row: InquirySession) {
   }
 }
 
+// 链路未采集（被采样丢弃或开关关闭）时不展示入口
+function openTrace(m: ChatMessage) {
+  if (!m.trace_id) return
+  router.push({ path: '/traces', query: { trace: m.trace_id, session_id: current.value?.session.id } })
+}
+
 async function onExport() {
   exporting.value = true
   try {
@@ -193,6 +206,9 @@ async function onExport() {
 
 onMounted(async () => {
   load()
+  // 从链路页「跳到咨询记录」带过来的会话：直接展开该会话对话
+  const sid = route.query.session_id as string | undefined
+  if (sid) openDetail({ id: sid } as InquirySession)
   try {
     agents.value = await apiListAgents()
   } catch {

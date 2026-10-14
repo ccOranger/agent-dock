@@ -36,6 +36,13 @@ PATCH  /api/v1/admin/agents/{name}/toggle  # 启用/禁用
 GET    /api/v1/admin/tools             # 工具列表
 GET    /api/v1/admin/metrics           # Prometheus 指标（admin）
 
+GET    /api/v1/admin/inquiries/sessions     # 跨客户咨询列表（agent/admin）
+GET    /api/v1/admin/inquiries/sessions/{id} # 会话详情（含消息 + 每条回复的 trace_id）
+GET    /api/v1/admin/traces                 # 请求链路列表（多维过滤）
+GET    /api/v1/admin/traces/usage           # 工具/Agent/MCP 使用分布
+GET    /api/v1/admin/traces/sessions/{id}   # 某会话按轮次的链路
+GET    /api/v1/admin/traces/{trace_ref}      # 单条链路详情（含 spans 时间线）
+
 GET    /health                         # 健康检查
 GET    /metrics                        # Prometheus 全局抓取端点
 ```
@@ -45,14 +52,31 @@ GET    /metrics                        # Prometheus 全局抓取端点
 | event | data | 说明 |
 |-------|------|------|
 | `session` | `{session_id}` | 首帧会话 ID |
-| `route` | `{agent_name, confidence, reason}` | 路由结果 |
+| `route` | `{agent_name, confidence, reason, intents, intent_total}` | 路由结果；`agent_name/confidence/reason` 为主意图，`intents` 为按主次排序的意图清单（最多 `ROUTER_MAX_INTENTS` 个） |
+| `agent_start` | `{agent_name, intent_index, intent_total, confidence, reason}` | 一个意图分支开始应答 |
+| `agent_end` | `{agent_name, intent_index, intent_total}` | 该意图分支应答结束 |
 | `text` | `{content}` | 文本增量 |
 | `tool_call` | `{id, name, args}` | 工具调用开始 |
 | `tool_result` | `{id, name, result, error}` | 工具返回 |
 | `memory_write` | `{type, id}` | 记忆写入通知 |
 | `handover` | `{reason, confidence}` | 转人工 |
-| `done` | `{message_id, usage}` | 结束 |
+| `done` | `{message_id, trace_id}` | 结束；`trace_id` 可用于在后台链路页定位本轮 |
 | `error` | `{code, message}` | 错误 |
+
+> 多意图：一条消息被识别为多个意图时，各业务 Agent **串行**执行，`intent_index > 0` 的分支前会先下发一段 `text`（`\n\n---\n\n`）作分块分隔；主意图置信度低于 `ROUTER_CONFIDENCE_THRESHOLD` 时整轮 `handover`，仅次要意图低于阈值则该分支直接丢弃。
+
+## 请求链路追踪（admin/traces）
+
+一轮对话 = `request_traces` 表的一行，记录本轮经过的业务 Agent / MCP 服务 / 工具 / RAG / 记忆与耗时、结局。高频过滤维度拍平为列（`agent_names`、`tool_names`、`mcp_server_names` 等数组列，GIN 索引命中），明细时间线存 `spans` JSONB（`router.llm` / `route.intent` / `agent.resolve` / `agent.build` / `tool.call` / `context.memory` / `context.rag` / `memory.persist` 等，每步含 `start_ms`、`duration_ms`、`status`、`attributes`）。
+
+| 端点 | 关键参数 | 返回 |
+|------|---------|------|
+| `GET /admin/traces` | `session_id/user_id/agent_name/tool_name/mcp_server/outcome/has_error/min_latency_ms/date_from/date_to` + 分页 | 摘要列表（不含 spans，附 `span_count`） |
+| `GET /admin/traces/usage` | `field=tool_names\|agent_names\|mcp_server_names`、`days` | 近 N 天各依赖被多少轮覆盖（识别没人用/长期失败的依赖） |
+| `GET /admin/traces/sessions/{id}` | — | 该会话按轮次的链路摘要（时间正序） |
+| `GET /admin/traces/{trace_ref}` | `trace_ref`=行ID / HTTP trace_id / 助手消息ID | 单条详情（含 spans 时间线） |
+
+> 采集为旁路：写库失败只记日志、绝不影响对话。`TRACE_ENABLED=false` 整体关闭；`TRACE_STORE_PAYLOAD=false` 时工具入参/返回只留类型摘要不存原文；`TRACE_SAMPLE_RATE<1` 时正常应答按概率采样，但 `handover`/`error`/带工具异常的轮次永远全量保留，便于事后排查。
 
 ## 错误码
 

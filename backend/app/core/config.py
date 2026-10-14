@@ -92,6 +92,18 @@ class Settings(BaseSettings):
     # ===== 路由 =====
     router_model: str = "deepseek-flash"
     router_confidence_threshold: float = 0.5
+    # 单条消息最多分发的业务意图数（多意图串行执行上限）
+    router_max_intents: int = 2
+
+    # ===== 链路追踪（request_traces）=====
+    trace_enabled: bool = True
+    # 工具入参/返回是否入库（含客户数据）：只存截断后的文本，关闭则仅存工具名与耗时
+    trace_store_payload: bool = True
+    trace_payload_max_chars: int = 2000
+    # 正常应答的采样率 0~1；转人工/出错的请求永远全量记录
+    trace_sample_rate: float = 1.0
+    # 保留天数，供清理脚本使用
+    trace_retention_days: int = 30
 
 
 @lru_cache

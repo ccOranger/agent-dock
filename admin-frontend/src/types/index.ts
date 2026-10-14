@@ -45,6 +45,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   routed_to?: string | null
+  /** 本轮链路 ID：仅助手消息且链路未被采样丢弃时有值 */
+  trace_id?: string | null
   created_at: string
 }
 
@@ -59,6 +61,61 @@ export interface InquiryDetail {
     updated_at: string
   }
   messages: ChatMessage[]
+}
+
+// ===== 请求链路追踪 =====
+export type TraceOutcome = 'answered' | 'handover' | 'error'
+
+export interface TraceSpan {
+  span_id: string
+  parent_id?: string | null
+  /** router.llm / route.intent / context.memory / context.rag / agent.resolve /
+   *  agent.build / agent.run / tool.call / memory.persist / context.budget */
+  type: string
+  name: string
+  start_ms: number
+  duration_ms: number
+  status: 'ok' | 'error' | 'empty' | 'skipped' | string
+  attributes: Record<string, unknown>
+}
+
+export interface RequestTraceSummary {
+  id: string
+  trace_id: string
+  session_id?: string | null
+  user_id?: string | null
+  user_message_id?: string | null
+  assistant_message_id?: string | null
+  intent_count: number
+  agent_names: string[]
+  agent_sources: string[]
+  llm_models: string[]
+  mcp_server_names: string[]
+  tool_names: string[]
+  rag_namespaces: string[]
+  memory_hit_count: number
+  rag_chunk_count: number
+  tool_call_count: number
+  tool_error_count: number
+  confidence?: number | null
+  outcome?: TraceOutcome | null
+  handover_reason?: string | null
+  error_code?: number | null
+  error_message?: string | null
+  ttft_ms?: number | null
+  total_latency_ms?: number | null
+  response_chars: number
+  span_count: number
+  created_at?: string | null
+}
+
+export interface RequestTraceDetail extends RequestTraceSummary {
+  spans: TraceSpan[]
+}
+
+export interface TraceUsageItem {
+  name: string
+  count: number
 }
 
 // ===== 知识库 =====
@@ -173,4 +230,12 @@ export interface MemoryItem {
   importance: number
   access_count: number
   created_at: string
+}
+
+/** 记忆类型的中文展示名（后台下拉与时间线共用） */
+export const MEMORY_TYPE_LABELS: Record<MemoryItem['type'], string> = {
+  working: '工作记忆',
+  episodic: '情景记忆',
+  semantic: '语义记忆',
+  perceptual: '感知记忆',
 }

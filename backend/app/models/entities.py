@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -167,4 +167,47 @@ class AuditLog(Base):
     target_id: Mapped[str | None] = mapped_column(String(64))
     payload: Mapped[dict | None] = mapped_column(JSONB)
     ip: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RequestTrace(Base):
+    """一轮对话的请求链路：经过哪些 Agent / MCP / 工具、耗时与结局。
+
+    一行 = 一轮请求（一条用户消息），明细时间线存 spans；
+    高频过滤维度拍平为标量/数组列，避免后台列表页解 JSONB。
+    与 audit_logs 分表：后者是低频安全/操作审计，保留策略与查询模式均不同。
+    """
+
+    __tablename__ = "request_traces"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    # HTTP 层 trace_id（structlog / X-Trace-Id），用于日志与链路互查
+    trace_id: Mapped[str] = mapped_column(String(64))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    user_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    assistant_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+    # ---- 可过滤/排序的拍平维度 ----
+    intent_count: Mapped[int] = mapped_column(Integer, default=0)
+    agent_names: Mapped[list] = mapped_column(ARRAY(Text), default=list)
+    agent_sources: Mapped[list] = mapped_column(ARRAY(Text), default=list)
+    llm_models: Mapped[list] = mapped_column(ARRAY(Text), default=list)
+    mcp_server_names: Mapped[list] = mapped_column(ARRAY(Text), default=list)
+    tool_names: Mapped[list] = mapped_column(ARRAY(Text), default=list)
+    rag_namespaces: Mapped[list] = mapped_column(ARRAY(Text), default=list)
+    memory_hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    rag_chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    tool_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    tool_error_count: Mapped[int] = mapped_column(Integer, default=0)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    outcome: Mapped[str | None] = mapped_column(String(16))
+    handover_reason: Mapped[str | None] = mapped_column(String(32))
+    error_code: Mapped[int | None] = mapped_column(Integer)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    ttft_ms: Mapped[int | None] = mapped_column(Integer)
+    total_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    response_chars: Mapped[int] = mapped_column(Integer, default=0)
+
+    spans: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

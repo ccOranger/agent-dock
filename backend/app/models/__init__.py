@@ -8,6 +8,7 @@ from app.models.entities import (
     KnowledgeBase,
     Memory,
     Message,
+    RequestTrace,
     Session,
     StaffUser,
     ToolMeta,
@@ -25,4 +26,5 @@ __all__ = [
     "AgentMeta",
     "ToolMeta",
     "AuditLog",
+    "RequestTrace",
 ]

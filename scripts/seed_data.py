@@ -6,6 +6,7 @@
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 os.environ.setdefault("PYTHONPATH", "backend")
@@ -34,18 +35,37 @@ SEED_CUSTOMERS = [
     {"username": "alice", "password": "Alice@123", "display_name": "Alice"},
 ]
 
+# ---- 本地 MCP 服务（FastMCP, stdio）：用 venv 解释器直接拉起脚本，无需任何端口/假域名 ----
+_BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
+
+
+def _mcp_stdio_config(script_name: str) -> dict:
+    """生成 stdio 传输的 MCP 配置（command=当前 python 解释器，args=[脚本绝对路径]）。
+
+    mcp_loader._build_mcp_server_source 会把它拼成 [python, script]，
+    hello_agents 的 MCPTool 以 stdio 子进程启动该 FastMCP 服务。
+    """
+    script = _BACKEND_ROOT / "mcp_servers" / script_name
+    return {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(script)],
+        "timeout_seconds": 20,
+    }
+
+
 SEED_TOOLS = [
     {
         "name": "mcp_logistics",
         "type": "mcp",
         "schema_": {},
-        "config": {"endpoint": "http://mcp-logistics:9000/sse", "transport": "sse", "timeout_seconds": 15},
+        "config": _mcp_stdio_config("logistics_server.py"),
     },
     {
         "name": "mcp_refund",
         "type": "mcp",
         "schema_": {},
-        "config": {"endpoint": "http://mcp-refund:9001/sse", "transport": "sse", "timeout_seconds": 15},
+        "config": _mcp_stdio_config("refund_server.py"),
     },
 ]
 
@@ -166,6 +186,11 @@ async def main() -> None:
             ).scalar_one_or_none()
             if row is None:
                 db.add(ToolMeta(**t))
+            else:
+                # 覆盖历史遗留的假域名配置（如旧版 sse endpoint），保证本地 stdio 生效
+                row.type = t["type"]
+                row.schema_ = t["schema_"]
+                row.config = t["config"]
         for a in SEED_AGENTS:
             row = (
                 await db.execute(select(AgentMeta).where(AgentMeta.name == a["name"]))

@@ -1,7 +1,10 @@
-"""自定义工具：继承项目内 BaseTool（适配 hello_agents.Tool）"""
-import httpx
+"""自定义工具：订单查询 / 修改。
 
+历史版本通过 httpx 访问固定假域名 http://order-service:8080（并不存在，必然失败）。
+现改为读取项目内的固定数据集 app.tools.custom.mock_data，可直接演示与测试。
+"""
 from app.tools.custom.base import BaseTool
+from app.tools.custom import mock_data
 
 
 class QueryOrderTool(BaseTool):
@@ -10,21 +13,36 @@ class QueryOrderTool(BaseTool):
     parameters = {
         "type": "object",
         "properties": {
-            "order_id": {"type": "string", "description": "订单号"},
+            "order_id": {"type": "string", "description": "订单号，例如 SO20240001"},
         },
         "required": ["order_id"],
         "additionalProperties": False,
     }
-    timeout = 10
-    base_url = "http://order-service:8080"
 
     async def run(self, order_id: str):
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(f"{self.base_url}/orders/{order_id}")
-            if resp.status_code == 404:
-                return {"ok": False, "error": "订单不存在"}
-            resp.raise_for_status()
-            return {"ok": True, "data": resp.json()}
+        order = mock_data.get_order(order_id)
+        if order is None:
+            return {"ok": False, "error": "订单不存在"}
+        return {"ok": True, "data": order}
+
+
+class ListOrdersTool(BaseTool):
+    name = "list_orders"
+    description = "根据客户 ID 列出该客户的全部订单（当客户未提供订单号时先用于定位）。"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "customer_id": {"type": "string", "description": "客户 ID，例如 alice"},
+        },
+        "required": ["customer_id"],
+        "additionalProperties": False,
+    }
+
+    async def run(self, customer_id: str):
+        orders = mock_data.list_orders(customer_id)
+        if not orders:
+            return {"ok": False, "error": "未查询到该客户的订单"}
+        return {"ok": True, "data": orders}
 
 
 class ModifyOrderTool(BaseTool):
@@ -34,18 +52,14 @@ class ModifyOrderTool(BaseTool):
         "type": "object",
         "properties": {
             "order_id": {"type": "string", "description": "订单号"},
-            "fields": {"type": "object", "description": "需要修改的字段键值对"},
+            "fields": {"type": "object", "description": "需要修改的字段键值对（仅支持 address/remark）"},
         },
         "required": ["order_id", "fields"],
         "additionalProperties": False,
     }
-    timeout = 10
-    base_url = "http://order-service:8080"
 
     async def run(self, order_id: str, fields: dict):
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.patch(f"{self.base_url}/orders/{order_id}", json={"fields": fields})
-            if resp.status_code == 404:
-                return {"ok": False, "error": "订单不存在"}
-            resp.raise_for_status()
-            return {"ok": True, "data": resp.json()}
+        order, error = mock_data.update_order(order_id, fields or {})
+        if error:
+            return {"ok": False, "error": error}
+        return {"ok": True, "data": order}

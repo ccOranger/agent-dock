@@ -12,10 +12,7 @@
         @keyup.enter="load"
       />
       <el-select v-model="type" placeholder="记忆类型" clearable style="width: 160px">
-        <el-option label="working" value="working" />
-        <el-option label="episodic" value="episodic" />
-        <el-option label="semantic" value="semantic" />
-        <el-option label="perceptual" value="perceptual" />
+        <el-option v-for="(label, val) in MEMORY_TYPE_LABELS" :key="val" :label="label" :value="val" />
       </el-select>
       <el-button type="primary" :disabled="!userId" @click="load">查询</el-button>
     </div>
@@ -35,7 +32,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { apiUserMemories } from '@/api'
-import type { MemoryItem } from '@/types'
+import { MEMORY_TYPE_LABELS, type MemoryItem } from '@/types'
 import MemoryTimeline from '@/components/MemoryTimeline.vue'
 
 const route = useRoute()

@@ -32,6 +32,8 @@ async def chat_stream(
                 user_id=str(user.id),
                 session_id=body.session_id,
                 message=body.message,
+                # 与 HTTP trace_id 对齐：后台链路页可直接用它在日志里 grep
+                trace_id=trace_id,
             ):
                 yield chunk
         except asyncio.CancelledError:
@@ -61,5 +63,6 @@ async def chat_message(
         user_id=str(user.id),
         session_id=body.session_id,
         message=body.message,
+        trace_id=trace_id,
     )
     return {"code": 0, "message": "ok", "data": result, "trace_id": trace_id}

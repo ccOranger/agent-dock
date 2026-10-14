@@ -12,7 +12,10 @@ import type {
   MCPServerPayload,
   MemoryItem,
   Paginated,
+  RequestTraceDetail,
+  RequestTraceSummary,
   SearchResult,
+  TraceUsageItem,
   User,
 } from '@/types'
 
@@ -48,6 +51,38 @@ export const apiInquiryDetail = (sessionId: string) =>
 // CSV 导出（Blob 下载）
 export const apiExportInquiries = (filters: Omit<InquiryFilters, 'page' | 'page_size'> = {}) =>
   downloadBlob('/admin/inquiries/sessions/export', filters as Record<string, unknown>)
+
+// ===== 请求链路追踪 =====
+export interface TraceFilters {
+  session_id?: string
+  user_id?: string
+  agent_name?: string
+  tool_name?: string
+  mcp_server?: string
+  outcome?: string
+  has_error?: boolean
+  min_latency_ms?: number
+  date_from?: string
+  date_to?: string
+}
+
+export const apiListTraces = (filters: TraceFilters = {}, page = 1, pageSize = 20) =>
+  unwrap(
+    http.get<never, { data: { data: Paginated<RequestTraceSummary> } }>('/admin/traces', {
+      params: { ...filters, page, page_size: pageSize },
+    }),
+  )
+
+export const apiTraceDetail = (traceRef: string) =>
+  unwrap(http.get<never, { data: { data: RequestTraceDetail } }>(`/admin/traces/${traceRef}`))
+
+export const apiSessionTraces = (sessionId: string) =>
+  unwrap(http.get<never, { data: { data: RequestTraceSummary[] } }>(`/admin/traces/sessions/${sessionId}`))
+
+export type TraceUsageField = 'tool_names' | 'agent_names' | 'mcp_server_names'
+
+export const apiTraceUsage = (field: TraceUsageField = 'tool_names', days = 7) =>
+  unwrap(http.get<never, { data: { data: TraceUsageItem[] } }>('/admin/traces/usage', { params: { field, days } }))
 
 // ===== 知识库：命名空间 =====
 export const apiListBases = () =>

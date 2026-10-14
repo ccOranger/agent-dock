@@ -1,6 +1,6 @@
 """仓储层：对 ORM 的异步封装（Repo 模式）"""
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from app.models.entities import (
     KnowledgeBase,
     Memory,
     Message,
+    RequestTrace,
     Session,
     StaffUser,
     ToolMeta,
@@ -261,19 +262,25 @@ class MessageRepo:
         session_id: uuid.UUID | str, page: int | None = None, page_size: int | None = None
     ) -> list[dict]:
         async with SessionLocal() as db:
+            # 顺带带出本轮链路 ID：后台咨询详情才能直接「查看链路」。
+            # 链路按 assistant_message_id 一对一定位，走 idx_traces_trace_id 之外的等值过滤即可
             stmt = (
-                select(Message).where(Message.session_id == uuid.UUID(str(session_id))).order_by(Message.created_at.asc())
+                select(Message, RequestTrace.trace_id)
+                .outerjoin(RequestTrace, RequestTrace.assistant_message_id == Message.id)
+                .where(Message.session_id == uuid.UUID(str(session_id)))
+                .order_by(Message.created_at.asc())
             )
             if page and page_size:
                 stmt = stmt.offset((page - 1) * page_size).limit(page_size)
-            rows = (await db.execute(stmt)).scalars().all()
+            rows = (await db.execute(stmt)).all()
             return [
                 {
-                    "id": str(r.id),
-                    "role": r.role,
-                    "content": r.content,
-                    "routed_to": r.routed_to,
-                    "created_at": r.created_at.isoformat(),
+                    "id": str(r[0].id),
+                    "role": r[0].role,
+                    "content": r[0].content,
+                    "routed_to": r[0].routed_to,
+                    "trace_id": r[1],
+                    "created_at": r[0].created_at.isoformat(),
                 }
                 for r in rows
             ]
@@ -646,3 +653,258 @@ class AuditRepo:
                 )
             )
             await db.commit()
+
+
+def _trace_uuid(value) -> uuid.UUID | None:
+    return uuid.UUID(str(value)) if value else None
+
+
+class TraceRepo:
+    """请求链路仓储：写入 + 后台多维过滤查询。"""
+
+    @staticmethod
+    async def insert(row: dict) -> None:
+        """写入一轮链路。调用方负责降级，链路失败不能影响对话。"""
+        async with SessionLocal() as db:
+            db.add(
+                RequestTrace(
+                    id=_trace_uuid(row.get("id")) or uuid.uuid4(),
+                    trace_id=str(row.get("trace_id") or "")[:64],
+                    session_id=_trace_uuid(row.get("session_id")),
+                    user_id=_trace_uuid(row.get("user_id")),
+                    user_message_id=_trace_uuid(row.get("user_message_id")),
+                    assistant_message_id=_trace_uuid(row.get("assistant_message_id")),
+                    intent_count=row.get("intent_count") or 0,
+                    agent_names=row.get("agent_names") or [],
+                    agent_sources=row.get("agent_sources") or [],
+                    llm_models=row.get("llm_models") or [],
+                    mcp_server_names=row.get("mcp_server_names") or [],
+                    tool_names=row.get("tool_names") or [],
+                    rag_namespaces=row.get("rag_namespaces") or [],
+                    memory_hit_count=row.get("memory_hit_count") or 0,
+                    rag_chunk_count=row.get("rag_chunk_count") or 0,
+                    tool_call_count=row.get("tool_call_count") or 0,
+                    tool_error_count=row.get("tool_error_count") or 0,
+                    confidence=row.get("confidence"),
+                    outcome=row.get("outcome"),
+                    handover_reason=row.get("handover_reason"),
+                    error_code=row.get("error_code"),
+                    error_message=row.get("error_message"),
+                    ttft_ms=row.get("ttft_ms"),
+                    total_latency_ms=row.get("total_latency_ms"),
+                    response_chars=row.get("response_chars") or 0,
+                    spans=row.get("spans") or [],
+                )
+            )
+            await db.commit()
+
+    @staticmethod
+    def _summary(t: RequestTrace) -> dict:
+        """列表页用的摘要（不带 spans，避免一页拉几 MB JSONB）。"""
+        return {
+            "id": str(t.id),
+            "trace_id": t.trace_id,
+            "session_id": str(t.session_id) if t.session_id else None,
+            "user_id": str(t.user_id) if t.user_id else None,
+            "user_message_id": str(t.user_message_id) if t.user_message_id else None,
+            "assistant_message_id": str(t.assistant_message_id) if t.assistant_message_id else None,
+            "intent_count": t.intent_count,
+            "agent_names": list(t.agent_names or []),
+            "agent_sources": list(t.agent_sources or []),
+            "llm_models": list(t.llm_models or []),
+            "mcp_server_names": list(t.mcp_server_names or []),
+            "tool_names": list(t.tool_names or []),
+            "rag_namespaces": list(t.rag_namespaces or []),
+            "memory_hit_count": t.memory_hit_count,
+            "rag_chunk_count": t.rag_chunk_count,
+            "tool_call_count": t.tool_call_count,
+            "tool_error_count": t.tool_error_count,
+            "confidence": t.confidence,
+            "outcome": t.outcome,
+            "handover_reason": t.handover_reason,
+            "error_code": t.error_code,
+            "error_message": t.error_message,
+            "ttft_ms": t.ttft_ms,
+            "total_latency_ms": t.total_latency_ms,
+            "response_chars": t.response_chars,
+            "span_count": len(t.spans or []),
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        }
+
+    @staticmethod
+    def _apply_filters(
+        stmt,
+        *,
+        session_id,
+        user_id,
+        agent_name,
+        tool_name,
+        mcp_server,
+        outcome,
+        has_error,
+        min_latency_ms,
+        date_from,
+        date_to,
+    ):
+        if session_id:
+            stmt = stmt.where(RequestTrace.session_id == uuid.UUID(str(session_id)))
+        if user_id:
+            stmt = stmt.where(RequestTrace.user_id == uuid.UUID(str(user_id)))
+        # 数组列用 @> 包含判定（GIN 索引可命中）
+        if agent_name:
+            stmt = stmt.where(RequestTrace.agent_names.contains([agent_name]))
+        if tool_name:
+            stmt = stmt.where(RequestTrace.tool_names.contains([tool_name]))
+        if mcp_server:
+            stmt = stmt.where(RequestTrace.mcp_server_names.contains([mcp_server]))
+        if outcome:
+            stmt = stmt.where(RequestTrace.outcome == outcome)
+        if has_error:
+            stmt = stmt.where(
+                (RequestTrace.outcome == "error") | (RequestTrace.tool_error_count > 0)
+            )
+        if min_latency_ms:
+            stmt = stmt.where(RequestTrace.total_latency_ms >= int(min_latency_ms))
+        if date_from:
+            stmt = stmt.where(RequestTrace.created_at >= date_from)
+        if date_to:
+            stmt = stmt.where(RequestTrace.created_at <= date_to)
+        return stmt
+
+    @staticmethod
+    async def list_filtered(
+        *,
+        session_id=None,
+        user_id=None,
+        agent_name=None,
+        tool_name=None,
+        mcp_server=None,
+        outcome=None,
+        has_error: bool = False,
+        min_latency_ms=None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
+        kw = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "agent_name": agent_name,
+            "tool_name": tool_name,
+            "mcp_server": mcp_server,
+            "outcome": outcome,
+            "has_error": has_error,
+            "min_latency_ms": min_latency_ms,
+            "date_from": date_from,
+            "date_to": date_to,
+        }
+        async with SessionLocal() as db:
+            base = TraceRepo._apply_filters(select(RequestTrace), **kw)
+            count_base = TraceRepo._apply_filters(
+                select(func.count()).select_from(RequestTrace), **kw
+            )
+            total = (await db.execute(count_base)).scalar_one()
+            rows = (
+                (
+                    await db.execute(
+                        base.order_by(RequestTrace.created_at.desc())
+                        .offset((page - 1) * page_size)
+                        .limit(page_size)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [TraceRepo._summary(t) for t in rows], total
+
+    @staticmethod
+    async def get(trace_ref: str) -> RequestTrace | None:
+        """按行 ID / HTTP trace_id / 助手消息 ID 依次尝试取一条完整链路。"""
+        async with SessionLocal() as db:
+            try:
+                row = await db.get(RequestTrace, uuid.UUID(str(trace_ref)))
+            except (ValueError, TypeError):
+                row = None
+            if row is not None:
+                return row
+            row = (
+                await db.execute(
+                    select(RequestTrace)
+                    .where(RequestTrace.trace_id == str(trace_ref))
+                    .order_by(RequestTrace.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if row is not None:
+                return row
+            try:
+                msg_id = uuid.UUID(str(trace_ref))
+            except (ValueError, TypeError):
+                return None
+            return (
+                await db.execute(
+                    select(RequestTrace).where(RequestTrace.assistant_message_id == msg_id).limit(1)
+                )
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def detail(trace_ref: str) -> dict | None:
+        row = await TraceRepo.get(trace_ref)
+        if row is None:
+            return None
+        data = TraceRepo._summary(row)
+        data["spans"] = list(row.spans or [])
+        return data
+
+    @staticmethod
+    async def list_by_session(session_id) -> list[dict]:
+        """某会话按轮次的链路（时间正序），供详情页画会话级时间线。"""
+        async with SessionLocal() as db:
+            rows = (
+                (
+                    await db.execute(
+                        select(RequestTrace)
+                        .where(RequestTrace.session_id == uuid.UUID(str(session_id)))
+                        .order_by(RequestTrace.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [TraceRepo._summary(t) for t in rows]
+
+    @staticmethod
+    async def usage_counts(field: str = "tool_names", days: int = 7, max_rows: int = 5000) -> list[dict]:
+        """近 N 天内各工具 / Agent / MCP 服务被多少轮请求覆盖（Python 侧聚合，
+        不依赖 PG unnest 写法，便于单测与不同版本兼容）。"""
+        column = getattr(RequestTrace, field, None)
+        if column is None:
+            return []
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        async with SessionLocal() as db:
+            values = (
+                (
+                    await db.execute(
+                        select(column).where(RequestTrace.created_at >= since).limit(max_rows)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        counter: dict[str, int] = {}
+        for names in values:
+            for name in names or []:
+                counter[name] = counter.get(name, 0) + 1
+        return [{"name": k, "count": c} for k, c in sorted(counter.items(), key=lambda x: -x[1])]
+
+    @staticmethod
+    async def delete_older_than(days: int) -> int:
+        """保留期清理（由 scripts/ 定期调用）。"""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        async with SessionLocal() as db:
+            result = await db.execute(
+                RequestTrace.__table__.delete().where(RequestTrace.created_at < cutoff)
+            )
+            await db.commit()
+            return int(result.rowcount or 0)

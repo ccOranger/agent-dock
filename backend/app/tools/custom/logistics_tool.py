@@ -1,7 +1,10 @@
-"""物流查询工具"""
-import httpx
+"""物流查询工具（进程内自定义版本）。
 
+历史版本访问固定假域名 http://logistics-service:8080（不存在）。现改为读取
+共享固定数据集 mock_data；同一份数据也被本地 MCP 服务 mcp_logistics 使用。
+"""
 from app.tools.custom.base import BaseTool
+from app.tools.custom import mock_data
 
 
 class QueryLogisticsTool(BaseTool):
@@ -10,18 +13,17 @@ class QueryLogisticsTool(BaseTool):
     parameters = {
         "type": "object",
         "properties": {
-            "order_id": {"type": "string", "description": "订单号"},
+            "order_id": {"type": "string", "description": "订单号，例如 SO20240001"},
         },
         "required": ["order_id"],
         "additionalProperties": False,
     }
-    timeout = 10
-    base_url = "http://logistics-service:8080"
 
     async def run(self, order_id: str):
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(f"{self.base_url}/logistics/{order_id}")
-            if resp.status_code == 404:
-                return {"ok": False, "error": "无物流记录"}
-            resp.raise_for_status()
-            return {"ok": True, "data": resp.json()}
+        rec = mock_data.get_logistics(order_id)
+        if rec is None:
+            order = mock_data.get_order(order_id)
+            if order is None:
+                return {"ok": False, "error": "订单不存在"}
+            return {"ok": False, "error": f"订单 {order_id} 当前状态为「{order['status_text']}」，暂无物流记录"}
+        return {"ok": True, "data": rec}

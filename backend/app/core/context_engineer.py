@@ -9,6 +9,7 @@ import logging
 import re
 
 from app.core.config import settings
+from app.core.tracing import SPAN_MEMORY, SPAN_PERSIST, SPAN_RAG
 from app.tools.memory_factory import get_memory_tool
 from app.utils.text import compute_importance, estimate_tokens
 
@@ -22,11 +23,21 @@ _EMOTIONAL_WORDS = ("投诉", "不满", "太差", "生气", "气死", "垃圾", 
 
 
 class ContextEngineer:
-    async def build(self, user_id: str, query: str, rag_namespaces: list[str] | None) -> str:
-        """构建增强后的 query：注入记忆与知识库上下文"""
+    async def build(
+        self,
+        user_id: str,
+        query: str,
+        rag_namespaces: list[str] | None,
+        collector=None,
+    ) -> str:
+        """构建增强后的 query：注入记忆与知识库上下文
+
+        collector 不为空时，把“召回了多少、哪个知识库命中、是否因预算被丢弃”
+        记为 span，否则这些只能靠日志推测。
+        """
         memory_ctx, rag_ctx = await asyncio.gather(
-            self._recall_memory(user_id, query),
-            self._recall_rag(rag_namespaces or [], query),
+            self._recall_memory(user_id, query, collector),
+            self._recall_rag(rag_namespaces or [], query, collector),
         )
 
         # Token 预算裁剪：为 system + history 预留
@@ -38,6 +49,16 @@ class ContextEngineer:
             cost = estimate_tokens(block)
             if budget - cost < 0:
                 logger.info("上下文预算不足，截断注入块")
+                if collector:
+                    # status=skipped 是“答非所问”的常见真因，必须在链路里可见
+                    collector.add(
+                        "context.budget",
+                        "budget_drop",
+                        status="skipped",
+                        dropped_chars=len(block),
+                        cost_tokens=cost,
+                        remain_budget=budget,
+                    )
                 break
             budget -= cost
             parts.append(block)
@@ -46,22 +67,41 @@ class ContextEngineer:
             return query
         return "\n\n".join(parts) + f"\n\n【客户问题】\n{query}"
 
-    async def _recall_memory(self, user_id: str, query: str) -> str:
+    async def _recall_memory(self, user_id: str, query: str, collector=None) -> str:
         """记忆检索，失败降级为空"""
+        started_ms = collector.now_ms() if collector else 0
         try:
             tool = get_memory_tool(user_id)
             result = await asyncio.to_thread(
                 tool.run, {"action": "search", "query": query, "limit": 5}
             )
-            if not result:
+            items = self._flatten(result) if result else []
+            if collector:
+                collector.memory_hit_count = len(items)
+                collector.add(
+                    SPAN_MEMORY,
+                    "memory_search",
+                    started_ms=started_ms,
+                    status="ok" if items else "empty",
+                    hit_count=len(items),
+                )
+            if not items:
                 return ""
-            lines = [f"- {item}" for item in self._flatten(result)]
+            lines = [f"- {item}" for item in items]
             return "【客户记忆】\n" + "\n".join(lines)
         except Exception as e:
             logger.warning(f"记忆检索失败（降级）: {e}")
+            if collector:
+                collector.add(
+                    SPAN_MEMORY,
+                    "memory_search",
+                    started_ms=started_ms,
+                    status="error",
+                    error=str(e)[:500],
+                )
             return ""
 
-    async def _recall_rag(self, namespaces: list[str], query: str) -> str:
+    async def _recall_rag(self, namespaces: list[str], query: str, collector=None) -> str:
         """知识库检索（跨多个命名空间，按相似度归并），失败降级为空"""
         namespaces = [n for n in namespaces if n]
         if not namespaces:
@@ -72,12 +112,36 @@ class ContextEngineer:
         top_k = settings.rag_top_k
         merged: list[dict] = []
         for ns in namespaces:
+            started_ms = collector.now_ms() if collector else 0
+            if collector:
+                collector.add_unique("rag_namespaces", ns)
             try:
                 # 纯向量检索（关闭 HyDE+MQE 高级检索）以保证对话延迟
                 results = await svc.search(ns, query, top_k=top_k, advanced=False)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"RAG 检索失败（降级，ns={ns}）: {e}")
+                if collector:
+                    collector.add(
+                        SPAN_RAG,
+                        ns,
+                        started_ms=started_ms,
+                        status="error",
+                        namespace=ns,
+                        error=str(e)[:500],
+                    )
                 continue
+            hits = len(results or [])
+            if collector:
+                collector.rag_chunk_count += hits
+                collector.add(
+                    SPAN_RAG,
+                    ns,
+                    started_ms=started_ms,
+                    status="ok" if hits else "empty",
+                    namespace=ns,
+                    chunk_count=hits,
+                    top_score=round(max((r.get("score", 0.0) for r in results or []), default=0.0), 4) or None,
+                )
             for r in results or []:
                 merged.append(r)
         if not merged:
@@ -143,35 +207,66 @@ class ContextEngineer:
         query: str,
         agent_name: str,
         history: list[dict],
+        collector=None,
     ) -> None:
         """会话轮次结束后异步归档记忆（mirror 到 DB）"""
+        started_ms = collector.now_ms() if collector else 0
         try:
             extra_meta, signals = self._extract_signals(query, history)
             metadata = {"agent_name": agent_name, "turn_count": len(history), **extra_meta}
             importance = compute_importance(query, metadata, signals)
-            if importance >= settings.memory_importance_threshold:
-                tool = get_memory_tool(user_id)
-                # 使用已配置的记忆类型，避免写入不支持的层
-                memory_type = "episodic"
-                await asyncio.to_thread(
-                    tool.run,
-                    {
-                        "action": "add",
-                        "memory_type": memory_type,
-                        "content": query,
-                        "metadata": metadata,
-                    },
-                )
-                from app.models.repositories import MemoryRepo
+            if importance < settings.memory_importance_threshold:
+                # 未达写入阈值也要留痕，否则“为什么没记住”无从查起
+                if collector:
+                    collector.add(
+                        SPAN_PERSIST,
+                        "memory_add",
+                        started_ms=started_ms,
+                        status="skipped",
+                        importance=round(importance, 3),
+                        threshold=settings.memory_importance_threshold,
+                    )
+                return
+            tool = get_memory_tool(user_id)
+            # 使用已配置的记忆类型，避免写入不支持的层
+            memory_type = "episodic"
+            await asyncio.to_thread(
+                tool.run,
+                {
+                    "action": "add",
+                    "memory_type": memory_type,
+                    "content": query,
+                    "metadata": metadata,
+                },
+            )
+            from app.models.repositories import MemoryRepo
 
-                await MemoryRepo.upsert_mirror(
-                    user_id=user_id,
-                    memory_uid=f"{session_id}:{abs(hash(query))}",
-                    type_=memory_type if not extra_meta else "semantic",
-                    content=query,
-                    importance=importance,
-                    session_id=session_id,
-                    metadata=metadata,
+            await MemoryRepo.upsert_mirror(
+                user_id=user_id,
+                memory_uid=f"{session_id}:{abs(hash(query))}",
+                type_=memory_type if not extra_meta else "semantic",
+                content=query,
+                importance=importance,
+                session_id=session_id,
+                metadata=metadata,
+            )
+            if collector:
+                collector.add(
+                    SPAN_PERSIST,
+                    "memory_add",
+                    started_ms=started_ms,
+                    status="ok",
+                    memory_type=memory_type,
+                    importance=round(importance, 3),
+                    signals=sorted(signals.keys()),
                 )
         except Exception as e:
             logger.warning(f"记忆归档失败（不阻塞主流程）: {e}")
+            if collector:
+                collector.add(
+                    SPAN_PERSIST,
+                    "memory_add",
+                    started_ms=started_ms,
+                    status="error",
+                    error=str(e)[:500],
+                )

@@ -32,6 +32,7 @@ from seed_data import (  # noqa: E402
 
 # 需要删除的表（含遗留单表 users）；先删子表再删父表由 CASCADE 兜底
 DROP_TABLES = [
+    "request_traces",
     "audit_logs",
     "messages",
     "sessions",
@@ -138,10 +139,11 @@ async def main() -> None:
                 "(select count(*) from customer_users) cust, "
                 "(select count(*) from agents) agents, "
                 "(select count(*) from tools) tools, "
-                "(select count(*) from documents) docs"
+                "(select count(*) from documents) docs, "
+                "(select count(*) from request_traces) traces"
             )
             print(
-                "   行数 -> staff=%s customer=%s agents=%s tools=%s documents=%s"
+                "   行数 -> staff=%s customer=%s agents=%s tools=%s documents=%s traces=%s"
                 % tuple(row)
             )
         finally:

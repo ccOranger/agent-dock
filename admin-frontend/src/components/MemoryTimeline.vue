@@ -6,7 +6,7 @@
       :timestamp="fmt(m.created_at)"
       :type="tagType(m.type)"
     >
-      <b>{{ m.type }}</b> · 重要性 {{ m.importance.toFixed(2) }} · 访问 {{ m.access_count }} 次
+      <b>{{ MEMORY_TYPE_LABELS[m.type] || m.type }}</b> · 重要性 {{ m.importance.toFixed(2) }} · 访问 {{ m.access_count }} 次
       <div class="content">{{ m.content }}</div>
     </el-timeline-item>
   </el-timeline>
@@ -15,7 +15,7 @@
 
 <script setup lang="ts">
 import dayjs from 'dayjs'
-import type { MemoryItem } from '@/types'
+import { MEMORY_TYPE_LABELS, type MemoryItem } from '@/types'
 
 defineProps<{ items: MemoryItem[] }>()
 

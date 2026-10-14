@@ -6,6 +6,9 @@
         <el-menu-item index="/inquiries">
           <span>咨询管理</span>
         </el-menu-item>
+        <el-menu-item index="/traces">
+          <span>链路追踪</span>
+        </el-menu-item>
         <el-menu-item index="/knowledge">
           <span>知识库维护</span>
         </el-menu-item>
