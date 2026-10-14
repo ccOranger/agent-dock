@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     refresh_token_ttl: int = 604800
 
     # ===== 记忆阈值 =====
-    memory_importance_threshold: float = 0.6
+    memory_importance_threshold: float = 0.35
     memory_access_threshold: int = 3
     memory_decay_half_life_days: int = 30
 

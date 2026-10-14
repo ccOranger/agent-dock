@@ -6,12 +6,19 @@ ContextEngineer：上下文融合
 """
 import asyncio
 import logging
+import re
 
 from app.core.config import settings
 from app.tools.memory_factory import get_memory_tool
 from app.utils.text import compute_importance, estimate_tokens
 
 logger = logging.getLogger(__name__)
+
+# 用于从用户消息中提取信号的预编译正则
+_ORDER_ID_RE = re.compile(r"(?:ORD|ORDER|TN)[\-_]?\d{6,}|订单号[：:]?\s*\d{6,}", re.IGNORECASE)
+_PHONE_RE = re.compile(r"1[3-9]\d{9}")
+_TICKET_ID_RE = re.compile(r"(?:TK|TICKET)[\-_]?\d{4,}|工单号[：:]?\s*\d{4,}", re.IGNORECASE)
+_EMOTIONAL_WORDS = ("投诉", "不满", "太差", "生气", "气死", "垃圾", "骗人", "退款", "举报", "差评", "敷衍")
 
 
 class ContextEngineer:
@@ -98,6 +105,37 @@ class ContextEngineer:
             return [str(i) for i in items]
         return [str(result)]
 
+    @staticmethod
+    def _extract_signals(query: str, history: list[dict]) -> tuple[dict, dict]:
+        """从用户消息中提取结构化信号，返回 (metadata_extras, signals)。"""
+        metadata: dict = {}
+        signals: dict = {"turn_count": len(history)}
+
+        # 订单号
+        m = _ORDER_ID_RE.search(query)
+        if m:
+            metadata["order_id"] = m.group()
+        # 工单号
+        m = _TICKET_ID_RE.search(query)
+        if m:
+            metadata["ticket_id"] = m.group()
+        # 手机号
+        m = _PHONE_RE.search(query)
+        if m:
+            metadata["phone"] = m.group()
+        # 情感强度（出现情感关键词越多，强度越高，上限 1.0）
+        hits = sum(1 for w in _EMOTIONAL_WORDS if w in query)
+        if hits:
+            signals["sentiment_intensity"] = min(hits / 3.0, 1.0)
+        # 重复提及：检查同一用户消息是否重复出现关键实体
+        if len(history) >= 3:
+            prev_user_msgs = [h["content"] for h in history[-6:] if h.get("role") == "user"]
+            for key_val in metadata.values():
+                if isinstance(key_val, str) and any(key_val in pm for pm in prev_user_msgs[:-1]):
+                    signals["repeat_mention"] = True
+                    break
+        return metadata, signals
+
     async def persist_after_run(
         self,
         user_id: str,
@@ -108,16 +146,18 @@ class ContextEngineer:
     ) -> None:
         """会话轮次结束后异步归档记忆（mirror 到 DB）"""
         try:
-            metadata = {"agent_name": agent_name, "turn_count": len(history)}
-            signals = {"turn_count": len(history)}
+            extra_meta, signals = self._extract_signals(query, history)
+            metadata = {"agent_name": agent_name, "turn_count": len(history), **extra_meta}
             importance = compute_importance(query, metadata, signals)
             if importance >= settings.memory_importance_threshold:
                 tool = get_memory_tool(user_id)
+                # 使用已配置的记忆类型，避免写入不支持的层
+                memory_type = "episodic"
                 await asyncio.to_thread(
                     tool.run,
                     {
                         "action": "add",
-                        "memory_type": "episodic",
+                        "memory_type": memory_type,
                         "content": query,
                         "metadata": metadata,
                     },
@@ -127,7 +167,7 @@ class ContextEngineer:
                 await MemoryRepo.upsert_mirror(
                     user_id=user_id,
                     memory_uid=f"{session_id}:{abs(hash(query))}",
-                    type_="episodic",
+                    type_=memory_type if not extra_meta else "semantic",
                     content=query,
                     importance=importance,
                     session_id=session_id,

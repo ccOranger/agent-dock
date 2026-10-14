@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import current_user
+from app.api.deps import current_customer
 from app.core.exceptions import Forbidden, NotFound
 from app.models.repositories import MessageRepo, SessionRepo
 from app.schemas.api import SessionCreate, SessionOut, SessionUpdate
@@ -27,7 +27,7 @@ async def _get_owned(session_id: str, user) -> "SessionRepo":
     sess = await SessionRepo.get(session_id)
     if sess is None:
         raise NotFound("会话不存在")
-    if str(sess.user_id) != str(user.id) and user.role == "customer":
+    if str(sess.user_id) != str(user.id):
         raise Forbidden()
     return sess
 
@@ -36,7 +36,7 @@ async def _get_owned(session_id: str, user) -> "SessionRepo":
 async def list_sessions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    user=Depends(current_user),
+    user=Depends(current_customer),
 ):
     items, total = await SessionRepo.list_by_user(user.id, page, page_size)
     return ApiResponse(
@@ -47,19 +47,19 @@ async def list_sessions(
 
 
 @router.post("", response_model=ApiResponse[SessionOut])
-async def create_session(body: SessionCreate, user=Depends(current_user)):
+async def create_session(body: SessionCreate, user=Depends(current_customer)):
     sess = await SessionRepo.create(user.id, title=body.title)
     return ApiResponse(data=_to_out(sess))
 
 
 @router.get("/{session_id}", response_model=ApiResponse[SessionOut])
-async def get_session(session_id: uuid.UUID, user=Depends(current_user)):
+async def get_session(session_id: uuid.UUID, user=Depends(current_customer)):
     sess = await _get_owned(str(session_id), user)
     return ApiResponse(data=_to_out(sess))
 
 
 @router.patch("/{session_id}", response_model=ApiResponse[SessionOut])
-async def update_session(session_id: uuid.UUID, body: SessionUpdate, user=Depends(current_user)):
+async def update_session(session_id: uuid.UUID, body: SessionUpdate, user=Depends(current_customer)):
     sess = await _get_owned(str(session_id), user)
     if body.title is not None:
         sess.title = body.title
@@ -75,7 +75,7 @@ async def update_session(session_id: uuid.UUID, body: SessionUpdate, user=Depend
 
 
 @router.delete("/{session_id}", response_model=ApiResponse)
-async def delete_session(session_id: uuid.UUID, user=Depends(current_user)):
+async def delete_session(session_id: uuid.UUID, user=Depends(current_customer)):
     sess = await _get_owned(str(session_id), user)
     from app.core.database import SessionLocal
 
@@ -90,7 +90,7 @@ async def list_messages(
     session_id: uuid.UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    user=Depends(current_user),
+    user=Depends(current_customer),
 ):
     await _get_owned(str(session_id), user)
     items = await MessageRepo.list_by_session(session_id, page=page, page_size=page_size)

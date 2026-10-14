@@ -31,6 +31,12 @@ class TokenExpired(BizError):
     __doc__ = "Token 过期"
 
 
+class AccountNotRegistered(BizError):
+    code = 2004
+    http_status = status.HTTP_404_NOT_FOUND
+    __doc__ = "账号不存在，请先注册"
+
+
 class Forbidden(BizError):
     code = 2003
     http_status = status.HTTP_403_FORBIDDEN

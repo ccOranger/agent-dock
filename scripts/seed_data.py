@@ -12,14 +12,26 @@ os.environ.setdefault("PYTHONPATH", "backend")
 
 from app.core.database import engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
-from app.models.entities import AgentMeta, Base, Document, ToolMeta, User  # noqa: E402
+from app.models.entities import (  # noqa: E402
+    AgentMeta,
+    Base,
+    CustomerUser,
+    Document,
+    StaffUser,
+    ToolMeta,
+)
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 
-SEED_USERS = [
+# 后台人员（管理后台 admin-frontend 登录）
+SEED_STAFF = [
     {"username": "admin", "password": "Admin@123", "role": "admin", "display_name": "管理员"},
-    {"username": "alice", "password": "Alice@123", "role": "customer", "display_name": "Alice"},
     {"username": "service01", "password": "Agent@123", "role": "agent", "display_name": "客服一号"},
+]
+
+# 客户（客户端 frontend 登录 / 注册）
+SEED_CUSTOMERS = [
+    {"username": "alice", "password": "Alice@123", "display_name": "Alice"},
 ]
 
 SEED_TOOLS = [
@@ -105,24 +117,49 @@ SEED_DOCUMENTS = [
 
 
 async def main() -> None:
+    import sys
+
     from sqlalchemy import select
 
+    # 可选：--rebuild 先删除全部表（用于人员/客户分表后的全量重建，会清空数据）
+    rebuild = "--rebuild" in sys.argv
     async with engine.begin() as conn:
+        if rebuild:
+            await conn.run_sync(Base.metadata.drop_all)
+            # 清理遗留的单表 users（分表后不再使用）
+            from sqlalchemy import text
+
+            await conn.execute(text("DROP TABLE IF EXISTS users CASCADE"))
         await conn.run_sync(Base.metadata.create_all)
 
     async with AsyncSession(engine) as db:
-        for u in SEED_USERS:
-            row = (await db.execute(select(User).where(User.username == u["username"]))).scalar_one_or_none()
-            if row:
-                continue
-            db.add(
-                User(
-                    username=u["username"],
-                    password_hash=hash_password(u["password"]),
-                    role=u["role"],
-                    display_name=u["display_name"],
+        for u in SEED_STAFF:
+            row = (
+                await db.execute(select(StaffUser).where(StaffUser.username == u["username"]))
+            ).scalar_one_or_none()
+            if row is None:
+                db.add(
+                    StaffUser(
+                        username=u["username"],
+                        password_hash=hash_password(u["password"]),
+                        role=u["role"],
+                        display_name=u["display_name"],
+                    )
                 )
-            )
+        for u in SEED_CUSTOMERS:
+            row = (
+                await db.execute(
+                    select(CustomerUser).where(CustomerUser.username == u["username"])
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                db.add(
+                    CustomerUser(
+                        username=u["username"],
+                        password_hash=hash_password(u["password"]),
+                        display_name=u["display_name"],
+                    )
+                )
         for t in SEED_TOOLS:
             row = (
                 await db.execute(select(ToolMeta).where(ToolMeta.name == t["name"]))
@@ -153,7 +190,7 @@ async def main() -> None:
                 db.add(Document(**d))
         await db.commit()
     print(
-        "✅ seed 完成：3 用户(admin/alice/service01) + 2 MCP 工具 + 3 代码 Agent + 1 动态 Agent + 3 示例文档"
+        "✅ seed 完成：2 后台人员(admin/service01) + 1 客户(alice) + 2 MCP 工具 + 3 代码 Agent + 1 动态 Agent + 3 示例文档"
     )
 
 

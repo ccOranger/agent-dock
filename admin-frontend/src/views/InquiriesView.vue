@@ -31,7 +31,7 @@
         <el-button @click="reset">重置</el-button>
       </div>
 
-      <el-table :data="rows" v-loading="loading" style="margin-top: 16px" @row-click="openDetail">
+      <el-table :data="rows" v-loading="loading" style="margin-top: 16px">
         <el-table-column prop="id" label="会话 ID" width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.id }}</span>
@@ -53,7 +53,14 @@
         </el-table-column>
         <el-table-column prop="last_route_to" label="路由 Agent" width="150" />
         <el-table-column prop="message_count" label="消息数" width="90" />
-        <el-table-column prop="created_at" label="创建时间" width="200" />
+        <el-table-column prop="created_at" label="创建时间" width="200">
+          <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link @click="openDetail(row)">查看</el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-pagination
@@ -79,7 +86,7 @@
           <div class="msg-meta">
             <el-tag size="small" :type="m.role === 'user' ? 'primary' : 'success'">{{ m.role }}</el-tag>
             <span v-if="m.routed_to" class="route">→ {{ m.routed_to }}</span>
-            <span class="time">{{ m.created_at }}</span>
+            <span class="time">{{ fmt(m.created_at) }}</span>
           </div>
           <div class="msg-content">{{ m.content }}</div>
         </div>
@@ -92,8 +99,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import dayjs from 'dayjs'
 import { apiExportInquiries, apiInquiryDetail, apiListAgents, apiListInquiries } from '@/api'
 import type { AgentInfo, InquiryDetail, InquirySession } from '@/types'
+
+function fmt(v?: string | null) {
+  return v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'
+}
 
 const rows = ref<InquirySession[]>([])
 const agents = ref<AgentInfo[]>([])

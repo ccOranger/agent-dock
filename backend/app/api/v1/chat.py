@@ -4,7 +4,7 @@ import asyncio
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import current_user
+from app.api.deps import current_customer
 from app.core.exceptions import UnsafeInput
 from app.core.logging import new_trace_id
 from app.core.security import detect_injection
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 async def chat_stream(
     body: ChatRequest,
     request: Request,
-    user=Depends(current_user),
+    user=Depends(current_customer),
     service: ChatService = Depends(ChatService),
 ):
     if detect_injection(body.message):
@@ -51,7 +51,7 @@ async def chat_stream(
 async def chat_message(
     body: ChatRequest,
     request: Request,
-    user=Depends(current_user),
+    user=Depends(current_customer),
     service: ChatService = Depends(ChatService),
 ):
     if detect_injection(body.message):

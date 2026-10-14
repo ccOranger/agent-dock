@@ -12,7 +12,7 @@
         <el-table-column prop="status" label="状态" width="100" />
         <el-table-column prop="last_route_to" label="最近路由" width="150" />
         <el-table-column label="创建时间" width="180">
-          <template #default="{ row }">{{ dayjs(row.created_at).format('YYYY-MM-DD HH:mm') }}</template>
+          <template #default="{ row }">{{ dayjs(row.created_at).format('YYYY-MM-DD HH:mm:ss') }}</template>
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">

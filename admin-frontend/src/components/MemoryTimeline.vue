@@ -3,7 +3,7 @@
     <el-timeline-item
       v-for="m in items"
       :key="m.id"
-      :timestamp="m.created_at"
+      :timestamp="fmt(m.created_at)"
       :type="tagType(m.type)"
     >
       <b>{{ m.type }}</b> · 重要性 {{ m.importance.toFixed(2) }} · 访问 {{ m.access_count }} 次
@@ -14,9 +14,14 @@
 </template>
 
 <script setup lang="ts">
+import dayjs from 'dayjs'
 import type { MemoryItem } from '@/types'
 
 defineProps<{ items: MemoryItem[] }>()
+
+function fmt(v?: string | null) {
+  return v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'
+}
 
 function tagType(type: MemoryItem['type']) {
   return { working: 'primary', episodic: 'success', semantic: 'warning', perceptual: 'info' }[type] as any

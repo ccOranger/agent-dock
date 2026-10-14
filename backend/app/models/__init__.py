@@ -3,18 +3,20 @@ from app.models.entities import (
     AgentMeta,
     AuditLog,
     Base,
+    CustomerUser,
     Document,
     KnowledgeBase,
     Memory,
     Message,
     Session,
+    StaffUser,
     ToolMeta,
-    User,
 )
 
 __all__ = [
     "Base",
-    "User",
+    "StaffUser",
+    "CustomerUser",
     "Session",
     "Message",
     "Memory",

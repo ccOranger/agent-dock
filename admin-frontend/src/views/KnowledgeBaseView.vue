@@ -74,7 +74,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="chunk_count" label="分块数" width="90" />
-        <el-table-column prop="created_at" label="创建时间" width="200" />
+        <el-table-column prop="created_at" label="创建时间" width="200">
+          <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button size="small" @click="viewChunks(row)">分块</el-button>
@@ -169,6 +171,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import dayjs from 'dayjs'
 import {
   apiCreateBase,
   apiCreateEntry,
@@ -188,6 +191,10 @@ import DocumentUploader from '@/components/DocumentUploader.vue'
 
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.user?.role === 'admin')
+
+function fmt(v?: string | null) {
+  return v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'
+}
 
 // ---- 命名空间 ----
 const bases = ref<KnowledgeBase[]>([])

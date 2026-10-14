@@ -9,31 +9,61 @@ from app.core.database import SessionLocal
 from app.models.entities import (
     AgentMeta,
     AuditLog,
+    CustomerUser,
     Document,
     KnowledgeBase,
     Memory,
     Message,
     Session,
+    StaffUser,
     ToolMeta,
-    User,
 )
 
 
-class UserRepo:
-    @staticmethod
-    async def get_by_username(username: str) -> User | None:
-        async with SessionLocal() as db:
-            return (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+class StaffRepo:
+    """后台人员（admin / agent）仓储。"""
 
     @staticmethod
-    async def get_by_id(user_id: uuid.UUID | str) -> User | None:
+    async def get_by_username(username: str) -> StaffUser | None:
         async with SessionLocal() as db:
-            return await db.get(User, uuid.UUID(str(user_id)))
+            return (
+                await db.execute(select(StaffUser).where(StaffUser.username == username))
+            ).scalar_one_or_none()
 
     @staticmethod
-    async def create(username: str, password_hash: str, role: str = "customer", **kw) -> User:
+    async def get_by_id(user_id: uuid.UUID | str) -> StaffUser | None:
         async with SessionLocal() as db:
-            user = User(username=username, password_hash=password_hash, role=role, **kw)
+            return await db.get(StaffUser, uuid.UUID(str(user_id)))
+
+    @staticmethod
+    async def create(username: str, password_hash: str, role: str = "agent", **kw) -> StaffUser:
+        async with SessionLocal() as db:
+            user = StaffUser(username=username, password_hash=password_hash, role=role, **kw)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            return user
+
+
+class CustomerRepo:
+    """客户账号仓储。"""
+
+    @staticmethod
+    async def get_by_username(username: str) -> CustomerUser | None:
+        async with SessionLocal() as db:
+            return (
+                await db.execute(select(CustomerUser).where(CustomerUser.username == username))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def get_by_id(user_id: uuid.UUID | str) -> CustomerUser | None:
+        async with SessionLocal() as db:
+            return await db.get(CustomerUser, uuid.UUID(str(user_id)))
+
+    @staticmethod
+    async def create(username: str, password_hash: str, **kw) -> CustomerUser:
+        async with SessionLocal() as db:
+            user = CustomerUser(username=username, password_hash=password_hash, **kw)
             db.add(user)
             await db.commit()
             await db.refresh(user)
@@ -129,8 +159,8 @@ class SessionRepo:
             .label("message_count")
         )
         async with SessionLocal() as db:
-            base = select(Session, User.username, User.display_name).join(
-                User, User.id == Session.user_id
+            base = select(Session, CustomerUser.username, CustomerUser.display_name).join(
+                CustomerUser, CustomerUser.id == Session.user_id
             )
             count_base = select(func.count()).select_from(Session)
             base = SessionRepo._apply_filters(
@@ -177,8 +207,8 @@ class SessionRepo:
         """导出用：返回满足过滤条件的会话（含首条客户问句摘要）。"""
         async with SessionLocal() as db:
             stmt = select(
-                Session, User.username, User.display_name
-            ).join(User, User.id == Session.user_id)
+                Session, CustomerUser.username, CustomerUser.display_name
+            ).join(CustomerUser, CustomerUser.id == Session.user_id)
             stmt = SessionRepo._apply_filters(
                 stmt, user_id, status, last_route_to, date_from, date_to
             )

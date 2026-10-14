@@ -1,25 +1,30 @@
 <template>
   <el-card>
     <template #header>
-      <div class="head">
-        <b>记忆查看</b>
-        <el-radio-group v-model="scope" size="small">
-          <el-radio-button value="me">我的记忆</el-radio-button>
-          <el-radio-button value="user">指定用户</el-radio-button>
-        </el-radio-group>
-      </div>
+      <b>客户记忆查看</b>
     </template>
     <div class="filters">
-      <el-input v-if="scope === 'user'" v-model="userId" placeholder="用户 ID" style="width: 280px" />
+      <el-input
+        v-model="userId"
+        placeholder="客户 ID（可从咨询列表复制）"
+        clearable
+        style="width: 340px"
+        @keyup.enter="load"
+      />
       <el-select v-model="type" placeholder="记忆类型" clearable style="width: 160px">
         <el-option label="working" value="working" />
         <el-option label="episodic" value="episodic" />
         <el-option label="semantic" value="semantic" />
         <el-option label="perceptual" value="perceptual" />
       </el-select>
-      <el-button type="primary" @click="load">查询</el-button>
+      <el-button type="primary" :disabled="!userId" @click="load">查询</el-button>
     </div>
-    <div style="margin-top: 16px" v-loading="loading">
+    <el-empty
+      v-if="!userId && !loading"
+      description="请输入客户 ID 查询该客户的记忆"
+      style="margin-top: 24px"
+    />
+    <div v-else style="margin-top: 16px" v-loading="loading">
       <MemoryTimeline :items="items" />
     </div>
   </el-card>
@@ -28,38 +33,37 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { apiMyMemories, apiUserMemories } from '@/api'
+import { ElMessage } from 'element-plus'
+import { apiUserMemories } from '@/api'
 import type { MemoryItem } from '@/types'
 import MemoryTimeline from '@/components/MemoryTimeline.vue'
 
 const route = useRoute()
-const scope = ref<'me' | 'user'>('me')
 const userId = ref((route.params.userId as string) || '')
 const type = ref<string>()
 const items = ref<MemoryItem[]>([])
 const loading = ref(false)
 
 async function load() {
+  if (!userId.value) {
+    ElMessage.warning('请先输入客户 ID')
+    return
+  }
   loading.value = true
   try {
-    items.value =
-      scope.value === 'me' ? await apiMyMemories(type.value) : await apiUserMemories(userId.value, type.value)
+    items.value = await apiUserMemories(userId.value, type.value)
   } finally {
     loading.value = false
   }
 }
 
 onMounted(() => {
-  if (userId.value) scope.value = 'user'
-  load()
+  // 从路由带参（如从咨询列表跳转）时自动查询
+  if (userId.value) load()
 })
 </script>
 
 <style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-}
 .filters {
   display: flex;
   gap: 8px;

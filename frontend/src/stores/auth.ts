@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiLogin, apiMe } from '@/api'
+import { apiLogin, apiMe, apiRegister } from '@/api'
 import { clearTokens, getToken, setTokens } from '@/api/http'
 import type { User } from '@/types'
 
@@ -10,6 +10,14 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(username: string, password: string) {
     const result = await apiLogin(username, password)
+    setTokens(result.access_token, result.refresh_token)
+    user.value = result.user
+    loggedIn.value = true
+  }
+
+  async function register(username: string, password: string) {
+    // 注册成功后后端直接下发 Token，自动登录
+    const result = await apiRegister(username, password)
     setTokens(result.access_token, result.refresh_token)
     user.value = result.user
     loggedIn.value = true
@@ -27,5 +35,5 @@ export const useAuthStore = defineStore('auth', () => {
     loggedIn.value = false
   }
 
-  return { user, loggedIn, login, fetchMe, logout }
+  return { user, loggedIn, login, register, fetchMe, logout }
 })

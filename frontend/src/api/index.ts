@@ -11,7 +11,17 @@ import type {
 
 // ===== Auth =====
 export const apiLogin = (username: string, password: string) =>
-  unwrap(http.post<never, { data: { data: LoginResult } }>('/auth/login', { username, password }))
+  unwrap(
+    http.post<never, { data: { data: LoginResult } }>('/auth/customer/login', { username, password }),
+  )
+
+export const apiRegister = (username: string, password: string) =>
+  unwrap(
+    http.post<never, { data: { data: LoginResult } }>('/auth/customer/register', {
+      username,
+      password,
+    }),
+  )
 
 export const apiMe = () => unwrap(http.get<never, { data: { data: User } }>('/auth/me'))
 

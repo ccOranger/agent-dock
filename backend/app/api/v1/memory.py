@@ -1,7 +1,7 @@
 """记忆接口（包装 MemoryTool + DB 归档查询）"""
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import current_user, require_staff
+from app.api.deps import current_customer, require_staff
 from app.core.exceptions import NotFound
 from app.models.repositories import MemoryRepo
 from app.schemas.api import MemorySearchRequest, MemoryUpdateRequest
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 @router.get("/me", response_model=ApiResponse[list])
-async def my_memories(type: str | None = None, user=Depends(current_user)):
+async def my_memories(type: str | None = None, user=Depends(current_customer)):
     rows = await MemoryRepo.list_by_user(user.id, type)
     return ApiResponse(
         data=[

@@ -3,30 +3,41 @@
 --       本 schema 未使用 vector 列（RAG 向量存于 Qdrant），故不依赖 pgvector。
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
--- ========== 用户 ==========
-CREATE TABLE users (
+-- ========== 后台人员（管理员 / 客服坐席） ==========
+CREATE TABLE staff_users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username        VARCHAR(64) UNIQUE NOT NULL,
-    email           VARCHAR(128) UNIQUE,
     password_hash   VARCHAR(256) NOT NULL,
-    role            VARCHAR(16) NOT NULL DEFAULT 'customer'
-                    CHECK (role IN ('customer','agent','admin')),
+    role            VARCHAR(16) NOT NULL DEFAULT 'agent'
+                    CHECK (role IN ('agent','admin')),
     display_name    VARCHAR(64),
     metadata        JSONB DEFAULT '{}'::jsonb,
     is_active       BOOLEAN DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_staff_users_role ON staff_users(role);
+
+-- ========== 客户账号（可自助注册） ==========
+CREATE TABLE customer_users (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username        VARCHAR(64) UNIQUE NOT NULL,
+    password_hash   VARCHAR(256) NOT NULL,
+    display_name    VARCHAR(64),
+    metadata        JSONB DEFAULT '{}'::jsonb,
+    is_active       BOOLEAN DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ========== 会话 ==========
 CREATE TABLE sessions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id         UUID NOT NULL REFERENCES customer_users(id) ON DELETE CASCADE,
     title           VARCHAR(128) DEFAULT '新对话',
     status          VARCHAR(16) NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active','closed','handover')),
-    assigned_agent  UUID REFERENCES users(id),
+    assigned_agent  UUID REFERENCES staff_users(id),
     memory_tool_uid VARCHAR(64),
     rag_namespace   VARCHAR(64),
     last_route_to   VARCHAR(64),
@@ -56,7 +67,7 @@ CREATE INDEX idx_messages_session_created ON messages(session_id, created_at ASC
 -- ========== 记忆归档（MemoryTool 的镜像） ==========
 CREATE TABLE memories (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id         UUID NOT NULL REFERENCES customer_users(id) ON DELETE CASCADE,
     memory_uid      VARCHAR(64) NOT NULL,
     session_id      UUID REFERENCES sessions(id) ON DELETE SET NULL,
     type            VARCHAR(16) NOT NULL
@@ -99,7 +110,7 @@ CREATE TABLE documents (
     error_message   TEXT,
     rag_namespace   VARCHAR(64) NOT NULL,
     chunk_count     INT NOT NULL DEFAULT 0,
-    uploaded_by     UUID REFERENCES users(id),
+    uploaded_by     UUID REFERENCES staff_users(id),
     metadata        JSONB DEFAULT '{}'::jsonb,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()

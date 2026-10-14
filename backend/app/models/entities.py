@@ -22,27 +22,44 @@ class TimestampMixin:
     )
 
 
-class User(Base, TimestampMixin):
-    __tablename__ = "users"
+class StaffUser(Base, TimestampMixin):
+    """后台人员（管理员 / 客服坐席），与客户数据物理隔离。"""
+
+    __tablename__ = "staff_users"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     username: Mapped[str] = mapped_column(String(64), unique=True)
-    email: Mapped[str | None] = mapped_column(String(128), unique=True)
     password_hash: Mapped[str] = mapped_column(String(256))
-    role: Mapped[str] = mapped_column(String(16), default="customer")
+    role: Mapped[str] = mapped_column(String(16), default="agent")
     display_name: Mapped[str | None] = mapped_column(String(64))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class CustomerUser(Base, TimestampMixin):
+    """客户账号，可自助注册，用于聊天会话与记忆归属。"""
+
+    __tablename__ = "customer_users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(256))
+    display_name: Mapped[str | None] = mapped_column(String(64))
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # 供统一的 UserInfo / 依赖校验使用：客户角色恒为 "customer"
+    role: str = "customer"
 
 
 class Session(Base, TimestampMixin):
     __tablename__ = "sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customer_users.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(128), default="新对话")
     status: Mapped[str] = mapped_column(String(16), default="active")
-    assigned_agent: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    assigned_agent: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("staff_users.id"))
     memory_tool_uid: Mapped[str | None] = mapped_column(String(64))
     rag_namespace: Mapped[str | None] = mapped_column(String(64))
     last_route_to: Mapped[str | None] = mapped_column(String(64))
@@ -69,7 +86,7 @@ class Memory(Base, TimestampMixin):
     __tablename__ = "memories"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customer_users.id", ondelete="CASCADE"))
     memory_uid: Mapped[str] = mapped_column(String(64))
     session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
     type: Mapped[str] = mapped_column(String(16))
@@ -94,7 +111,7 @@ class Document(Base, TimestampMixin):
     error_message: Mapped[str | None] = mapped_column(Text)
     rag_namespace: Mapped[str] = mapped_column(String(64))
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
-    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("staff_users.id"))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
 
