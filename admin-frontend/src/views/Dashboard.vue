@@ -1,5 +1,5 @@
 <template>
-  <div class="page">
+  <div>
     <el-row :gutter="16">
       <el-col :span="8">
         <el-card>
@@ -46,9 +46,3 @@ onMounted(async () => {
   agents.value = await apiListAgents()
 })
 </script>
-
-<style scoped>
-.page {
-  padding: 24px 8%;
-}
-</style>

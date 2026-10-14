@@ -9,18 +9,17 @@ import logging
 
 from app.core.config import settings
 from app.tools.memory_factory import get_memory_tool
-from app.tools.rag_factory import get_rag_tool
 from app.utils.text import compute_importance, estimate_tokens
 
 logger = logging.getLogger(__name__)
 
 
 class ContextEngineer:
-    async def build(self, user_id: str, query: str, rag_namespace: str | None) -> str:
+    async def build(self, user_id: str, query: str, rag_namespaces: list[str] | None) -> str:
         """构建增强后的 query：注入记忆与知识库上下文"""
         memory_ctx, rag_ctx = await asyncio.gather(
             self._recall_memory(user_id, query),
-            self._recall_rag(rag_namespace, query),
+            self._recall_rag(rag_namespaces or [], query),
         )
 
         # Token 预算裁剪：为 system + history 预留
@@ -55,33 +54,39 @@ class ContextEngineer:
             logger.warning(f"记忆检索失败（降级）: {e}")
             return ""
 
-    async def _recall_rag(self, namespace: str | None, query: str) -> str:
-        """知识库检索，失败降级为空"""
-        if not namespace:
+    async def _recall_rag(self, namespaces: list[str], query: str) -> str:
+        """知识库检索（跨多个命名空间，按相似度归并），失败降级为空"""
+        namespaces = [n for n in namespaces if n]
+        if not namespaces:
             return ""
-        try:
-            tool = get_rag_tool(namespace)
-            result = await asyncio.to_thread(
-                tool.run,
-                {
-                    "action": "search",
-                    "query": query,
-                    "limit": settings.rag_top_k,
-                    "min_score": settings.rag_min_score,
-                    "namespace": namespace,
-                },
-            )
-            if not result:
-                return ""
-            text = str(result)
-            # RAGTool 未命中时返回提示文本（🔍 开头），不注入上下文
-            if text.startswith("🔍") or "未找到" in text:
-                return ""
-            lines = [f"- {item}" for item in self._flatten(result)]
-            return "【知识库参考】\n" + "\n".join(lines)
-        except Exception as e:
-            logger.warning(f"RAG 检索失败（降级）: {e}")
+        from app.services.rag_service import RagService
+
+        svc = RagService()
+        top_k = settings.rag_top_k
+        merged: list[dict] = []
+        for ns in namespaces:
+            try:
+                # 纯向量检索（关闭 HyDE+MQE 高级检索）以保证对话延迟
+                results = await svc.search(ns, query, top_k=top_k, advanced=False)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"RAG 检索失败（降级，ns={ns}）: {e}")
+                continue
+            for r in results or []:
+                merged.append(r)
+        if not merged:
             return ""
+        merged.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+        lines: list[str] = []
+        for r in merged[:top_k]:
+            content = (r.get("content") or "").strip()
+            if not content:
+                continue
+            src = r.get("source_name") or ""
+            prefix = f"[{src}] " if src else ""
+            lines.append(f"- {prefix}{content}")
+        if not lines:
+            return ""
+        return "【知识库参考】\n" + "\n".join(lines)
 
     @staticmethod
     def _flatten(result) -> list[str]:

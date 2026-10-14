@@ -5,6 +5,7 @@
 """
 import sys
 import types
+from types import SimpleNamespace
 
 import pytest
 
@@ -68,3 +69,25 @@ _install_hello_agents_stub()
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture
+def make_test_app():
+    """构造挂载指定路由的独立测试应用，并按角色覆盖 current_user 依赖（不触发真实 DB/启动事件）"""
+    from fastapi import FastAPI
+
+    from app.api.deps import current_user
+
+    def _factory(routers: list, prefix: str = "/api/v1") -> FastAPI:
+        app = FastAPI()
+        for r in routers:
+            app.include_router(r, prefix=prefix)
+        return app
+
+    def _as_role(app: FastAPI, role: str) -> FastAPI:
+        user = SimpleNamespace(id="u-1", username=role, role=role, display_name=role, is_active=True)
+        app.dependency_overrides[current_user] = lambda: user
+        return app
+
+    _factory.as_role = _as_role
+    return _factory

@@ -6,26 +6,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
   { path: '/chat', component: () => import('@/views/customer/ChatView.vue') },
   { path: '/history', component: () => import('@/views/customer/HistoryView.vue') },
-  {
-    path: '/admin/knowledge',
-    component: () => import('@/views/knowledge/DocumentList.vue'),
-    meta: { roles: ['admin', 'agent'] },
-  },
-  {
-    path: '/admin/memory/:userId?',
-    component: () => import('@/views/memory/MemoryView.vue'),
-    meta: { roles: ['agent', 'admin'] },
-  },
-  {
-    path: '/admin/agents',
-    component: () => import('@/views/admin/AgentList.vue'),
-    meta: { roles: ['admin'] },
-  },
-  {
-    path: '/admin/dashboard',
-    component: () => import('@/views/admin/Dashboard.vue'),
-    meta: { roles: ['admin'] },
-  },
+  // 管理功能（知识库/Agent/记忆/仪表盘/咨询管理）已迁移至独立后台工程 admin-frontend（:5174）
 ]
 
 const router = createRouter({
