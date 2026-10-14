@@ -84,9 +84,9 @@ CONVERSATIONS = [
 
 
 def login(client: httpx.Client, base_url: str, username: str, password: str) -> str:
-    """登录获取 access_token。"""
+    """登录获取 access_token（人员/客户分表后走客户登录入口）。"""
     resp = client.post(
-        f"{base_url}/api/v1/auth/login",
+        f"{base_url}/api/v1/auth/customer/login",
         json={"username": username, "password": password},
     )
     if resp.status_code != 200:

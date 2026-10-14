@@ -27,7 +27,7 @@ frontend/        Vue 3 客户端（客户对话端，src/{api,stores,router,view
 admin-frontend/  Vue 3 管理后台（Agent/知识库/工单/MCP/记忆/登录，独立工程）
 data/            RAGTool 知识库根目录（cs_default / cs_order / cs_after_sales）
 backend/data/    运行时数据：文档归档 doc_archives/、知识库 knowledge_bases/（已 .gitignore 排除，勿入库）
-scripts/         init_db.sql / init_db.sh / seed_data.py；增量迁移 migrate_admin_console.sql / migrate_dynamic_agents.sql
+scripts/         init_db.sql（全量 schema）/ init_db.sh（本机一键建库）/ seed_data.py（种子定义，幂等）/ rebuild_and_seed.py（开发阶段全量重建+灌种子）/ seed_memory_via_chat.py（模拟对话造记忆测试数据）
 docs/            spec.md（规范）/ api.md（接口速查）/ runbook.md（运维手册）
 ```
 
@@ -50,13 +50,13 @@ docs/            spec.md（规范）/ api.md（接口速查）/ runbook.md（运
 bash scripts/init_db.sh          # 或手动执行 scripts/init_db.sql
 ```
 
-> 若用云托管库（非本机），可直接用 `psql`/客户端执行 `scripts/init_db.sql`（已去除 `uuid-ossp`/`vector` 依赖）；也可跳过此步，由下一步的 `seed_data.py` 自动 `create_all` 建表。
+> 若用云托管库（非本机），推荐直接用下文的 `rebuild_and_seed.py`（单往返 simple query，规避连接池代理断连）；本机库可用 `psql`/客户端执行 `scripts/init_db.sql`（已去除 `uuid-ossp`/`vector` 依赖），或交由 `seed_data.py` 的 `create_all` 自动建表。
 
-> **已部署库的增量升级**：新增管理后台与动态 Agent 后，`init_db.sql` 加入了 `knowledge_bases` 表、`documents.kind` 列及 `agents` 表的动态 Agent 扩展列。全新库直接跑 `init_db.sql` 即可；**存量库**需执行以下幂等迁移脚本（否则启动会因缺表/缺列报错）：
+> **开发阶段的 schema 重置**：本项目尚处开发阶段，schema 频繁变动（如 `users` 已拆分为 `staff_users` / `customer_users`，相关外键重指向）。改动 ORM 模型后，无需手写增量迁移，直接对目标库**全量重建 + 灌种子**（⚠️ 会清空现有业务数据，仅限开发）：
 >
-> ```bash
-> psql "$DATABASE_URL" -f scripts/migrate_admin_console.sql   # knowledge_bases 表 + documents.kind
-> psql "$DATABASE_URL" -f scripts/migrate_dynamic_agents.sql  # agents 表动态 Agent 列
+> ```powershell
+> cd backend
+> .\.venv\Scripts\python.exe ..\scripts\rebuild_and_seed.py   # DROP 旧表(含遗留 users) → 建表 → seed；单往返 simple query 适配云库代理
 > ```
 
 ### 2. 后端
@@ -132,7 +132,7 @@ npm test              # vitest
 | `/chat/stream` 报 `Future attached to a different loop` | 跨事件循环访问 asyncpg 连接池；MCP 配置已在主 loop 预取 |
 | 前端登录弹窗 `Cannot read properties of undefined (reading 'data')` | `unwrap` 未 `await` Promise（已修复）；前端数据层依赖此函数 |
 | 控制台 `favicon.ico 404` | 无害；`index.html` 已改为引用 `/vite.svg` |
-| 启动报缺列/缺表（如 `agents.source` / `knowledge_bases`） | 存量库未执行迁移；按上文执行 `migrate_admin_console.sql` + `migrate_dynamic_agents.sql`（幂等） |
+| 启动报缺列/缺表 / 外键不一致（模型改字段后） | schema 与库不一致；开发阶段直接执行 `scripts/rebuild_and_seed.py` 全量重建（会清空数据，重建含 `users` 拆分后的 `staff_users`/`customer_users`） |
 
 ## 文档
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 初始化数据库（需本地 PostgreSQL 15 + pgvector）
+# 初始化数据库（需本地 PostgreSQL 13+；schema 不依赖 pgvector / uuid-ossp）
 set -euo pipefail
 
 DB_NAME=${DB_NAME:-cs_db}
@@ -11,8 +11,7 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
   sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
 
-echo ">> 安装扩展并执行 init_db.sql"
-sudo -u postgres psql -d "${DB_NAME}" -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+echo ">> 执行 init_db.sql（pg_trgm 扩展已在脚本内幂等创建）"
 PGDB_URL="postgresql://${DB_USER}:cs_pass@localhost:5432/${DB_NAME}"
 psql "${PGDB_URL}" -f "$(dirname "$0")/init_db.sql"
 
