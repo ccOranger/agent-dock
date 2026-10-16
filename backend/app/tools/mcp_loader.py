@@ -2,7 +2,11 @@
 MCPLoader：从 DB 读取 MCP 配置，加载为 MCPTool 并注册
 """
 import logging
+import os
+import shutil
+import sys
 import threading
+from pathlib import Path
 from typing import Any
 
 from hello_agents.tools import MCPTool, ToolRegistry
@@ -11,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 # 单个 MCP 服务工具发现（建连 + list_tools）的硬超时上限（秒）
 DEFAULT_MCP_TIMEOUT = 15
+
+# backend 根目录（本文件位于 backend/app/tools/mcp_loader.py）：stdio 服务脚本按此重定位
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 async def fetch_mcp_configs(names: list[str]) -> dict[str, dict | None]:
@@ -27,21 +34,66 @@ async def fetch_mcp_configs(names: list[str]) -> dict[str, dict | None]:
     return configs
 
 
+def _resolve_stdio_command(command: str | None) -> str:
+    """把配置里的解释器解析为当前主机上可用的命令。
+
+    - 留空 → 用运行进程自己的 sys.executable（跨 Windows/Linux/容器都可移植）；
+    - 裸命令名（不含路径分隔符，如 python/uv/npx/docker）→ 交给 PATH 解析；
+      Windows 上 npx/npm/yarn/pnpm 等实为 .cmd 包装，create_subprocess_exec 直接传裸名
+      会 FileNotFoundError，故当本机 PATH 上存在 <name>.cmd 时补上 .cmd 后缀（DB 仍存
+      跨平台裸名，Linux 上保持原样）；
+    - 绝对路径解释器 → 仅当本机确实存在才用，否则回退 sys.executable（兼容旧库写死的异机绝对路径）。
+    """
+    if not command:
+        return sys.executable
+    norm = str(command).replace("\\", "/")
+    if "/" not in norm:
+        if os.name == "nt" and not command.lower().endswith((".cmd", ".exe", ".bat")):
+            if shutil.which(command + ".cmd"):
+                return command + ".cmd"
+        return command
+    return command if Path(norm).exists() else sys.executable
+
+
+def _resolve_stdio_arg(arg: str) -> str:
+    """把服务脚本参数解析为当前主机上的真实路径（仅处理路径类参数）。
+
+    - 选项 token（以 - 开头，如 --port）原样保留；
+    - 含 mcp_servers 段的（新库相对路径 / 旧库异机绝对路径）→ 取 mcp_servers/ 之后
+      的相对片段，按 _BACKEND_ROOT 重定位；
+    - 其它当前能命中的相对路径 → 绝对化；其余（参数值等）原样。
+    """
+    s = str(arg)
+    norm = s.replace("\\", "/")
+    if norm.startswith("-"):
+        return s
+    parts = [x for x in norm.split("/") if x]
+    if "mcp_servers" in parts:
+        rel = "/".join(parts[parts.index("mcp_servers"):])
+        return str((_BACKEND_ROOT / rel).resolve())
+    p = Path(norm)
+    if p.exists():
+        return str(p.resolve())
+    return s
+
+
 def _build_mcp_server_source(cfg: dict) -> dict | list:
     """将 DB 中的 MCP 配置映射为 hello_agents MCPTool/MCPClient 可识别的 server_source。
 
     支持两类传输：
+    - 本地（stdio）：解释器与脚本路径在加载时按当前运行环境重解析（方案 A），
+      因此 DB 里只存相对路径/留空解释器也能跨环境跑；旧库的绝对路径自动回退。
     - 远程（sse / http）：config 含 endpoint，转成 {"transport", "url", "headers", "auth"} 配置字典。
-    - 本地（stdio）：config 含 command（可选 args），转成命令列表。
     """
     conf = cfg.get("config") or {}
     transport = (conf.get("transport") or "").lower()
 
-    # 本地 stdio：显式提供 command
+    # 本地 stdio：command 可留空（回退运行解释器），args 里的脚本路径按 backend 根重定位
     command = conf.get("command")
     if command or transport == "stdio":
         args = conf.get("args") or []
-        return [command, *args] if command else args
+        resolved_args = [_resolve_stdio_arg(a) for a in args]
+        return [_resolve_stdio_command(command), *resolved_args]
 
     # 远程 sse / http
     url = conf.get("endpoint") or conf.get("url")

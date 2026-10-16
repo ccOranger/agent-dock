@@ -35,9 +35,10 @@
           <el-switch v-model="row.enabled" @change="() => onToggle(row)" />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="操作" width="300" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="success" size="small" @click="openTools(row)">查看工具</el-button>
           <el-button link type="warning" size="small" @click="test(row)">测试</el-button>
           <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
         </template>
@@ -61,11 +62,11 @@
         <el-input v-model="form.endpoint" placeholder="http://host:port/sse" />
       </el-form-item>
       <template v-else>
-        <el-form-item label="命令" required>
-          <el-input v-model="form.command" placeholder="python" />
+        <el-form-item label="命令">
+          <el-input v-model="form.command" placeholder="留空 = 使用后端运行环境的 Python 解释器（推荐）" />
         </el-form-item>
         <el-form-item label="参数">
-          <el-input v-model="argsText" placeholder="以空格分隔，如 server.py --port 9000" />
+          <el-input v-model="argsText" placeholder="相对 backend 根的服务脚本，如 mcp_servers/logistics_server.py" />
         </el-form-item>
       </template>
       <el-form-item label="超时(秒)">
@@ -80,6 +81,29 @@
       <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="toolsDialogVisible" :title="`工具列表 · ${toolsServerName}`" width="720px">
+    <div v-loading="toolsLoading" element-loading-text="连接 MCP 服务中…">
+      <el-alert v-if="toolsError" :title="`获取失败：${toolsError}`" type="error" :closable="false" show-icon />
+      <template v-else>
+        <div class="tools-summary">共 {{ tools.length }} 个工具（展开行可查看参数 Schema）</div>
+        <el-table :data="tools" size="small" max-height="440">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <pre class="schema-pre">{{ JSON.stringify(row.input_schema, null, 2) }}</pre>
+            </template>
+          </el-table-column>
+          <el-table-column prop="name" label="工具名" width="260" />
+          <el-table-column prop="description" label="描述" show-overflow-tooltip />
+        </el-table>
+        <div v-if="!tools.length && !toolsLoading" class="muted">未发现工具</div>
+      </template>
+    </div>
+    <template #footer>
+      <el-button @click="toolsDialogVisible = false">关闭</el-button>
+      <el-button type="primary" :loading="toolsLoading" @click="loadTools(toolsServerId)">刷新</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -89,10 +113,11 @@ import {
   apiCreateMcpServer,
   apiDeleteMcpServer,
   apiListMcpServers,
+  apiListMcpTools,
   apiTestMcpServer,
   apiUpdateMcpServer,
 } from '@/api'
-import type { MCPServer, MCPServerPayload } from '@/types'
+import type { MCPServer, MCPServerPayload, MCPServerTool } from '@/types'
 
 const servers = ref<MCPServer[]>([])
 const loading = ref(false)
@@ -101,6 +126,13 @@ const submitting = ref(false)
 const editing = ref(false)
 const editingId = ref<string>('')
 const argsText = ref('')
+
+const toolsDialogVisible = ref(false)
+const toolsLoading = ref(false)
+const toolsError = ref('')
+const toolsServerName = ref('')
+const toolsServerId = ref('')
+const tools = ref<MCPServerTool[]>([])
 
 const emptyForm = (): MCPServerPayload => ({
   name: '',
@@ -162,10 +194,6 @@ async function submit() {
     ElMessage.warning('远程 MCP 服务需填写 Endpoint')
     return
   }
-  if (form.transport === 'stdio' && !form.command) {
-    ElMessage.warning('stdio 需填写命令')
-    return
-  }
   submitting.value = true
   try {
     if (editing.value) {
@@ -217,6 +245,35 @@ async function test(row: MCPServer) {
   }
 }
 
+function openTools(row: MCPServer) {
+  toolsServerId.value = row.id
+  toolsServerName.value = row.name
+  tools.value = []
+  toolsError.value = ''
+  toolsDialogVisible.value = true
+  loadTools(row.id)
+}
+
+async function loadTools(id: string) {
+  if (!id) return
+  toolsLoading.value = true
+  toolsError.value = ''
+  try {
+    const res = await apiListMcpTools(id)
+    if (res.ok) {
+      tools.value = res.tools ?? []
+    } else {
+      tools.value = []
+      toolsError.value = res.error || '无法连接该 MCP 服务'
+    }
+  } catch (e: any) {
+    tools.value = []
+    toolsError.value = e?.message || '获取工具列表失败'
+  } finally {
+    toolsLoading.value = false
+  }
+}
+
 async function remove(row: MCPServer) {
   try {
     await ElMessageBox.confirm(`确认删除 MCP 服务「${row.name}」？`, '删除确认', { type: 'warning' })
@@ -239,5 +296,20 @@ onMounted(load)
 }
 .muted {
   color: #909399;
+}
+.tools-summary {
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+}
+.schema-pre {
+  margin: 0;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

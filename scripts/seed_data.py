@@ -6,7 +6,6 @@
 import asyncio
 import os
 import sys
-from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 os.environ.setdefault("PYTHONPATH", "backend")
@@ -35,21 +34,21 @@ SEED_CUSTOMERS = [
     {"username": "alice", "password": "Alice@123", "display_name": "Alice"},
 ]
 
-# ---- 本地 MCP 服务（FastMCP, stdio）：用 venv 解释器直接拉起脚本，无需任何端口/假域名 ----
-_BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
+# ---- 本地 MCP 服务（FastMCP, stdio）：存相对路径+留空解释器，由加载时按运行环境解析 ----
 
 
 def _mcp_stdio_config(script_name: str) -> dict:
-    """生成 stdio 传输的 MCP 配置（command=当前 python 解释器，args=[脚本绝对路径]）。
+    """生成跨环境可移植的 stdio 传输配置（方案 A）。
 
-    mcp_loader._build_mcp_server_source 会把它拼成 [python, script]，
-    hello_agents 的 MCPTool 以 stdio 子进程启动该 FastMCP 服务。
+    不再把开发机的绝对解释器/脚本路径写死进 DB：
+    - command 留空 → 由 mcp_loader 在加载时用运行进程的 sys.executable；
+    - args 存相对 backend 根的路径（mcp_servers/xxx.py）→ 加载时按 backend 根重定位。
+    这样同一份 seed 在 Windows/Linux/容器下都能拉起（旧库绝对路径也会被兼容回退）。
     """
-    script = _BACKEND_ROOT / "mcp_servers" / script_name
     return {
         "transport": "stdio",
-        "command": sys.executable,
-        "args": [str(script)],
+        "command": "",
+        "args": [f"mcp_servers/{script_name}"],
         "timeout_seconds": 20,
     }
 
@@ -66,6 +65,19 @@ SEED_TOOLS = [
         "type": "mcp",
         "schema_": {},
         "config": _mcp_stdio_config("refund_server.py"),
+    },
+    {
+        # 公开免费的第三方 stdio MCP 官方演示服务（需主机已安装 Node/npx，免 API Key）：
+        # DB 存跨平台裸命令名 npx，Windows 上由 mcp_loader 自动补 .cmd。
+        "name": "mcp_everything",
+        "type": "mcp",
+        "schema_": {},
+        "config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-everything"],
+            "timeout_seconds": 60,
+        },
     },
 ]
 
@@ -215,7 +227,7 @@ async def main() -> None:
                 db.add(Document(**d))
         await db.commit()
     print(
-        "✅ seed 完成：2 后台人员(admin/service01) + 1 客户(alice) + 2 MCP 工具 + 3 代码 Agent + 1 动态 Agent + 3 示例文档"
+        "✅ seed 完成：2 后台人员(admin/service01) + 1 客户(alice) + 3 MCP 工具(2 本地stdio + 1 npx everything) + 3 代码 Agent + 1 动态 Agent + 3 示例文档"
     )
 
 

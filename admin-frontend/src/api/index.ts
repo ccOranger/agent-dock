@@ -10,6 +10,7 @@ import type {
   LoginResult,
   MCPServer,
   MCPServerPayload,
+  MCPServerToolsResult,
   MemoryItem,
   Paginated,
   RequestTraceDetail,
@@ -223,6 +224,9 @@ export const apiTestMcpServer = (body: MCPServerPayload) =>
       body,
     ),
   )
+
+export const apiListMcpTools = (id: string) =>
+  unwrap(http.get<never, { data: { data: MCPServerToolsResult } }>(`/admin/mcp-servers/${id}/tools`))
 
 // ===== Admin：Memory =====
 export const apiMyMemories = (type?: string) =>

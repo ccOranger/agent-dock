@@ -1,4 +1,6 @@
 """管理接口：Agent（代码 + 动态）/ MCP 工具 / 指标"""
+import asyncio
+
 from fastapi import APIRouter, Depends
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import Response
@@ -240,6 +242,39 @@ async def test_mcp_server(body: MCPServerCreate, user=Depends(require_admin)):
         return ApiResponse(data={"ok": True, "tool_count": len(tools), "tools": tools})
     except Exception as e:  # noqa: BLE001
         return ApiResponse(code=0, data={"ok": False, "error": str(e)})
+
+
+@router.get("/mcp-servers/{server_id}/tools", response_model=ApiResponse[dict])
+async def list_mcp_server_tools(server_id: str, user=Depends(require_staff)):
+    """连接该 MCP 服务并返回其全部工具列表（按已存配置探测，不落库）。"""
+    row = await ToolRepo.get(server_id)
+    if row is None or row.type != "mcp":
+        raise NotFound("MCP 服务不存在")
+    from app.tools.mcp_loader import _build_mcp_server_source
+
+    source = _build_mcp_server_source({"name": row.name, "config": row.config or {}})
+    if not source:
+        raise ParamError("缺少 endpoint/command，无法连接")
+    timeout = int((row.config or {}).get("timeout_seconds") or 15)
+    try:
+        from hello_agents.protocols.mcp.client import MCPClient
+
+        async def _fetch() -> list:
+            async with MCPClient(source) as client:
+                return await client.list_tools()
+
+        tools = await asyncio.wait_for(_fetch(), timeout=timeout)
+        items = [
+            {
+                "name": t.get("name"),
+                "description": t.get("description") or "",
+                "input_schema": t.get("input_schema") or {},
+            }
+            for t in tools
+        ]
+        return ApiResponse(data={"ok": True, "server_name": row.name, "tools": items})
+    except Exception as e:  # noqa: BLE001
+        return ApiResponse(code=0, data={"ok": False, "error": str(e) or "连接失败"})
 
 
 # ===== 工具（保留旧接口） =====

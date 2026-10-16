@@ -209,6 +209,19 @@ export interface MCPServerPayload {
   enabled?: boolean
 }
 
+export interface MCPServerTool {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+}
+
+export interface MCPServerToolsResult {
+  ok: boolean
+  server_name?: string
+  tools?: MCPServerTool[]
+  error?: string
+}
+
 export interface DynamicAgentPayload {
   name: string
   display_name?: string | null
