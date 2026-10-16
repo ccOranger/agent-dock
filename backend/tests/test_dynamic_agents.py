@@ -217,6 +217,95 @@ def test_agent_detail_dynamic_registered_tools(admin_client, monkeypatch):
     assert data["registered_tools"] == ["memory", "rag", "query_order", "create_ticket"]
 
 
+def _code_meta(name="legacy_agent", **kw):
+    """一条 source=code 的 DB 镜像行（用于模拟代码已下线的孤儿记录）。"""
+    return SimpleNamespace(
+        name=name,
+        source="code",
+        enabled=kw.get("enabled", True),
+        description=kw.get("description", "已下线的代码 Agent"),
+        system_prompt=kw.get("system_prompt", None),
+        llm_model=kw.get("llm_model", ""),
+        rag_namespace=kw.get("rag_namespace", None),
+        rag_namespaces=kw.get("rag_namespaces", []),
+        search_all_knowledge_bases=kw.get("search_all_knowledge_bases", False),
+        mcp_tool_names=kw.get("mcp_tool_names", []),
+        custom_tool_names=kw.get("custom_tool_names", []),
+        display_name=kw.get("display_name", name),
+        sort_order=kw.get("sort_order", 0),
+    )
+
+
+def test_agents_list_marks_orphan_code_stale(admin_client, monkeypatch):
+    # 库中有一条 source=code 但不在代码注册表的孤儿行
+    async def fake_list_all():
+        return [_code_meta(name="legacy_agent")]
+
+    monkeypatch.setattr(AgentRepo, "list_all", fake_list_all)
+    resp = admin_client.get(f"{adm.router.prefix}/agents")
+    assert resp.status_code == 200
+    data = {a["name"]: a for a in resp.json()["data"]}
+    assert data["legacy_agent"]["source"] == "code"
+    assert data["legacy_agent"]["stale"] is True
+    # 在册代码 Agent 仍为未失效
+    assert data["order_service"]["stale"] is False
+
+
+def test_agent_detail_orphan_code_stale(admin_client, monkeypatch):
+    async def fake_get_by_name(name):
+        return _code_meta(name="legacy_agent", description="旧下单助手")
+
+    monkeypatch.setattr(AgentRepo, "get_by_name", fake_get_by_name)
+    resp = admin_client.get(f"{adm.router.prefix}/agents/legacy_agent")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["source"] == "code"
+    assert data["stale"] is True
+    assert data["description"] == "旧下单助手"
+
+
+def test_delete_orphan_code_agent_allowed(admin_client, monkeypatch):
+    async def fake_get_by_name(name):
+        return _code_meta(name="legacy_agent")
+
+    deleted: list[str] = []
+
+    async def fake_delete_by_name(name):
+        deleted.append(name)
+        return True
+
+    async def fake_audit(**kw):
+        return None
+
+    monkeypatch.setattr(AgentRepo, "get_by_name", fake_get_by_name)
+    monkeypatch.setattr(AgentRepo, "delete_by_name", fake_delete_by_name)
+    monkeypatch.setattr(adm.AuditRepo, "write", fake_audit)
+    resp = admin_client.delete(f"{adm.router.prefix}/agents/legacy_agent")
+    assert resp.status_code == 200
+    assert deleted == ["legacy_agent"]
+
+
+@pytest.mark.asyncio
+async def test_validate_agents_sync_orphan_does_not_raise(monkeypatch):
+    from app.core.bootstrap import validate_agents_sync
+    from app.agents.registry import AGENT_REGISTRY
+
+    # 库里有一条不在注册表的孤儿 code 行 + 一条在册 code 行
+    registered = next(iter(AGENT_REGISTRY.keys()))
+    rows = [_code_meta(name=registered), _code_meta(name="legacy_agent")]
+
+    async def fake_list_all():
+        return rows
+
+    async def fake_create(**kw):
+        return SimpleNamespace(**kw)
+
+    monkeypatch.setattr(AgentRepo, "list_all", fake_list_all)
+    monkeypatch.setattr(AgentRepo, "create", fake_create)
+    # 旧实现会 raise RuntimeError；新实现仅告警，正常返回
+    await validate_agents_sync()
+
+
 def test_agent_write_requires_admin(make_test_app):
     app = make_test_app([adm.router], prefix="")
     agent_client = TestClient(make_test_app.as_role(app, "agent"))

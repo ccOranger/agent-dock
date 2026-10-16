@@ -11,7 +11,8 @@
       <el-table-column prop="name" label="名称" width="160" />
       <el-table-column label="来源" width="90">
         <template #default="{ row }">
-          <el-tag :type="row.source === 'code' ? 'info' : 'success'" size="small">
+          <el-tag v-if="row.stale" type="danger" size="small">已失效</el-tag>
+          <el-tag v-else :type="row.source === 'code' ? 'info' : 'success'" size="small">
             {{ row.source === 'code' ? '代码' : '动态' }}
           </el-tag>
         </template>
@@ -57,7 +58,8 @@
       </el-table-column>
       <el-table-column label="启用" width="80">
         <template #default="{ row }">
-          <el-switch v-model="row.enabled" @change="toggle(row)" />
+          <el-switch v-if="!row.stale" v-model="row.enabled" @change="toggle(row)" />
+          <span v-else class="muted">—</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="210" fixed="right">
@@ -67,6 +69,7 @@
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
           </template>
+          <el-button v-else-if="row.stale" link type="danger" size="small" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -377,7 +380,10 @@ async function submit() {
 
 async function remove(row: AgentInfo) {
   try {
-    await ElMessageBox.confirm(`确认删除动态 Agent「${row.name}」？`, '删除确认', { type: 'warning' })
+    const tip = row.stale
+      ? `该 Agent 对应代码已下线，确认删除残留记录「${row.name}」？`
+      : `确认删除动态 Agent「${row.name}」？`
+    await ElMessageBox.confirm(tip, '删除确认', { type: 'warning' })
     await apiDeleteAgent(row.name)
     ElMessage.success('已删除')
     await load()

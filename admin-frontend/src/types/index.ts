@@ -176,6 +176,7 @@ export interface AgentInfo {
   enabled: boolean
   display_name?: string
   source: 'code' | 'dynamic'
+  stale?: boolean
   system_prompt?: string | null
   search_all_knowledge_bases?: boolean
   sort_order?: number

@@ -96,8 +96,11 @@ async def validate_agents_sync() -> None:
     code_db_names = {r.name for r in all_rows if r.source == "code"}
     code_names = set(AGENT_REGISTRY.keys())
 
-    if code_db_names - code_names:
-        raise RuntimeError(f"DB 中以下 code Agent 未在代码注册: {code_db_names - code_names}")
+    orphans = code_db_names - code_names
+    if orphans:
+        # 代码已下线但库中仍残留 source=code 的行：不再阻断启动，
+        # 这类行在后台标为“已失效”并可手动删除。
+        logger.warning(f"DB 中存在未在代码注册的 code Agent（已失效，可在后台删除）: {sorted(orphans)}")
 
     for missing in code_names - code_db_names:
         cls = AGENT_REGISTRY[missing]

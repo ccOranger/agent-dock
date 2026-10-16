@@ -29,40 +29,60 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 async def agents(user=Depends(require_admin)):
     """代码注册表 + DB 动态 Agent 合并返回（代码 Agent 的 MCP 绑定只读）"""
     db_rows = {r.name: r for r in await AgentRepo.list_all()}
+    code_items = list_agents()
+    registry_names = {i["name"] for i in code_items}
     result = []
     # 1) 代码 Agent（定义来自 Python 类，DB 仅存开关/展示）
-    for item in list_agents():
+    for item in code_items:
         meta = db_rows.get(item["name"])
         result.append(
             {
                 **item,
                 "source": "code",
+                "stale": False,
                 "enabled": meta.enabled if meta else True,
                 "display_name": (meta.display_name if meta and meta.display_name else item["name"]),
             }
         )
-    # 2) 动态 Agent（定义全部来自 DB）
+    # 2) 动态 Agent + 已失效的孤儿代码行（定义均来自 DB）
     for name, meta in db_rows.items():
-        if meta.source != "dynamic":
-            continue
-        result.append(
-            {
-                "name": meta.name,
-                "description": meta.description or meta.name,
-                "model": meta.llm_model or "",
-                "rag_namespace": meta.rag_namespace,
-                "mcp_tools": list(meta.mcp_tool_names or []),
-                "custom_tool_names": list(meta.custom_tool_names or []),
-                "source": "dynamic",
-                "enabled": meta.enabled,
-                "display_name": meta.display_name or meta.name,
-                "system_prompt": meta.system_prompt,
-                "rag_namespaces": list(meta.rag_namespaces or []),
-                "search_all_knowledge_bases": meta.search_all_knowledge_bases,
-                "registered_tools": _dynamic_registered_tools(meta),
-                "sort_order": meta.sort_order,
-            }
-        )
+        if meta.source == "dynamic":
+            result.append(
+                {
+                    "name": meta.name,
+                    "description": meta.description or meta.name,
+                    "model": meta.llm_model or "",
+                    "rag_namespace": meta.rag_namespace,
+                    "mcp_tools": list(meta.mcp_tool_names or []),
+                    "custom_tool_names": list(meta.custom_tool_names or []),
+                    "source": "dynamic",
+                    "stale": False,
+                    "enabled": meta.enabled,
+                    "display_name": meta.display_name or meta.name,
+                    "system_prompt": meta.system_prompt,
+                    "rag_namespaces": list(meta.rag_namespaces or []),
+                    "search_all_knowledge_bases": meta.search_all_knowledge_bases,
+                    "registered_tools": _dynamic_registered_tools(meta),
+                    "sort_order": meta.sort_order,
+                }
+            )
+        elif meta.source == "code" and name not in registry_names:
+            # 代码已下线但库中仍残留 source=code 的行 → “已失效”，仅能查看/删除（不可编辑/开关）
+            result.append(
+                {
+                    "name": meta.name,
+                    "description": meta.description or meta.name,
+                    "model": meta.llm_model or "",
+                    "rag_namespace": meta.rag_namespace,
+                    "mcp_tools": list(meta.mcp_tool_names or []),
+                    "custom_tool_names": list(meta.custom_tool_names or []),
+                    "source": "code",
+                    "stale": True,
+                    "enabled": meta.enabled,
+                    "display_name": meta.display_name or meta.name,
+                    "system_prompt": meta.system_prompt,
+                }
+            )
     return ApiResponse(data=result)
 
 
@@ -89,7 +109,28 @@ async def agent_detail(name: str, user=Depends(require_admin)):
         )
     for item in list_agents():
         if item["name"] == name:
-            return ApiResponse(data={**item, "source": "code", "enabled": meta.enabled if meta else True})
+            return ApiResponse(
+                data={**item, "source": "code", "stale": False, "enabled": meta.enabled if meta else True}
+            )
+    # 代码已下线的孤儿 source=code 行：以 DB 镜像回显，标记已失效
+    if meta is not None and meta.source == "code":
+        return ApiResponse(
+            data={
+                "name": meta.name,
+                "description": meta.description or meta.name,
+                "model": meta.llm_model or "",
+                "rag_namespace": meta.rag_namespace,
+                "mcp_tools": list(meta.mcp_tool_names or []),
+                "custom_tool_names": list(meta.custom_tool_names or []),
+                "source": "code",
+                "stale": True,
+                "enabled": meta.enabled,
+                "display_name": meta.display_name or meta.name,
+                "system_prompt": meta.system_prompt,
+                "rag_namespaces": list(meta.rag_namespaces or []),
+                "search_all_knowledge_bases": meta.search_all_knowledge_bases,
+            }
+        )
     raise NotFound("Agent 不存在")
 
 
@@ -152,9 +193,13 @@ async def delete_agent(name: str, user=Depends(require_admin)):
     meta = await AgentRepo.get_by_name(name)
     if meta is None:
         raise NotFound("Agent 不存在")
-    if meta.source != "dynamic":
-        raise ParamError("代码 Agent 不可删除，仅可在后台禁用")
-    await AgentRepo.delete_dynamic(name)
+    if meta.source == "code":
+        if name in AGENT_REGISTRY:
+            raise ParamError("代码 Agent 不可删除，仅可在后台禁用")
+        # 代码已下线的孤儿行（不在代码注册表）：允许清理
+        await AgentRepo.delete_by_name(name)
+    else:
+        await AgentRepo.delete_dynamic(name)
     await AuditRepo.write(action="admin.agent.delete", user_id=str(user.id), target_type="agent", target_id=name)
     return ApiResponse()
 

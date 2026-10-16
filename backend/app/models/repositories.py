@@ -556,6 +556,17 @@ class AgentRepo:
             await db.commit()
             return True
 
+    @staticmethod
+    async def delete_by_name(name: str) -> bool:
+        """按名删除任意 source 的 Agent 行（仅供后台清理“已失效”的孤儿 code 行，调用方需先校验）。"""
+        async with SessionLocal() as db:
+            row = (await db.execute(select(AgentMeta).where(AgentMeta.name == name))).scalar_one_or_none()
+            if not row:
+                return False
+            await db.delete(row)
+            await db.commit()
+            return True
+
 
 class ToolRepo:
     @staticmethod
