@@ -9,6 +9,7 @@ DynamicBusinessAgent：由管理后台在 DB 中配置的动态业务 Agent
 from hello_agents.tools import ToolRegistry
 
 from app.agents.base_business_agent import BaseBusinessAgent
+from app.tools.custom_loader import register_custom_tools
 from app.tools.memory_factory import get_memory_tool
 from app.tools.rag_factory import get_rag_tool
 
@@ -25,6 +26,7 @@ class DynamicBusinessAgent(BaseBusinessAgent):
         self.rag_namespaces = list(meta.rag_namespaces or [])
         self.search_all_knowledge_bases = bool(meta.search_all_knowledge_bases)
         self.mcp_tools = list(meta.mcp_tool_names or [])
+        self.custom_tool_names = list(meta.custom_tool_names or [])
 
     def build_tools(self, registry: ToolRegistry) -> None:
         # 动态 Agent 必挂 memory 工具
@@ -34,3 +36,5 @@ class DynamicBusinessAgent(BaseBusinessAgent):
         primary = self.rag_namespace or (self.rag_namespaces[0] if self.rag_namespaces else None)
         if primary:
             registry.register_tool(get_rag_tool(primary))
+        # 代码自定义工具：按名从代码目录实例化并注册（会话上下文参数由执行时自动注入）。
+        self.registered_custom_tools = register_custom_tools(registry, self.custom_tool_names)

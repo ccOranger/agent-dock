@@ -141,6 +141,7 @@ CREATE TABLE agents (
     rag_namespaces  JSONB NOT NULL DEFAULT '[]'::jsonb,      -- 显式多知识库（与 rag_namespace 合并去重）
     search_all_knowledge_bases BOOLEAN NOT NULL DEFAULT FALSE,
     mcp_tool_names  JSONB NOT NULL DEFAULT '[]'::jsonb,     -- Agent ↔ MCP 工具绑定
+    custom_tool_names JSONB NOT NULL DEFAULT '[]'::jsonb,   -- Agent ↔ 代码自定义工具绑定（实现在 custom_catalog，登记在 tools type=custom）
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );

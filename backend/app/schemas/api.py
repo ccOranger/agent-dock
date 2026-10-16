@@ -120,6 +120,7 @@ class DynamicAgentCreate(BaseModel):
     rag_namespaces: list[str] = Field(default_factory=list)  # 显式多知识库（与 rag_namespace 合并去重）
     search_all_knowledge_bases: bool = False
     mcp_tool_names: list[str] = Field(default_factory=list)
+    custom_tool_names: list[str] = Field(default_factory=list)  # 绑定的代码自定义工具（需在后台登记且启用）
     enabled: bool = True
     sort_order: int = 0
 
@@ -135,6 +136,7 @@ class DynamicAgentUpdate(BaseModel):
     rag_namespaces: list[str] | None = None
     search_all_knowledge_bases: bool | None = None
     mcp_tool_names: list[str] | None = None
+    custom_tool_names: list[str] | None = None
     enabled: bool | None = None
     sort_order: int | None = None
 
@@ -143,6 +145,7 @@ class MCPServerCreate(BaseModel):
     """后台添加 MCP 服务（写入 tools 表 type=mcp）"""
 
     name: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_]+$")
+    description: str | None = Field(default=None, max_length=512)  # 该 MCP 服务的作用说明（仅后台展示，存于 config）
     transport: Literal["sse", "http", "stdio"] = "sse"
     endpoint: str | None = Field(default=None, max_length=512)  # sse/http 使用
     command: str | None = Field(default=None, max_length=256)  # stdio 使用
@@ -154,6 +157,7 @@ class MCPServerCreate(BaseModel):
 
 
 class MCPServerUpdate(BaseModel):
+    description: str | None = Field(default=None, max_length=512)
     transport: Literal["sse", "http", "stdio"] | None = None
     endpoint: str | None = Field(default=None, max_length=512)
     command: str | None = Field(default=None, max_length=256)
@@ -162,6 +166,19 @@ class MCPServerUpdate(BaseModel):
     auth: dict | None = None
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     enabled: bool | None = None
+
+
+# ===== 管理后台：自定义工具登记 =====
+class CustomToolRegister(BaseModel):
+    """把代码目录里的工具登记到 tools 表（type=custom）；name 必须存在于代码目录。"""
+
+    name: str = Field(min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=512)  # 可选覆盖显示描述（实现/参数仍以代码为准）
+    enabled: bool = True
+
+
+class CustomToolToggle(BaseModel):
+    enabled: bool
 
 
 # ===== 管理后台：咨询信息 =====

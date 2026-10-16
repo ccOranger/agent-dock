@@ -30,6 +30,8 @@ class BaseBusinessAgent(ABC):
     def __init__(self, user_id: str, session_id: str | None = None):
         self.user_id = user_id
         self.session_id = session_id
+        # build_tools 中成功注册的代码自定义工具名（供系统提示“必须调用工具”约束纳入）
+        self.registered_custom_tools: list[str] = []
 
     @abstractmethod
     def build_tools(self, registry: ToolRegistry) -> None:
@@ -51,25 +53,26 @@ class BaseBusinessAgent(ABC):
 
         # 3. 创建 SimpleAgent（默认模型来自环境配置 LLM_MODEL_ID）
         model = self.llm_model or settings.llm_model_id
+        available_tool_names = list(self.registered_custom_tools) + mcp_tool_names
         return SimpleAgent(
             name=self.name,
             llm=HelloAgentsLLM(model=model),
-            system_prompt=self._final_system_prompt(mcp_tool_names),
+            system_prompt=self._final_system_prompt(available_tool_names),
             tool_registry=registry,
         )
 
-    def _final_system_prompt(self, mcp_tool_names: list[str]) -> str:
-        """当确实带来了可用 MCP 工具时，附加“必须调用工具”约束。
+    def _final_system_prompt(self, available_tool_names: list[str]) -> str:
+        """当确实带来了可用工具（代码自定义工具 / MCP）时，附加“必须调用工具”约束。
 
         SimpleAgent 用文本 ReAct（[TOOL_CALL:...]）而非原生 function-calling，且工具清单
         只展示名称+描述、不展示参数名。若提示词未明确要求，模型很容易声称“无法获取
-        实时数据”而直接编造答案。因此只要 MCP 工具注册成功，就在系统提示里强制要求
+        实时数据”而直接编造答案。因此只要有工具注册成功，就在系统提示里强制要求
         先调用工具再作答。
         """
         prompt = self.system_prompt or ""
-        if not mcp_tool_names:
+        if not available_tool_names:
             return prompt
-        tools_line = "、".join(mcp_tool_names)
+        tools_line = "、".join(available_tool_names)
         return (
             f"{prompt}\n\n## 工具使用要求（必须遵守）\n"
             f"你可以使用以下实时工具：{tools_line}。\n"

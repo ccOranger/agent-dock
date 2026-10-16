@@ -49,6 +49,12 @@
           <span v-if="!row.mcp_tools || !row.mcp_tools.length" class="muted">—</span>
         </template>
       </el-table-column>
+      <el-table-column label="自定义工具" width="200">
+        <template #default="{ row }">
+          <el-tag v-for="t in row.custom_tool_names" :key="t" size="small" type="success" style="margin-right: 4px">{{ t }}</el-tag>
+          <span v-if="!row.custom_tool_names || !row.custom_tool_names.length" class="muted">—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="启用" width="80">
         <template #default="{ row }">
           <el-switch v-model="row.enabled" @change="toggle(row)" />
@@ -148,6 +154,26 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item>
+        <template #label>
+          自定义工具
+          <el-tooltip
+            placement="top"
+            content="代码开发并在「自定义工具」页登记启用后可绑定；仅动态 Agent 支持。实现来自代码，后台不可编辑其逻辑。"
+          >
+            <span class="q-help">?</span>
+          </el-tooltip>
+        </template>
+        <el-select v-model="form.custom_tool_names" multiple clearable placeholder="选择已登记的自定义工具">
+          <el-option
+            v-for="t in registeredCustomTools"
+            :key="t.name"
+            :label="t.display_description || t.name"
+            :value="t.name"
+            :disabled="!t.enabled"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item label="启用">
         <el-switch v-model="form.enabled" />
       </el-form-item>
@@ -160,23 +186,28 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   apiCreateAgent,
   apiDeleteAgent,
   apiListAgents,
   apiListBases,
+  apiListCustomTools,
   apiListMcpServers,
   apiToggleAgent,
   apiUpdateAgent,
 } from '@/api'
-import type { AgentInfo, DynamicAgentPayload, KnowledgeBase, MCPServer } from '@/types'
+import type { AgentInfo, CustomToolSpec, DynamicAgentPayload, KnowledgeBase, MCPServer } from '@/types'
 
 const agents = ref<AgentInfo[]>([])
 const mcpServers = ref<MCPServer[]>([])
 const knowledgeBases = ref<KnowledgeBase[]>([])
+const customTools = ref<CustomToolSpec[]>([])
 const loading = ref(false)
+
+// 仅已登记的自定义工具可作为绑定候选（未登记表示代码有但未开放给 Agent）
+const registeredCustomTools = computed(() => customTools.value.filter((t) => t.registered))
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
@@ -192,6 +223,7 @@ const emptyForm = (): DynamicAgentPayload => ({
   rag_namespaces: [],
   search_all_knowledge_bases: false,
   mcp_tool_names: [],
+  custom_tool_names: [],
   enabled: true,
 })
 const form = reactive<DynamicAgentPayload>(emptyForm())
@@ -199,10 +231,16 @@ const form = reactive<DynamicAgentPayload>(emptyForm())
 async function load() {
   loading.value = true
   try {
-    const [a, m, k] = await Promise.all([apiListAgents(), apiListMcpServers(), apiListBases()])
+    const [a, m, k, ct] = await Promise.all([
+      apiListAgents(),
+      apiListMcpServers(),
+      apiListBases(),
+      apiListCustomTools(),
+    ])
     agents.value = a
     mcpServers.value = m
     knowledgeBases.value = k
+    customTools.value = ct
   } finally {
     loading.value = false
   }
@@ -236,6 +274,7 @@ function openEdit(row: AgentInfo) {
     rag_namespaces: [...(row.rag_namespaces ?? [])],
     search_all_knowledge_bases: row.search_all_knowledge_bases ?? false,
     mcp_tool_names: [...(row.mcp_tools ?? [])],
+    custom_tool_names: [...(row.custom_tool_names ?? [])],
     enabled: row.enabled,
   })
   dialogVisible.value = true

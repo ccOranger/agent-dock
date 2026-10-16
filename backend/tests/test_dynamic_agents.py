@@ -23,6 +23,7 @@ def _dyn_meta(name="dyn1", **kw):
         rag_namespaces=kw.get("rag_namespaces", []),
         search_all_knowledge_bases=kw.get("search_all_knowledge_bases", False),
         mcp_tool_names=kw.get("mcp_tool_names", ["mcp_refund"]),
+        custom_tool_names=kw.get("custom_tool_names", []),
         display_name=kw.get("display_name", name),
         sort_order=kw.get("sort_order", 0),
     )
@@ -30,13 +31,19 @@ def _dyn_meta(name="dyn1", **kw):
 
 # ===== 运行时：映射与解析 =====
 def test_dynamic_agent_maps_meta_fields():
-    meta = _dyn_meta(name="refund_agent", rag_namespace="cs_after_sales", rag_namespaces=["cs_order", "cs_after_sales"])
+    meta = _dyn_meta(
+        name="refund_agent",
+        rag_namespace="cs_after_sales",
+        rag_namespaces=["cs_order", "cs_after_sales"],
+        custom_tool_names=["query_order", "create_ticket"],
+    )
     agent = DynamicBusinessAgent(meta=meta, user_id="u1", session_id="s1")
     assert agent.name == "refund_agent"
     assert agent.system_prompt == "你是动态助手"
     assert agent.rag_namespace == "cs_after_sales"
     assert agent.rag_namespaces == ["cs_order", "cs_after_sales"]
     assert agent.mcp_tools == ["mcp_refund"]
+    assert agent.custom_tool_names == ["query_order", "create_ticket"]
     assert agent.user_id == "u1"
 
 

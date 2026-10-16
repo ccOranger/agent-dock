@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.v1 import admin
+from app.schemas.api import MCPServerCreate
 
 FAKE_TOOLS = [
     {"name": "echo", "description": "Echoes input", "input_schema": {"type": "object"}},
@@ -102,3 +103,19 @@ def test_customer_forbidden_on_tools(make_test_app):
     resp = customer_client.get(f"{admin.router.prefix}/mcp-servers/t-1/tools")
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == 2003
+
+
+def test_mcp_description_roundtrip():
+    """description 写入 config 且能被 _config_to_body 还原（供 PUT 合并保留）。"""
+    body = MCPServerCreate(name="mcp_demo", transport="stdio", args=["s.py"], description="物流查询服务")
+    config = admin._build_mcp_config(body)
+    assert config["description"] == "物流查询服务"
+    assert admin._config_to_body(config)["description"] == "物流查询服务"
+
+
+def test_mcp_description_empty_not_persisted():
+    """空描述不写入 config；还原时缺省为 None（可清空）。"""
+    body = MCPServerCreate(name="mcp_demo", transport="stdio", args=["s.py"], description="")
+    config = admin._build_mcp_config(body)
+    assert "description" not in config
+    assert admin._config_to_body(config)["description"] is None

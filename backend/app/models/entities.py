@@ -145,6 +145,8 @@ class AgentMeta(Base, TimestampMixin):
     search_all_knowledge_bases: Mapped[bool] = mapped_column(Boolean, default=False)
     # Agent ↔ MCP 工具绑定（仅存名称，配置见 tools 表 type=mcp）
     mcp_tool_names: Mapped[list] = mapped_column(JSONB, default=list)
+    # Agent ↔ 代码自定义工具绑定（仅存名称，实现来自代码目录 custom_catalog，登记见 tools 表 type=custom）
+    custom_tool_names: Mapped[list] = mapped_column(JSONB, default=list)
 
 
 class ToolMeta(Base, TimestampMixin):

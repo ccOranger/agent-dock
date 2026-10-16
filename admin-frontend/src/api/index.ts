@@ -2,6 +2,7 @@ import { downloadBlob, http, unwrap } from './http'
 import type {
   AgentInfo,
   ChunkList,
+  CustomToolSpec,
   DynamicAgentPayload,
   DocumentItem,
   InquiryDetail,
@@ -227,6 +228,18 @@ export const apiTestMcpServer = (body: MCPServerPayload) =>
 
 export const apiListMcpTools = (id: string) =>
   unwrap(http.get<never, { data: { data: MCPServerToolsResult } }>(`/admin/mcp-servers/${id}/tools`))
+
+// ===== Admin：自定义工具 =====
+export const apiListCustomTools = () =>
+  unwrap(http.get<never, { data: { data: CustomToolSpec[] } }>('/admin/custom-tools'))
+
+export const apiRegisterCustomTool = (body: { name: string; description?: string; enabled?: boolean }) =>
+  unwrap(http.post<never, { data: { data: { name: string } } }>('/admin/custom-tools', body))
+
+export const apiToggleCustomTool = (name: string, enabled: boolean) =>
+  http.patch(`/admin/custom-tools/${name}/toggle`, { enabled })
+
+export const apiDeleteCustomTool = (name: string) => http.delete(`/admin/custom-tools/${name}`)
 
 // ===== Admin：Memory =====
 export const apiMyMemories = (type?: string) =>

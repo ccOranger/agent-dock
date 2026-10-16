@@ -21,6 +21,9 @@
         <el-menu-item index="/mcp-servers" v-if="isAdmin">
           <span>MCP 服务管理</span>
         </el-menu-item>
+        <el-menu-item index="/custom-tools" v-if="isAdmin">
+          <span>自定义工具管理</span>
+        </el-menu-item>
         <el-menu-item index="/memory">
           <span>记忆管理</span>
         </el-menu-item>

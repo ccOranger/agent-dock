@@ -171,6 +171,7 @@ export interface AgentInfo {
   rag_namespace: string | null
   rag_namespaces?: string[]
   mcp_tools: string[]
+  custom_tool_names?: string[]
   enabled: boolean
   display_name?: string
   source: 'code' | 'dynamic'
@@ -184,6 +185,7 @@ export type MCPTransport = 'sse' | 'http' | 'stdio'
 export interface MCPServer {
   id: string
   name: string
+  description?: string | null
   type: string
   enabled: boolean
   config: {
@@ -200,6 +202,7 @@ export interface MCPServer {
 
 export interface MCPServerPayload {
   name: string
+  description?: string | null
   transport: MCPTransport
   endpoint?: string | null
   command?: string | null
@@ -223,6 +226,16 @@ export interface MCPServerToolsResult {
   error?: string
 }
 
+// ===== 自定义工具（实现来自代码目录，后台登记/开关）=====
+export interface CustomToolSpec {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+  registered: boolean
+  enabled: boolean
+  display_description?: string | null
+}
+
 export interface DynamicAgentPayload {
   name: string
   display_name?: string | null
@@ -233,6 +246,7 @@ export interface DynamicAgentPayload {
   rag_namespaces?: string[]
   search_all_knowledge_bases?: boolean
   mcp_tool_names: string[]
+  custom_tool_names?: string[]
   enabled?: boolean
   sort_order?: number
 }

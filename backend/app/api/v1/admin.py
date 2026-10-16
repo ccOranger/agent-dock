@@ -11,12 +11,15 @@ from app.core.exceptions import Conflict, NotFound, ParamError
 from app.models.repositories import AgentRepo, AuditRepo, KnowledgeBaseRepo, ToolRepo
 from app.schemas.api import (
     AgentToggleRequest,
+    CustomToolRegister,
+    CustomToolToggle,
     DynamicAgentCreate,
     DynamicAgentUpdate,
     MCPServerCreate,
     MCPServerUpdate,
 )
 from app.schemas.common import ApiResponse
+from app.tools import custom_catalog
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -50,6 +53,7 @@ async def agents(user=Depends(require_admin)):
                 "model": meta.llm_model or "",
                 "rag_namespace": meta.rag_namespace,
                 "mcp_tools": list(meta.mcp_tool_names or []),
+                "custom_tool_names": list(meta.custom_tool_names or []),
                 "source": "dynamic",
                 "enabled": meta.enabled,
                 "display_name": meta.display_name or meta.name,
@@ -73,6 +77,7 @@ async def agent_detail(name: str, user=Depends(require_admin)):
                 "model": meta.llm_model or "",
                 "rag_namespace": meta.rag_namespace,
                 "mcp_tools": list(meta.mcp_tool_names or []),
+                "custom_tool_names": list(meta.custom_tool_names or []),
                 "source": "dynamic",
                 "enabled": meta.enabled,
                 "display_name": meta.display_name or meta.name,
@@ -98,6 +103,7 @@ async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
     if body.rag_namespace and await KnowledgeBaseRepo.get(body.rag_namespace) is None:
         raise ParamError(f"知识库 namespace 不存在: {body.rag_namespace}")
     await _validate_rag_namespaces(body.rag_namespaces)
+    await _validate_custom_tool_bindings(body.custom_tool_names)
 
     row = await AgentRepo.create_dynamic(
         name=body.name,
@@ -109,6 +115,7 @@ async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
         rag_namespaces=body.rag_namespaces,
         search_all_knowledge_bases=body.search_all_knowledge_bases,
         mcp_tool_names=body.mcp_tool_names,
+        custom_tool_names=body.custom_tool_names,
         enabled=body.enabled,
         sort_order=body.sort_order,
     )
@@ -127,6 +134,8 @@ async def update_agent(name: str, body: DynamicAgentUpdate, user=Depends(require
         raise ParamError(f"知识库 namespace 不存在: {body.rag_namespace}")
     if body.rag_namespaces is not None:
         await _validate_rag_namespaces(body.rag_namespaces)
+    if body.custom_tool_names is not None:
+        await _validate_custom_tool_bindings(body.custom_tool_names)
 
     fields = body.model_dump(exclude_unset=True)
     if fields:
@@ -180,6 +189,7 @@ async def list_mcp_servers(user=Depends(require_staff)):
             {
                 "id": str(r.id),
                 "name": r.name,
+                "description": r.config.get("description") if r.config else None,
                 "type": r.type,
                 "enabled": r.enabled,
                 "config": r.config,
@@ -283,6 +293,75 @@ async def list_mcp_server_tools(server_id: str, user=Depends(require_staff)):
         return ApiResponse(code=0, data={"ok": False, "error": str(e) or "连接失败"})
 
 
+# ===== 自定义工具管理（实现来自代码目录，后台登记/开关）=====
+@router.get("/custom-tools", response_model=ApiResponse[list])
+async def list_custom_tools(user=Depends(require_staff)):
+    """扫描代码目录列出自定义工具，并标注其在 tools 表的登记/启用状态（含覆盖显示描述）。"""
+    registered = {r.name: r for r in await ToolRepo.list_by_type("custom")}
+    data = []
+    for spec in custom_catalog.list_specs():
+        row = registered.get(spec["name"])
+        cfg = (row.config or {}) if row else {}
+        data.append(
+            {
+                "name": spec["name"],
+                "description": spec["description"],
+                "parameters": spec["parameters"],
+                "registered": row is not None,
+                "enabled": bool(row.enabled) if row else False,
+                "display_description": cfg.get("description"),
+            }
+        )
+    return ApiResponse(data=data)
+
+
+@router.post("/custom-tools", response_model=ApiResponse[dict])
+async def register_custom_tool(body: CustomToolRegister, user=Depends(require_admin)):
+    """把代码目录中的某个工具登记到 tools 表（type=custom）。"""
+    if not custom_catalog.exists(body.name):
+        raise ParamError(f"工具不在代码目录中: {body.name}")
+    if await _get_custom_row(body.name) is not None:
+        raise Conflict(f"自定义工具已登记: {body.name}")
+    if await ToolRepo.get_by_name(body.name) is not None:
+        raise Conflict(f"名称已被 MCP 工具占用: {body.name}")
+    spec = next((s for s in custom_catalog.list_specs() if s["name"] == body.name), {})
+    config = {"description": body.description} if body.description else {}
+    row = await ToolRepo.create_custom(
+        name=body.name, schema_=spec.get("parameters", {}), config=config, enabled=body.enabled
+    )
+    await AuditRepo.write(
+        action="admin.custom_tool.create", user_id=str(user.id), target_type="tool", target_id=row.name
+    )
+    return ApiResponse(data={"name": row.name})
+
+
+@router.patch("/custom-tools/{name}/toggle", response_model=ApiResponse)
+async def toggle_custom_tool(name: str, body: CustomToolToggle, user=Depends(require_admin)):
+    row = await _get_custom_row(name)
+    if row is None:
+        raise NotFound("自定义工具未登记")
+    await ToolRepo.update(row.id, enabled=body.enabled)
+    await AuditRepo.write(
+        action="admin.custom_tool.toggle", user_id=str(user.id), target_type="tool", target_id=name
+    )
+    return ApiResponse()
+
+
+@router.delete("/custom-tools/{name}", response_model=ApiResponse)
+async def delete_custom_tool(name: str, user=Depends(require_admin)):
+    row = await _get_custom_row(name)
+    if row is None:
+        raise NotFound("自定义工具未登记")
+    for agent in await AgentRepo.list_dynamic(enabled_only=False):
+        if name in (agent.custom_tool_names or []):
+            raise ParamError(f"自定义工具被 Agent 引用，无法删除: {agent.name}")
+    await ToolRepo.delete(row.id)
+    await AuditRepo.write(
+        action="admin.custom_tool.delete", user_id=str(user.id), target_type="tool", target_id=name
+    )
+    return ApiResponse()
+
+
 # ===== 工具（保留旧接口） =====
 @router.get("/tools", response_model=ApiResponse[list])
 async def tools(user=Depends(require_staff)):
@@ -324,9 +403,36 @@ async def _validate_rag_namespaces(names: list[str]) -> None:
             raise ParamError(f"知识库 namespace 不存在: {n}")
 
 
+async def _get_custom_row(name: str):
+    """按名取 tools 表 type=custom 的 ORM 行（含 id/enabled/config）；get_by_name_and_type 只回 dict 不够用。"""
+    for r in await ToolRepo.list_by_type("custom"):
+        if r.name == name:
+            return r
+    return None
+
+
+async def _validate_custom_tool_bindings(names: list[str]) -> None:
+    """校验绑定的自定义工具均已登记（tools type=custom）、启用，且仍在代码目录中。"""
+    if not names:
+        return
+    # 先做纯内存的代码目录校验，避免未知名也去查库
+    for n in names:
+        if not custom_catalog.exists(n):
+            raise ParamError(f"自定义工具不在代码目录: {n}")
+    registered = {r.name: r for r in await ToolRepo.list_by_type("custom")}
+    for n in names:
+        row = registered.get(n)
+        if row is None:
+            raise ParamError(f"自定义工具未登记: {n}")
+        if not row.enabled:
+            raise ParamError(f"自定义工具已禁用: {n}")
+
+
 def _build_mcp_config(body: MCPServerCreate) -> dict:
     """将 MCP 服务请求体归一化为 tools.config 存储结构。"""
     config: dict = {"transport": body.transport, "timeout_seconds": body.timeout_seconds}
+    if body.description:
+        config["description"] = body.description
     if body.transport == "stdio":
         config["command"] = body.command
         config["args"] = body.args or []
@@ -343,6 +449,7 @@ def _config_to_body(config: dict) -> dict:
     """从存储的 config 还原为可回填写的请求字段（用于 PUT 合并）。"""
     return {
         "transport": config.get("transport", "sse"),
+        "description": config.get("description"),
         "endpoint": config.get("endpoint"),
         "command": config.get("command"),
         "args": config.get("args") or [],

@@ -606,6 +606,18 @@ class ToolRepo:
             return row
 
     @staticmethod
+    async def create_custom(
+        name: str, schema_: dict | None = None, config: dict | None = None, enabled: bool = True
+    ) -> ToolMeta:
+        """登记一个代码目录里的自定义工具（type=custom）。"""
+        async with SessionLocal() as db:
+            row = ToolMeta(name=name, type="custom", schema_=schema_ or {}, config=config or {}, enabled=enabled)
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
     async def update(tool_id: uuid.UUID | str, **fields) -> ToolMeta | None:
         async with SessionLocal() as db:
             row = await db.get(ToolMeta, uuid.UUID(str(tool_id)))

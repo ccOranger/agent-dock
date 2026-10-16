@@ -9,6 +9,12 @@
 
     <el-table :data="servers" v-loading="loading">
       <el-table-column prop="name" label="名称" width="180" />
+      <el-table-column prop="description" label="描述" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.description">{{ row.description }}</span>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="传输" width="90">
         <template #default="{ row }">
           <el-tag size="small">{{ row.config.transport }}</el-tag>
@@ -50,6 +56,15 @@
     <el-form :model="form" label-width="120px">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" :disabled="editing" placeholder="字母/数字/下划线，如 mcp_logistics" />
+      </el-form-item>
+      <el-form-item label="描述">
+        <el-input
+          v-model="form.description"
+          type="textarea"
+          :rows="2"
+          maxlength="512"
+          placeholder="可选，记录该 MCP 服务的作用（仅后台展示，不影响调用）"
+        />
       </el-form-item>
       <el-form-item label="传输类型">
         <el-select v-model="form.transport">
@@ -136,6 +151,7 @@ const tools = ref<MCPServerTool[]>([])
 
 const emptyForm = (): MCPServerPayload => ({
   name: '',
+  description: '',
   transport: 'sse',
   endpoint: '',
   command: '',
@@ -167,6 +183,7 @@ function openEdit(row: MCPServer) {
   editingId.value = row.id
   Object.assign(form, {
     name: row.name,
+    description: row.description ?? '',
     transport: row.config.transport,
     endpoint: row.config.endpoint ?? '',
     command: row.config.command ?? '',
