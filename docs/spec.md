@@ -375,6 +375,7 @@ smart-cs/
 │   ├── mcp_servers/              # 本地 FastMCP（stdio）演示服务
 │   │   ├── logistics_server.py
 │   │   └── refund_server.py
+│   ├── data/                     # 运行时数据（.gitignore 排除）：doc_archives/、knowledge_bases/（RAG_KB_ROOT 相对 backend 工作目录）
 │   ├── alembic/
 │   ├── tests/
 │   ├── pyproject.toml
@@ -402,11 +403,6 @@ smart-cs/
 │   │                             # TracesView/MemoryView/InquiriesView/McpServersView/Dashboard
 │   ├── package.json
 │   └── vite.config.ts
-├── data/
-│   └── knowledge_bases/
-│       ├── cs_default/
-│       ├── cs_order/
-│       └── cs_after_sales/
 ├── docs/
 │   ├── spec.md
 │   ├── api.md

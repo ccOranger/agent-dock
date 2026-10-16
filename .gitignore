@@ -22,8 +22,6 @@ dist/
 .vscode/
 
 # 运行时数据
-data/knowledge_bases/*
-!data/knowledge_bases/**/.gitkeep
 backend/data/doc_archives/*
 !backend/data/doc_archives/**/.gitkeep
 backend/data/knowledge_bases/*

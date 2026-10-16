@@ -25,8 +25,7 @@
 backend/         FastAPI + HelloAgents（app/{api,core,agents,tools,models,schemas,services,utils}）
 frontend/        Vue 3 客户端（客户对话端，src/{api,stores,router,views,components,types}）
 admin-frontend/  Vue 3 管理后台（Agent/知识库/工单/MCP/记忆/登录，独立工程）
-data/            RAGTool 知识库根目录（cs_default / cs_order / cs_after_sales）
-backend/data/    运行时数据：文档归档 doc_archives/、知识库 knowledge_bases/（已 .gitignore 排除，勿入库）
+backend/data/    运行时数据：文档归档 doc_archives/、知识库 knowledge_bases/（RAG_KB_ROOT 相对 backend 工作目录；已 .gitignore 排除，勿入库）
 scripts/         init_db.sql（全量 schema）/ init_db.sh（本机一键建库）/ seed_data.py（种子定义，幂等）/ rebuild_and_seed.py（开发阶段全量重建+灌种子）/ seed_memory_via_chat.py（模拟对话造记忆测试数据）
 docs/            spec.md（规范 v2.0）/ api.md（接口速查）/ runbook.md（运维手册）/ updates/（U01~U09 各功能详解文档）
 ```
