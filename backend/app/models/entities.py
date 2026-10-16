@@ -170,6 +170,32 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Ticket(Base, TimestampMixin):
+    """客诉工单：结构化增改查的独立表。
+
+    此前工单只作为 audit_logs 的 action=create_ticket/update_ticket 记录、把字段埋在
+    payload JSONB 里，无法按状态流转、按工单号回查或在后台增改查。改为独立表：
+    - ticket_no 对外可读（TK-XXXXXXXX），业务与后台都以它为主键回查；
+    - user_id/session_id 存 UUID 但不建外键（示例客户名等非 UUID 会降级为 NULL），
+      与 audit_logs 保持一致，避免历史脏数据阻塞写入；
+    - updates 追加式记录每次补录（订单号/快递单号等），content 保留最新概述。
+    """
+
+    __tablename__ = "tickets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    ticket_no: Mapped[str] = mapped_column(String(32), unique=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    category: Mapped[str] = mapped_column(String(32), default="general")
+    urgency: Mapped[str] = mapped_column(String(16), default="medium")
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    title: Mapped[str | None] = mapped_column(String(256))
+    content: Mapped[str] = mapped_column(Text, default="")
+    updates: Mapped[list] = mapped_column(JSONB, default=list)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+
 class RequestTrace(Base):
     """一轮对话的请求链路：经过哪些 Agent / MCP / 工具、耗时与结局。
 

@@ -171,6 +171,26 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_audit_user_created ON audit_logs(user_id, created_at DESC);
 CREATE INDEX idx_audit_action ON audit_logs(action);
 
+-- ========== 客诉工单（结构化增改查，取代此前埋在 audit_logs.payload 的工单记录） ==========
+CREATE TABLE IF NOT EXISTS tickets (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_no   VARCHAR(32) UNIQUE NOT NULL,
+    user_id     UUID,
+    session_id  UUID,
+    category    VARCHAR(32) NOT NULL DEFAULT 'general',
+    urgency     VARCHAR(16) NOT NULL DEFAULT 'medium' CHECK (urgency IN ('low','medium','high')),
+    status      VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_progress','escalated','resolved','closed')),
+    title       VARCHAR(256),
+    content     TEXT NOT NULL DEFAULT '',
+    updates     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_status_created ON tickets(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tickets_user_created ON tickets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tickets_session ON tickets(session_id);
+
 -- ========== 请求链路（一轮对话一行，明细存 spans） ==========
 CREATE TABLE IF NOT EXISTS request_traces (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),

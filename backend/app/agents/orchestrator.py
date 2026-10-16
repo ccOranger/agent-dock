@@ -7,9 +7,10 @@ Orchestrator：调度器
      agent_start / agent_end 事件分块下发
 """
 import asyncio
+import inspect
 import logging
 import threading
-from typing import AsyncIterator, Iterator
+from typing import Any, AsyncIterator, Iterator
 
 from hello_agents import Message
 from hello_agents.agents import SimpleAgent
@@ -39,6 +40,9 @@ _TOOL_MARKER = "[TOOL_CALL:"
 # 多意图分块之间插入的分隔（markdown 水平线，前端逐字渲染即可分段）
 _INTENT_SEPARATOR = "\n\n---\n\n"
 
+# 注入业务 Agent 的最近对话轮数上限（业务 Agent 每轮新建，靠此获得跨轮记忆）
+_HISTORY_WINDOW = 12
+
 
 def _safe_prefix_len(text: str) -> int | None:
     """计算可以安全下发给前端的前缀长度。
@@ -54,8 +58,67 @@ def _safe_prefix_len(text: str) -> int | None:
     return len(text)
 
 
+# 自定义工具默认执行超时（秒）；BaseTool 子类可用 timeout 类属性覆盖
+_DEFAULT_TOOL_TIMEOUT = 30
+
+
+def _execute_tool(
+    agent: SimpleAgent,
+    tool_name: str,
+    args: dict[str, Any],
+    context: dict[str, Any] | None,
+    loop: asyncio.AbstractEventLoop | None,
+) -> str:
+    """项目级工具执行器，替代 hello_agents 的同步 `_execute_tool_call`。
+
+    hello_agents 用同步 `tool.run(参数字典)` 调用工具，只适配 MCP 包装工具；
+    本项目的自定义工具是 `async def run(**kwargs)`（见 custom/base.py），若沿用
+    同步调用会返回未 await 的协程（或直接 TypeError），工具根本不执行、不落库。
+    这里统一两种形态：
+    - 协程函数：绑定 kwargs，并回投到主事件循环执行（DB 连接池绑定主循环，
+      不能在工作线程里另起 loop），用 run_coroutine_threadsafe + 超时等待结果；
+    - 普通函数（MCP 包装工具）：按 hello_agents 约定传参数字典。
+    对模型不会提供的内部参数（user_id/session_id），若工具声明了则从会话上下文注入。
+    """
+    registry = agent.tool_registry
+    tool = registry.get_tool(tool_name) if registry is not None else None
+    if tool is None:
+        return f"❌ 错误：未找到工具 '{tool_name}'"
+
+    args = dict(args or {})
+    context = context or {}
+    # 注入会话上下文：仅补齐工具显式声明、且模型未给出的 user_id/session_id
+    try:
+        declared = {p.name for p in tool.get_parameters()}
+    except Exception:  # noqa: BLE001
+        declared = set()
+    for key in ("user_id", "session_id"):
+        if key in declared and not args.get(key) and context.get(key):
+            args[key] = context[key]
+
+    try:
+        if inspect.iscoroutinefunction(tool.run):
+            if loop is None:
+                result = asyncio.run(tool.run(**args))
+            else:
+                timeout = getattr(tool, "timeout", None) or _DEFAULT_TOOL_TIMEOUT
+                future = asyncio.run_coroutine_threadsafe(tool.run(**args), loop)
+                result = future.result(timeout)
+        else:
+            # 同步工具（如 MCPWrappedTool）：按 hello_agents 约定接收参数字典
+            result = tool.run(args)
+        return f"🔧 工具 {tool_name} 执行结果：\n{result}"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(f"工具执行失败: {tool_name}")
+        return f"❌ 工具调用失败：{str(exc)}"
+
+
 def _stream_with_tools(
-    agent: SimpleAgent, input_text: str, max_tool_iterations: int = 3
+    agent: SimpleAgent,
+    input_text: str,
+    context: dict[str, Any] | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+    max_tool_iterations: int = 3,
 ) -> Iterator[dict]:
     """流式执行 + 真正的工具调用循环（同步生成器，产出 dict 事件）。
 
@@ -119,7 +182,7 @@ def _stream_with_tools(
                 args = {"raw": raw_args}
             yield {"type": "tool_call", "data": {"id": call_id, "name": tool_name, "args": args}}
 
-            result = agent._execute_tool_call(tool_name, raw_args)
+            result = _execute_tool(agent, tool_name, args, context, loop)
             results.append(result)
             clean = clean.replace(call["original"], "")
             yield {
@@ -150,18 +213,21 @@ class Orchestrator:
         self.ctx_engineer = ContextEngineer()
 
     @staticmethod
-    async def _astream(simple_agent: SimpleAgent, query: str) -> AsyncIterator[dict]:
+    async def _astream(
+        simple_agent: SimpleAgent, query: str, context: dict[str, Any] | None = None
+    ) -> AsyncIterator[dict]:
         """将 SimpleAgent.stream_run（同步生成器）桥接为异步流。
 
         后台线程逐条产出事件，通过线程安全的方式回投到事件循环的队列，
         避免阻塞事件循环同时保留逐个流式送达的语义。
+        工具执行（协程型自定义工具）回投到本 loop 执行，保证 DB 连接池可用。
         """
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
 
         def _pump() -> None:
             try:
-                for event in _stream_with_tools(simple_agent, query):
+                for event in _stream_with_tools(simple_agent, query, context=context, loop=loop):
                     loop.call_soon_threadsafe(queue.put_nowait, event)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("stream_run 执行异常")
@@ -296,7 +362,7 @@ class Orchestrator:
             text_chars = 0
             open_tools: dict[str, str] = {}
             async for event in self._run_business_agent(
-                business_agent, user_id, query, collector=collector, intent_index=index
+                business_agent, user_id, query, session_id=session_id, history=history, collector=collector, intent_index=index
             ):
                 etype = event.get("type")
                 data = event.get("data") or {}
@@ -364,6 +430,8 @@ class Orchestrator:
         business_agent,
         user_id: str,
         query: str,
+        session_id: str = "",
+        history: list[dict] | None = None,
         collector=None,
         intent_index: int = 0,
     ) -> AsyncIterator[dict]:
@@ -414,8 +482,30 @@ class Orchestrator:
                 available_tools=available,
             )
             collector.add_unique("llm_models", model)
-        async for event in self._astream(simple_agent, enriched_query):
+        # 把最近若干轮对话注入 Agent._history，赋予跨轮记忆：业务 Agent 每轮新建，
+        # 不注入则模型看不到上一轮，既接不住追问也不知道刚创建的工单号（无法 update_ticket）
+        self._seed_history(simple_agent, history)
+        async for event in self._astream(
+            simple_agent,
+            enriched_query,
+            context={"user_id": user_id, "session_id": session_id},
+        ):
             yield event
+
+    @staticmethod
+    def _seed_history(simple_agent: SimpleAgent, history: list[dict] | None) -> None:
+        """用最近几轮历史填充 SimpleAgent._history（_stream_with_tools 会读取它）。"""
+        if not history:
+            return
+        prior = list(history)
+        # 当前这轮的用户消息已在生成前入库，会出现在 history 末尾，需剔除以免与本轮输入重复
+        if prior and prior[-1].get("role") == "user":
+            prior = prior[:-1]
+        for h in prior[-_HISTORY_WINDOW:]:
+            role = h.get("role")
+            content = (h.get("content") or "").strip()
+            if role in ("user", "assistant") and content:
+                simple_agent._history.append(Message(content, role))
 
     @staticmethod
     async def _resolve_rag_namespaces(business_agent) -> list[str]:

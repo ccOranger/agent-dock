@@ -33,6 +33,7 @@ from seed_data import (  # noqa: E402
 # 需要删除的表（含遗留单表 users）；先删子表再删父表由 CASCADE 兜底
 DROP_TABLES = [
     "request_traces",
+    "tickets",
     "audit_logs",
     "messages",
     "sessions",

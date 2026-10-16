@@ -10,6 +10,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/inquiries' },
       { path: 'inquiries', component: () => import('@/views/InquiriesView.vue'), meta: { title: '咨询管理' } },
+      { path: 'tickets', component: () => import('@/views/TicketsView.vue'), meta: { title: '工单管理' } },
       { path: 'traces', component: () => import('@/views/TracesView.vue'), meta: { title: '链路追踪' } },
       { path: 'knowledge', component: () => import('@/views/KnowledgeBaseView.vue'), meta: { title: '知识库维护' } },
       { path: 'agents', component: () => import('@/views/AgentList.vue'), meta: { title: 'Agent 管理', roles: ['admin'] } },

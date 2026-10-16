@@ -211,3 +211,13 @@ class KnowledgeEntryCreate(BaseModel):
 class KnowledgeEntryUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=256)
     content: str = Field(min_length=1)
+
+
+# ===== 管理后台：工单 =====
+class TicketStatusUpdate(BaseModel):
+    status: Literal["open", "in_progress", "escalated", "resolved", "closed"]
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class TicketNoteCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)

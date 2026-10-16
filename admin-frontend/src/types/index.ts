@@ -239,3 +239,46 @@ export const MEMORY_TYPE_LABELS: Record<MemoryItem['type'], string> = {
   semantic: '语义记忆',
   perceptual: '感知记忆',
 }
+
+// ===== 工单管理 =====
+export type TicketStatus = 'open' | 'in_progress' | 'escalated' | 'resolved' | 'closed'
+export type TicketUrgency = 'low' | 'medium' | 'high'
+
+export interface TicketUpdateEntry {
+  content: string
+  at: string
+  action?: string
+}
+
+export interface TicketSummary {
+  id: string
+  ticket_no: string
+  user_id?: string | null
+  session_id?: string | null
+  category: string
+  urgency: TicketUrgency
+  status: TicketStatus
+  title?: string | null
+  content: string
+  update_count: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface TicketDetail extends TicketSummary {
+  updates: TicketUpdateEntry[]
+}
+
+export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
+  open: '待处理',
+  in_progress: '处理中',
+  escalated: '已升级',
+  resolved: '已解决',
+  closed: '已关闭',
+}
+
+export const TICKET_URGENCY_LABELS: Record<TicketUrgency, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+}

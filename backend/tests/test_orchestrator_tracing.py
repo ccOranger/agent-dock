@@ -96,7 +96,7 @@ def _make_orch(monkeypatch, intents, agents, known=None, stream_events=None):
     async def fake_resolve(name, user_id, session_id=None):
         return agents.get(name) if name in known_names else None
 
-    async def fake_astream(simple_agent, query):
+    async def fake_astream(simple_agent, query, context=None):
         for event in stream_events or [{"type": "text", "data": {"content": "答案"}}]:
             yield event
 

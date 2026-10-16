@@ -15,6 +15,8 @@ import type {
   RequestTraceDetail,
   RequestTraceSummary,
   SearchResult,
+  TicketDetail,
+  TicketSummary,
   TraceUsageItem,
   User,
 } from '@/types'
@@ -51,6 +53,38 @@ export const apiInquiryDetail = (sessionId: string) =>
 // CSV 导出（Blob 下载）
 export const apiExportInquiries = (filters: Omit<InquiryFilters, 'page' | 'page_size'> = {}) =>
   downloadBlob('/admin/inquiries/sessions/export', filters as Record<string, unknown>)
+
+// ===== 工单管理 =====
+export interface TicketFilters {
+  user_id?: string
+  status?: string
+  category?: string
+  urgency?: string
+  keyword?: string
+  date_from?: string
+  date_to?: string
+}
+
+export const apiListTickets = (filters: TicketFilters = {}, page = 1, pageSize = 20) =>
+  unwrap(
+    http.get<never, { data: { data: Paginated<TicketSummary> } }>('/admin/tickets', {
+      params: { ...filters, page, page_size: pageSize },
+    }),
+  )
+
+export const apiTicketDetail = (ticketNo: string) =>
+  unwrap(http.get<never, { data: { data: TicketDetail } }>(`/admin/tickets/${ticketNo}`))
+
+export const apiUpdateTicketStatus = (ticketNo: string, status: string, note?: string) =>
+  unwrap(
+    http.patch<never, { data: { data: TicketSummary } }>(`/admin/tickets/${ticketNo}/status`, {
+      status,
+      note,
+    }),
+  )
+
+export const apiAddTicketNote = (ticketNo: string, content: string) =>
+  unwrap(http.post<never, { data: { data: TicketSummary } }>(`/admin/tickets/${ticketNo}/notes`, { content }))
 
 // ===== 请求链路追踪 =====
 export interface TraceFilters {

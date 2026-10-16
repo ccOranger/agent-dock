@@ -17,6 +17,7 @@ from app.models.entities import (
     RequestTrace,
     Session,
     StaffUser,
+    Ticket,
     ToolMeta,
 )
 
@@ -653,6 +654,206 @@ class AuditRepo:
                 )
             )
             await db.commit()
+
+
+def _ticket_uuid(value) -> uuid.UUID | None:
+    """尽力转 UUID；示例客户名（alice）等非 UUID 返回 None，不阻断工单写入。"""
+    if not value:
+        return None
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _ticket_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class TicketRepo:
+    """客诉工单仓储：结构化增改查（取代此前散落在 audit_logs.payload 的工单记录）。"""
+
+    STATUSES = ("open", "in_progress", "escalated", "resolved", "closed")
+
+    @staticmethod
+    def new_ticket_no() -> str:
+        return f"TK-{uuid.uuid4().hex[:8].upper()}"
+
+    @staticmethod
+    def to_dict(t: Ticket, *, include_updates: bool = False) -> dict:
+        data = {
+            "id": str(t.id),
+            "ticket_no": t.ticket_no,
+            "user_id": str(t.user_id) if t.user_id else None,
+            "session_id": str(t.session_id) if t.session_id else None,
+            "category": t.category,
+            "urgency": t.urgency,
+            "status": t.status,
+            "title": t.title,
+            "content": t.content,
+            "update_count": len(t.updates or []),
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        }
+        if include_updates:
+            data["updates"] = list(t.updates or [])
+        return data
+
+    @staticmethod
+    async def create(
+        content: str,
+        *,
+        ticket_no: str | None = None,
+        user_id=None,
+        session_id=None,
+        category: str = "general",
+        urgency: str = "medium",
+        title: str | None = None,
+    ) -> Ticket:
+        async with SessionLocal() as db:
+            row = Ticket(
+                ticket_no=ticket_no or TicketRepo.new_ticket_no(),
+                user_id=_ticket_uuid(user_id),
+                session_id=_ticket_uuid(session_id),
+                category=category or "general",
+                urgency=urgency if urgency in ("low", "medium", "high") else "medium",
+                status="open",
+                title=(title or content)[:256],
+                content=content[:4000],
+                updates=[],
+            )
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def get_by_ticket_no(ticket_no: str) -> Ticket | None:
+        async with SessionLocal() as db:
+            return (
+                await db.execute(select(Ticket).where(Ticket.ticket_no == str(ticket_no)))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def get(ticket_id: uuid.UUID | str) -> Ticket | None:
+        async with SessionLocal() as db:
+            return await db.get(Ticket, uuid.UUID(str(ticket_id)))
+
+    @staticmethod
+    async def append_update(ticket_no: str, content: str) -> Ticket | None:
+        """补录一条更新：追加到 updates 历史并把 content 刷为最新概述。找不到工单返回 None。"""
+        async with SessionLocal() as db:
+            row = (
+                await db.execute(select(Ticket).where(Ticket.ticket_no == str(ticket_no)))
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            row.updates = list(row.updates or []) + [{"content": content[:2000], "at": _ticket_now()}]
+            row.content = content[:4000]
+            if row.status == "open":
+                row.status = "in_progress"
+            row.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def set_status(ticket_no: str, status: str, note: str | None = None) -> Ticket | None:
+        async with SessionLocal() as db:
+            row = (
+                await db.execute(select(Ticket).where(Ticket.ticket_no == str(ticket_no)))
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            if status not in TicketRepo.STATUSES:
+                raise ValueError(f"非法工单状态: {status}")
+            row.status = status
+            if note:
+                row.updates = list(row.updates or []) + [
+                    {"content": note[:2000], "at": _ticket_now(), "action": f"status->{status}"}
+                ]
+            row.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def latest_open_for(user_id=None, session_id=None) -> Ticket | None:
+        """取该客户/会话最近一张未关闭工单（供 escalate 关联）。"""
+        uid = _ticket_uuid(user_id)
+        sid = _ticket_uuid(session_id)
+        if uid is None and sid is None:
+            return None
+        async with SessionLocal() as db:
+            stmt = select(Ticket).where(Ticket.status.in_(("open", "in_progress")))
+            if uid is not None and sid is not None:
+                stmt = stmt.where((Ticket.user_id == uid) | (Ticket.session_id == sid))
+            elif uid is not None:
+                stmt = stmt.where(Ticket.user_id == uid)
+            else:
+                stmt = stmt.where(Ticket.session_id == sid)
+            return (
+                await db.execute(stmt.order_by(Ticket.created_at.desc()).limit(1))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    def _apply_filters(stmt, *, user_id, status, category, urgency, keyword, date_from, date_to):
+        uid = _ticket_uuid(user_id)
+        if uid is not None:
+            stmt = stmt.where(Ticket.user_id == uid)
+        if status:
+            stmt = stmt.where(Ticket.status == status)
+        if category:
+            stmt = stmt.where(Ticket.category == category)
+        if urgency:
+            stmt = stmt.where(Ticket.urgency == urgency)
+        if keyword:
+            like = f"%{keyword}%"
+            stmt = stmt.where(Ticket.content.ilike(like) | Ticket.ticket_no.ilike(like))
+        if date_from:
+            stmt = stmt.where(Ticket.created_at >= date_from)
+        if date_to:
+            stmt = stmt.where(Ticket.created_at <= date_to)
+        return stmt
+
+    @staticmethod
+    async def list_filtered(
+        *,
+        user_id=None,
+        status: str | None = None,
+        category: str | None = None,
+        urgency: str | None = None,
+        keyword: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
+        kw = {
+            "user_id": user_id,
+            "status": status,
+            "category": category,
+            "urgency": urgency,
+            "keyword": keyword,
+            "date_from": date_from,
+            "date_to": date_to,
+        }
+        async with SessionLocal() as db:
+            base = TicketRepo._apply_filters(select(Ticket), **kw)
+            count_base = TicketRepo._apply_filters(select(func.count()).select_from(Ticket), **kw)
+            total = (await db.execute(count_base)).scalar_one()
+            rows = (
+                (
+                    await db.execute(
+                        base.order_by(Ticket.created_at.desc())
+                        .offset((page - 1) * page_size)
+                        .limit(page_size)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [TicketRepo.to_dict(t) for t in rows], total
 
 
 def _trace_uuid(value) -> uuid.UUID | None:
