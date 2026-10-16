@@ -47,7 +47,7 @@ def build_tools(self, registry):
         registry.register_tool(get_rag_tool(self.rag_namespace))
 ```
 
-> 无进程内自定义 Python 工具（如 `query_order`）；需要这类硬编码能力时仍应写代码 Agent。
+> 早期动态 Agent 无进程内自定义工具（如 `query_order`）；自 [U10](10-custom-tool-management.md) 起，可在后台登记代码自定义工具并按 `custom_tool_names` 绑定给动态 Agent，`build_tools` 会额外调用 `register_custom_tools` 装配它们。
 
 ## 5. 路由实时化
 
@@ -55,7 +55,7 @@ def build_tools(self, registry):
 
 ## 6. 启动校验（core/bootstrap.py::validate_agents_sync）
 
-只校验 **代码 Agent**：DB 中 `source=code` 的行必须都能在 `AGENT_REGISTRY` 找到，否则抛错；代码注册但 DB 缺失的自动补登记。`source=dynamic` 不参与校验。
+只校验 **代码 Agent**：代码注册但 DB 缺失的自动补登记；DB 中 `source=code` 的行若在代码注册表找不到（代码已下线的孤儿行），**不再抛错阻断启动**，改为告警并在后台标记「已失效」可删除（详见 [U11](11-code-agent-transparency-state.md)）。`source=dynamic` 不参与校验。
 
 ## 7. 管理后台 API（api/v1/admin.py）
 
@@ -65,7 +65,7 @@ def build_tools(self, registry):
 | GET | `/admin/agents/{name}` | admin | 详情 |
 | POST | `/admin/agents` | admin | 创建动态 Agent（重名校验、MCP 绑定校验、namespace 校验） |
 | PUT | `/admin/agents/{name}` | admin | 编辑（仅 dynamic 可改，字段级更新） |
-| DELETE | `/admin/agents/{name}` | admin | 删除（代码 Agent 不可删，只能禁用） |
+| DELETE | `/admin/agents/{name}` | admin | 删除（在册代码 Agent 不可删，只能禁用；代码已下线的孤儿行可删，见 U11） |
 | PATCH | `/admin/agents/{name}/toggle` | admin | 启用/禁用（代码/动态通用） |
 
 创建/更新约束：

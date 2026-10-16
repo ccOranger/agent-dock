@@ -14,7 +14,8 @@
 
 - 每个业务 = 一个独立 Python 类（继承 `BaseBusinessAgent`）+ 独立 Prompt + 独立工具集
 - 新增业务：新建类文件 + 注册表加一行，路由 Prompt 自动感知，零改路由代码
-- **动态 Agent**：除代码托管 Agent 外，可在管理后台基于数据库配置（system_prompt / 模型 / RAG namespace / MCP 工具）动态创建，注册与路由实时生效（代码 Agent 与动态 Agent 混合注册）
+- **动态 Agent**：除代码托管 Agent 外，可在管理后台基于数据库配置（system_prompt / 模型 / RAG namespace / MCP 工具 / 自定义工具）动态创建，注册与路由实时生效（代码 Agent 与动态 Agent 混合注册）
+- **自定义工具管理**：代码侧已开发的 `BaseTool` 集中在目录中供后台扫描、登记到 `tools` 表（`type=custom`）并启停，动态 Agent 可按名绑定复用（工具实现永远来自代码，后台只做登记入口）
 - 记忆一律走 HelloAgents `MemoryTool`（四层），知识库一律走 `RAGTool`（多 namespace）
 - 对话接口 SSE 流式输出（session / route / text / tool_call / tool_result / handover / done / error）
 - **管理后台**：独立 `admin-frontend` 工程，提供 Agent 管理、知识库命名空间管理、跨客户工单（咨询）查看/CSV 导出、MCP Servers、记忆时序等能力
@@ -27,7 +28,7 @@ frontend/        Vue 3 客户端（客户对话端，src/{api,stores,router,view
 admin-frontend/  Vue 3 管理后台（Agent/知识库/工单/MCP/记忆/登录，独立工程）
 backend/data/    运行时数据：文档归档 doc_archives/、知识库 knowledge_bases/（RAG_KB_ROOT 相对 backend 工作目录；已 .gitignore 排除，勿入库）
 scripts/         init_db.sql（全量 schema）/ init_db.sh（本机一键建库）/ seed_data.py（种子定义，幂等）/ rebuild_and_seed.py（开发阶段全量重建+灌种子）/ seed_memory_via_chat.py（模拟对话造记忆测试数据）
-docs/            spec.md（规范 v2.0）/ api.md（接口速查）/ runbook.md（运维手册）/ updates/（U01~U09 各功能详解文档）
+docs/            spec.md（规范 v2.0）/ api.md（接口速查）/ runbook.md（运维手册）/ updates/（U01~U11 各功能详解文档）
 ```
 
 ## 快速开始
@@ -103,7 +104,7 @@ npm run dev                      # http://localhost:5174（/api 已代理到后�
 ```
 
 > 管理后台为独立工程，端口 **5174**（与客户前端 5173 分离，共用同一后端）。使用 `admin` 角色账号登录。
-> 功能：Agent 列表与动态 Agent 创建/启停、知识库命名空间与文档管理、跨客户工单查看与 CSV 导出、MCP Servers 配置、记忆时序。
+> 功能：Agent 列表与动态 Agent 创建/启停、Agent 详情查看（含代码 Agent 的系统提示词/注册工具/MCP，代码已下线的孤儿行标「已失效」可删除）、知识库命名空间与文档管理、跨客户工单查看与 CSV 导出、MCP Servers 配置（含服务描述）、自定义工具管理（扫描代码目录、登记/启停并绑定给动态 Agent）、记忆时序。
 
 ### 5. 测试
 
@@ -132,10 +133,12 @@ npm test              # vitest
 | 前端登录弹窗 `Cannot read properties of undefined (reading 'data')` | `unwrap` 未 `await` Promise（已修复）；前端数据层依赖此函数 |
 | 控制台 `favicon.ico 404` | 无害；`index.html` 已改为引用 `/vite.svg` |
 | 启动报缺列/缺表 / 外键不一致（模型改字段后） | schema 与库不一致；开发阶段直接执行 `scripts/rebuild_and_seed.py` 全量重建（会清空数据，重建含 `users` 拆分后的 `staff_users`/`customer_users`） |
+| 启动日志告警「DB 中存在未在代码注册的 code Agent（已失效）」 | 代码已下线但库中残留 `source=code` 行；已**不再阻断启动**，该类行在 Agent 列表标「已失效」，可在后台直接删除 |
+| 后台禁用了某个代码 Agent 但似仍被命中 | 需确认已重启/热重载到含修复的版本；现在路由候选与运行时解析均尊重 `enabled`（见 U11），禁用会真正阻断 |
 
 ## 文档
 
 - [开发规范 Spec v2.0](docs/spec.md)
-- [功能更新详解（U01~U09）](docs/updates/README.md)
+- [功能更新详解（U01~U11）](docs/updates/README.md)
 - [API 速查](docs/api.md)
 - [运维手册](docs/runbook.md)

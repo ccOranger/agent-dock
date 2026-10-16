@@ -84,15 +84,26 @@ POST   /api/v1/knowledge/search                   # 检索测试（body: namespa
 
 ## Admin · Agents（代码 + 动态混合注册，require_admin 写）
 
-（[U03](updates/03-dynamic-agents.md)）
+（[U03](updates/03-dynamic-agents.md)、[U11](updates/11-code-agent-transparency-state.md)）
 
 ```
-GET    /api/v1/admin/agents                 # 代码注册表 + DB 动态 Agent 合并（code 的 MCP 绑定只读）
-GET    /api/v1/admin/agents/{name}          # Agent 详情
-POST   /api/v1/admin/agents                 # 创建动态 Agent（重名/冲突→3002；校验 MCP 绑定与 namespace）
+GET    /api/v1/admin/agents                 # 代码注册表 + DB 动态 Agent 合并（code 带出 system_prompt/registered_tools/custom_tool_names/mcp_tools；孤儿 code 行标 stale）
+GET    /api/v1/admin/agents/{name}          # Agent 详情（代码/动态均含注册工具；stale 行回显 DB 镜像）
+POST   /api/v1/admin/agents                 # 创建动态 Agent（重名/冲突→3002；校验 MCP 绑定、自定义工具与 namespace）
 PUT    /api/v1/admin/agents/{name}          # 编辑动态 Agent（仅 source=dynamic 可编辑）
-DELETE /api/v1/admin/agents/{name}          # 删除动态 Agent（代码 Agent 不可删→1001）
-PATCH  /api/v1/admin/agents/{name}/toggle   # 启用/禁用（body: enabled）
+DELETE /api/v1/admin/agents/{name}          # 删除（在册代码 Agent 不可删→1001；代码已下线的孤儿行可删）
+PATCH  /api/v1/admin/agents/{name}/toggle   # 启用/禁用（body: enabled；禁用后路由与解析真正不命中）
+```
+
+## Admin · Custom Tools（代码自定义工具登记，require_admin 写 / require_staff 读）
+
+（[U10](updates/10-custom-tool-management.md)）
+
+```
+GET    /api/v1/admin/custom-tools            # 扫描代码目录列出工具（含 registered/enabled/覆盖描述）
+POST   /api/v1/admin/custom-tools            # 登记到 tools 表 type=custom（不在目录→1001；重名/MCP 占用→3002）
+PATCH  /api/v1/admin/custom-tools/{name}/toggle  # 启用/禁用（body: enabled）
+DELETE /api/v1/admin/custom-tools/{name}     # 取消登记（被动态 Agent 引用→1001）
 ```
 
 ## Admin · MCP Servers（require_admin 写 / require_staff 读）

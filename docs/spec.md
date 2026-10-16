@@ -407,7 +407,7 @@ smart-cs/
 │   ├── spec.md
 │   ├── api.md
 │   ├── runbook.md
-│   └── updates/                 # U01~U09 各已完成功能的详解文档 + 索引 README
+│   └── updates/                 # U01~U11 各已完成功能的详解文档 + 索引 README
 ├── scripts/
 │   ├── init_db.sh
 │   ├── init_db.sql
@@ -946,17 +946,21 @@ def init_hello_agents() -> HelloAgentsBootstrap:
 
 
 async def validate_agents_sync() -> None:
-    """启动时校验：代码注册表 与 DB 表 是否一致"""
+    """启动时校验：代码注册表 与 DB 中 source=code 的行 是否一致（dynamic 不参与）"""
     from app.agents.registry import AGENT_REGISTRY
-    from app.models.agent import AgentRepo
+    from app.models.repositories import AgentRepo
 
-    db_names = set(await AgentRepo.list_names())
+    all_rows = await AgentRepo.list_all()
+    code_db_names = {r.name for r in all_rows if r.source == "code"}
     code_names = set(AGENT_REGISTRY.keys())
 
-    if db_names - code_names:
-        raise RuntimeError(f"DB 中以下 Agent 未在代码注册: {db_names - code_names}")
+    orphans = code_db_names - code_names
+    if orphans:
+        # 代码已下线但库中仍残留 source=code 的行：不再阻断启动，
+        # 这类行在后台标为“已失效”并可手动删除（详见 updates/11）。
+        logger.warning(f"DB 中存在未在代码注册的 code Agent（已失效，可在后台删除）: {sorted(orphans)}")
 
-    for missing in code_names - db_names:
+    for missing in code_names - code_db_names:  # 只补登记缺失行，不重置已有行的 enabled
         cls = AGENT_REGISTRY[missing]
         await AgentRepo.create(
             name=missing,

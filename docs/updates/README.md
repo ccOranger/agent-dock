@@ -19,6 +19,8 @@
 | U07 | 人员/客户分表与双入口鉴权 | users 拆为 staff_users/customer_users，各自登录 + 客户自助注册 | [07-staff-customer-auth-split.md](07-staff-customer-auth-split.md) |
 | U08 | 知识库管理增强 | namespace CRUD、原文归档下载、手工 FAQ 条目、分块浏览与高级检索 | [08-knowledge-base-admin.md](08-knowledge-base-admin.md) |
 | U09 | 异步自定义工具执行机制修复 | 自定义 async 工具真正执行、回投主事件循环、落库可用 | [09-async-tool-execution.md](09-async-tool-execution.md) |
+| U10 | 自定义工具管理与 MCP 服务描述 | 代码 BaseTool 目录扫描/登记到 tools 表供动态 Agent 绑定；MCP 增加描述字段 | [10-custom-tool-management.md](10-custom-tool-management.md) |
+| U11 | 代码 Agent 信息透明与状态治理 | 列表/详情带出提示词与注册工具、查看详情、禁用真正生效、孤儿行容错与清理 | [11-code-agent-transparency-state.md](11-code-agent-transparency-state.md) |
 
 ## 与三份主文档的关系
 
