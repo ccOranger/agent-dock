@@ -195,6 +195,9 @@ export async function apiRagSearch(
 export const apiListAgents = () =>
   unwrap(http.get<never, { data: { data: AgentInfo[] } }>('/admin/agents'))
 
+export const apiGetAgentDetail = (name: string) =>
+  unwrap(http.get<never, { data: { data: AgentInfo } }>(`/admin/agents/${name}`))
+
 export const apiToggleAgent = (name: string, enabled: boolean) =>
   http.patch(`/admin/agents/${name}/toggle`, { enabled })
 

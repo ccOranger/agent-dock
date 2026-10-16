@@ -39,7 +39,6 @@ async def agents(user=Depends(require_admin)):
                 "source": "code",
                 "enabled": meta.enabled if meta else True,
                 "display_name": (meta.display_name if meta and meta.display_name else item["name"]),
-                "system_prompt": None,
             }
         )
     # 2) 动态 Agent（定义全部来自 DB）
@@ -60,6 +59,7 @@ async def agents(user=Depends(require_admin)):
                 "system_prompt": meta.system_prompt,
                 "rag_namespaces": list(meta.rag_namespaces or []),
                 "search_all_knowledge_bases": meta.search_all_knowledge_bases,
+                "registered_tools": _dynamic_registered_tools(meta),
                 "sort_order": meta.sort_order,
             }
         )
@@ -84,6 +84,7 @@ async def agent_detail(name: str, user=Depends(require_admin)):
                 "system_prompt": meta.system_prompt,
                 "rag_namespaces": list(meta.rag_namespaces or []),
                 "search_all_knowledge_bases": meta.search_all_knowledge_bases,
+                "registered_tools": _dynamic_registered_tools(meta),
             }
         )
     for item in list_agents():
@@ -409,6 +410,20 @@ async def _get_custom_row(name: str):
         if r.name == name:
             return r
     return None
+
+
+def _dynamic_registered_tools(meta) -> list[str]:
+    """动态 Agent 运行时 build_tools 静态可知的注册工具：memory（必挂）+ rag（有主库时）+ 已登记自定义工具。
+
+    MCP 属外部工具（运行时发现），单独以 mcp_tools 展示，不并入此列表（与代码 Agent 口径一致）。
+    """
+    tools = ["memory"]
+    namespaces = list(meta.rag_namespaces or [])
+    primary = meta.rag_namespace or (namespaces[0] if namespaces else None)
+    if primary:
+        tools.append("rag")
+    tools.extend(meta.custom_tool_names or [])
+    return tools
 
 
 async def _validate_custom_tool_bindings(names: list[str]) -> None:

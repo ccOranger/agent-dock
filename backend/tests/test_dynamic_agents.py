@@ -49,20 +49,28 @@ def test_dynamic_agent_maps_meta_fields():
 
 @pytest.mark.asyncio
 async def test_resolve_business_agent_code_and_dynamic_and_unknown(monkeypatch):
-    # 代码 Agent：返回代码类实例
+    async def fake_get(name):
+        if name == "dyn1":
+            return _dyn_meta(name="dyn1")
+        if name == "order_service":  # 代码 Agent 在库中被禁用
+            return SimpleNamespace(name="order_service", source="code", enabled=False)
+        return None
+
+    monkeypatch.setattr(AgentRepo, "get_by_name", fake_get)
+
+    # 代码 Agent：DB 无行或启用时返回代码类实例
     code_agent = await registry.resolve_business_agent("knowledge_qa", user_id="u1")
     assert isinstance(code_agent, KnowledgeAgent)
 
-    # 动态 Agent：get_by_name 返回 dynamic 行
-    async def fake_get(name):
-        return _dyn_meta(name="dyn1") if name == "dyn1" else None
+    # 代码 Agent 被禁用：即使代码注册表里有也不再命中
+    assert await registry.resolve_business_agent("order_service", user_id="u1") is None
 
-    monkeypatch.setattr(AgentRepo, "get_by_name", fake_get)
+    # 动态 Agent：get_by_name 返回 dynamic 行
     dyn_agent = await registry.resolve_business_agent("dyn1", user_id="u1")
     assert isinstance(dyn_agent, DynamicBusinessAgent)
     assert dyn_agent.name == "dyn1"
 
-    # 禁用/不存在：返回 None
+    # 不存在：返回 None
     assert await registry.resolve_business_agent("nope", user_id="u1") is None
 
 
@@ -71,10 +79,29 @@ async def test_list_effective_agents_merges_code_and_dynamic(monkeypatch):
     async def fake_list_dynamic(enabled_only=True):
         return [{"name": "dyn1", "description": "d", "model": "", "rag_namespace": None, "mcp_tools": []}]
 
+    async def fake_list_all():
+        return []
+
     monkeypatch.setattr(registry, "list_dynamic_agents", fake_list_dynamic)
+    monkeypatch.setattr(AgentRepo, "list_all", fake_list_all)
     names = [a["name"] for a in await registry.list_effective_agents()]
     assert "knowledge_qa" in names  # 代码 Agent 保留
     assert "dyn1" in names  # 动态 Agent 合并
+
+
+@pytest.mark.asyncio
+async def test_list_effective_agents_excludes_disabled_code(monkeypatch):
+    async def fake_list_dynamic(enabled_only=True):
+        return []
+
+    async def fake_list_all():
+        return [SimpleNamespace(name="order_service", source="code", enabled=False)]
+
+    monkeypatch.setattr(registry, "list_dynamic_agents", fake_list_dynamic)
+    monkeypatch.setattr(AgentRepo, "list_all", fake_list_all)
+    names = [a["name"] for a in await registry.list_effective_agents()]
+    assert "order_service" not in names  # 被禁用的代码 Agent 从路由候选中剔除
+    assert "knowledge_qa" in names
 
 
 # ===== API：动态 Agent CRUD =====
@@ -150,6 +177,44 @@ def test_agents_list_merges_source(admin_client, monkeypatch):
     assert data["knowledge_qa"]["source"] == "code"
     assert data["dyn1"]["source"] == "dynamic"
     assert data["dyn1"]["mcp_tools"] == ["mcp_refund"]
+    # 代码 Agent 也应带出系统提示词/注册工具/MCP（从代码静态解析，无需 DB）
+    order = data["order_service"]
+    assert order["system_prompt"]
+    assert "query_order" in order["custom_tool_names"]
+    assert "mcp_logistics" in order["mcp_tools"]
+    assert "memory" in order["registered_tools"]
+    # knowledge_qa 仅挂 memory/rag，无自定义工具
+    assert data["knowledge_qa"]["registered_tools"] == ["memory", "rag"]
+    assert data["knowledge_qa"]["custom_tool_names"] == []
+    # 动态 Agent 也应有注册工具（无主库/自定义工具时仅 memory）
+    assert data["dyn1"]["registered_tools"] == ["memory"]
+
+
+def test_agent_detail_code_returns_fields(admin_client, monkeypatch):
+    async def fake_get_by_name(name):
+        return None
+
+    monkeypatch.setattr(AgentRepo, "get_by_name", fake_get_by_name)
+    resp = admin_client.get(f"{adm.router.prefix}/agents/knowledge_qa")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["source"] == "code"
+    assert data["enabled"] is True
+    assert data["system_prompt"]
+    assert data["registered_tools"] == ["memory", "rag"]
+
+
+def test_agent_detail_dynamic_registered_tools(admin_client, monkeypatch):
+    async def fake_get_by_name(name):
+        return _dyn_meta(name="dynx", rag_namespace="cs_a", custom_tool_names=["query_order", "create_ticket"])
+
+    monkeypatch.setattr(AgentRepo, "get_by_name", fake_get_by_name)
+    resp = admin_client.get(f"{adm.router.prefix}/agents/dynx")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["source"] == "dynamic"
+    # memory + rag(有主库) + 已登记自定义工具；MCP 不并入
+    assert data["registered_tools"] == ["memory", "rag", "query_order", "create_ticket"]
 
 
 def test_agent_write_requires_admin(make_test_app):

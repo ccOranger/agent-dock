@@ -60,13 +60,13 @@
           <el-switch v-model="row.enabled" @change="toggle(row)" />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
+          <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
           <template v-if="row.source === 'dynamic'">
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
           </template>
-          <span v-else class="muted">只读</span>
         </template>
       </el-table-column>
     </el-table>
@@ -183,6 +183,59 @@
       <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="detailVisible" title="Agent 详情" width="720px">
+    <div v-loading="detailLoading">
+      <el-descriptions v-if="detail" :column="2" border size="small">
+        <el-descriptions-item label="名称">{{ detail.name }}</el-descriptions-item>
+        <el-descriptions-item label="显示名">{{ detail.display_name || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="来源">
+          <el-tag :type="detail.source === 'code' ? 'info' : 'success'" size="small">
+            {{ detail.source === 'code' ? '代码' : '动态' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="启用">
+          <el-tag :type="detail.enabled ? 'success' : 'danger'" size="small">{{ detail.enabled ? '启用' : '禁用' }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="模型">{{ detail.model || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="知识库">
+          <el-tag v-if="detail.search_all_knowledge_bases" size="small" style="margin-right: 4px">全部库</el-tag>
+          <el-tag v-if="detail.rag_namespace" size="small" style="margin-right: 4px">{{ detail.rag_namespace }}</el-tag>
+          <el-tag
+            v-for="ns in detail.rag_namespaces"
+            :key="ns"
+            size="small"
+            type="info"
+            style="margin-right: 4px"
+          >{{ ns }}</el-tag>
+          <span
+            v-if="!detail.search_all_knowledge_bases && !detail.rag_namespace && (!detail.rag_namespaces || !detail.rag_namespaces.length)"
+            class="muted"
+          >—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="描述" :span="2">{{ detail.description || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="MCP 工具" :span="2">
+          <el-tag v-for="t in detail.mcp_tools" :key="t" size="small" style="margin-right: 4px">{{ t }}</el-tag>
+          <span v-if="!detail.mcp_tools || !detail.mcp_tools.length" class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="自定义工具" :span="2">
+          <el-tag v-for="t in detail.custom_tool_names" :key="t" size="small" type="success" style="margin-right: 4px">{{ t }}</el-tag>
+          <span v-if="!detail.custom_tool_names || !detail.custom_tool_names.length" class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item v-if="detail.registered_tools" label="注册工具" :span="2">
+          <el-tag v-for="t in detail.registered_tools" :key="t" size="small" type="info" style="margin-right: 4px">{{ t }}</el-tag>
+          <span v-if="!detail.registered_tools.length" class="muted">—</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="System Prompt" :span="2">
+          <pre v-if="detail.system_prompt" class="prompt-pre">{{ detail.system_prompt }}</pre>
+          <span v-else class="muted">—</span>
+        </el-descriptions-item>
+      </el-descriptions>
+    </div>
+    <template #footer>
+      <el-button @click="detailVisible = false">关闭</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -191,6 +244,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   apiCreateAgent,
   apiDeleteAgent,
+  apiGetAgentDetail,
   apiListAgents,
   apiListBases,
   apiListCustomTools,
@@ -212,6 +266,10 @@ const registeredCustomTools = computed(() => customTools.value.filter((t) => t.r
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const editing = ref(false)
+
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detail = ref<AgentInfo | null>(null)
 
 const emptyForm = (): DynamicAgentPayload => ({
   name: '',
@@ -253,6 +311,19 @@ async function toggle(row: AgentInfo) {
   } catch (e: any) {
     row.enabled = !row.enabled
     ElMessage.error(e?.message || '操作失败')
+  }
+}
+
+async function openDetail(row: AgentInfo) {
+  detail.value = row
+  detailVisible.value = true
+  detailLoading.value = true
+  try {
+    detail.value = await apiGetAgentDetail(row.name)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '获取详情失败，已展示列表数据')
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -345,5 +416,17 @@ onMounted(load)
   line-height: 1;
   cursor: help;
   vertical-align: middle;
+}
+.prompt-pre {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 8px 12px;
 }
 </style>

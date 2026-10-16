@@ -172,6 +172,7 @@ export interface AgentInfo {
   rag_namespaces?: string[]
   mcp_tools: string[]
   custom_tool_names?: string[]
+  registered_tools?: string[]
   enabled: boolean
   display_name?: string
   source: 'code' | 'dynamic'
