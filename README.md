@@ -1,7 +1,7 @@
 # smart-cs — 智能客服系统
 
 > 基于 **HelloAgents + FastAPI + Vue 3** 的多 Agent 智能客服系统。
-> 完整开发规范见 [docs/spec.md](docs/spec.md)（Spec v1.3，本仓库唯一真相源）。
+> 完整开发规范见 [docs/spec.md](docs/spec.md)（Spec v2.0，与代码实现同步）；各已完成功能的详解见 [docs/updates/](docs/updates/README.md)。
 
 ## 架构一览
 
@@ -28,7 +28,7 @@ admin-frontend/  Vue 3 管理后台（Agent/知识库/工单/MCP/记忆/登录�
 data/            RAGTool 知识库根目录（cs_default / cs_order / cs_after_sales）
 backend/data/    运行时数据：文档归档 doc_archives/、知识库 knowledge_bases/（已 .gitignore 排除，勿入库）
 scripts/         init_db.sql（全量 schema）/ init_db.sh（本机一键建库）/ seed_data.py（种子定义，幂等）/ rebuild_and_seed.py（开发阶段全量重建+灌种子）/ seed_memory_via_chat.py（模拟对话造记忆测试数据）
-docs/            spec.md（规范）/ api.md（接口速查）/ runbook.md（运维手册）
+docs/            spec.md（规范 v2.0）/ api.md（接口速查）/ runbook.md（运维手册）/ updates/（U01~U09 各功能详解文档）
 ```
 
 ## 快速开始
@@ -136,6 +136,7 @@ npm test              # vitest
 
 ## 文档
 
-- [开发规范 Spec v1.3](docs/spec.md)
+- [开发规范 Spec v2.0](docs/spec.md)
+- [功能更新详解（U01~U09）](docs/updates/README.md)
 - [API 速查](docs/api.md)
 - [运维手册](docs/runbook.md)

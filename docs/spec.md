@@ -1,12 +1,33 @@
-# 智能客服系统 — 可执行开发规范（Spec v1.3）
+# 智能客服系统 — 可执行开发规范（Spec v2.0）
 
-> **文档版本**：v1.3
-> **状态**：Approved for Implementation
+> **文档版本**：v2.0
+> **状态**：与代码实现同步（Implementation-synced）
 > **核心变更**：
 > - Agent / MemoryTool / RAGTool 全部基于 **HelloAgents** 框架原生 API
 > - 多 Agent 采用 **业务独立开发 + 路由 Agent 分发** 架构
+> - **v2.0**：随迭代落地对 v1.x 设计做就地校正 —— 依赖版本、Schema（人员/客户分表、tickets、request_traces、knowledge_bases、动态 Agent）、异步工具执行、多意图路由、链路追踪、知识库管理、双入口鉴权等
 > **适用框架**：HelloAgents + FastAPI + Vue 3
 > **目标读者**：后端工程师、前端工程师、测试工程师
+
+---
+
+## 0. 实现现状总览（v2.0）
+
+> 本 Spec 是**可执行开发规范（SSOT）**；下文各章已就地校正为当前代码的真实实现。每一处相对 v1.x 的**增量特性**另有独立详解文档（含背景、设计、关键实现、契约、配置、验证与边界），收录于 [`docs/updates/`](updates/README.md)。二者冲突时，以本目录与代码为准。
+
+| 更新 | 主题 | 影响章节 | 详解 |
+|------|------|----------|------|
+| U01 | HelloAgents 0.2.9 集成与依赖适配（`qdrant-client<1.10`、`bcrypt==4.0.1`、`BaseTool` 适配层） | §2、§6 | [↗](updates/01-helloagents-integration.md) |
+| U02 | 多意图路由与追问续接 | §7、§10 | [↗](updates/02-multi-intent-routing.md) |
+| U03 | 动态 Agent 混合注册与路由实时化 | §4、§7 | [↗](updates/03-dynamic-agents.md) |
+| U04 | 请求链路追踪（request_traces） | §4、§14 | [↗](updates/04-request-tracing.md) |
+| U05 | stdio 型本地 MCP 演示服务与固定数据 | §6、§12 | [↗](updates/05-stdio-mcp-demo.md) |
+| U06 | 工单独立表（tickets）与跨轮记忆 | §4、§8 | [↗](updates/06-tickets-cross-round-memory.md) |
+| U07 | 人员/客户分表（staff_users / customer_users）与双入口鉴权 | §4、§12 | [↗](updates/07-staff-customer-auth-split.md) |
+| U08 | 知识库管理增强（namespace CRUD / 归档下载 / 手工 FAQ / 分块浏览 / 高级检索） | §4、§9 | [↗](updates/08-knowledge-base-admin.md) |
+| U09 | 异步自定义工具执行机制（协程工具回投主 loop 真正落地） | §6、§7 | [↗](updates/09-async-tool-execution.md) |
+
+> 接口清单以 [`api.md`](api.md) 为准（已同步全部实际端点与 SSE 事件）；部署/运维以 [`runbook.md`](runbook.md) 为准。
 
 ---
 
@@ -103,69 +124,79 @@
 ### 2.1 版本要求（强制）
 
 ```yaml
-python: ">=3.11,<3.13"
+python: ">=3.11,<3.13"        # 本仓库 backend/.venv 由 uv 管理，实测 3.12
 node: ">=18.18.0"
-pnpm: ">=8.0.0"
-postgres: "15.x (含 pgvector 0.5+)"
-redis: "7.x"
+npm / pnpm: 任一即可（README 以 npm 为例）
+postgres: "14+（无需 pgvector / uuid-ossp；RAG 向量不落 PG）"
+redis: "7.x"                  # 工作记忆 / 缓存
+qdrant: "向量库（记忆 + RAG 真相）；qdrant-client 需 <1.10"
+neo4j: "可选（仅启用 semantic 语义记忆时必需）"
+hello-agents: ">=0.2.4,<=0.2.9"   # 公开版，[memory,protocols] 扩展
 ```
 
-### 2.2 后端依赖（requirements.txt）
+> 相比 v1.x：不再要求 PostgreSQL 15 / pgvector（向量存 Qdrant）；默认 UUID 用 PG13+ 内置 `gen_random_uuid()`，不依赖 `uuid-ossp`。
+
+### 2.2 后端依赖（requirements.txt，节选）
+
+以下为当前 `backend/requirements.txt` 的真实约束，关键**钉版原因**必须遵守（否则运行期会碎）：
 
 ```txt
-# Web 框架
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-python-multipart==0.0.9
+# ============ HelloAgents 框架（核心） ============
+# [memory,protocols] 扩展：memory→四层记忆（episodic 依赖 Qdrant、semantic 依赖 Neo4j/Spacy）；
+# protocols→MCPTool / 协议适配（a2a-sdk）。fastapi/httpx 用下限(>=)而非钉死，避免 a2a-sdk 拉高版本时冲突。
+hello-agents[memory,protocols]>=0.2.4,<=0.2.9
 
-# 数据层
+# ============ 向量库 / Embedding 运行时硬约束 ============
+# hello-agents 0.2.9 的 qdrant_store 仍 import SearchRequest，qdrant-client>=1.10 已移除该类（导致 QDRANT_AVAILABLE=False），故钉上界。
+qdrant-client>=1.9.0,<1.10
+# EMBED_MODEL_TYPE=dashscope 时，DashScopeEmbedding.__init__ 无条件 import dashscope SDK（即使走 REST）。
+dashscope>=1.20.0
+
+# FastAPI 与基础（下限宽松，由解析器上探兼容版）
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+httpx>=0.27.0
+aiohttp>=3.10.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.9
+loguru>=0.7.0
+structlog>=24.4.0
+fastmcp>=2.0.0
+uv>=0.8.0
+python-dateutil>=2.8.2
+huggingface_hub>=0.25.0
+
+# ============ 数据层 ============
 sqlalchemy[asyncio]==2.0.35
-asyncpg==0.29.0
+# asyncpg 0.29.x 无 cp312/cp313 预编译 wheel（需本地 MSVC），0.30.0 起提供
+asyncpg>=0.30.0,<0.31
 alembic==1.13.2
-pgvector==0.3.2
 redis==5.0.8
 
-# 校验与配置
-pydantic==2.9.2
-pydantic-settings==2.5.2
-
-# 鉴权
+# ============ 鉴权 ============
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# passlib 1.7.4 仅兼容 bcrypt<4.1；不锁会被拉入 bcrypt 5.x → hash_password 报 “72 bytes” 错
+bcrypt==4.0.1
 
-# ============ HelloAgents（核心） ============
-# HelloAgents 基于 OpenAI 原生 API，本身提供：
-#   - HelloAgentsLLM      : 统一 LLM 客户端
-#   - SimpleAgent         : 基础 Agent（ReAct 循环）
-#   - MemoryTool          : 四层记忆（working/episodic/semantic/perceptual）
-#   - RAGTool             : 知识库检索工具
-#   - ToolRegistry        : 工具注册中心
-#   - MCPTool             : MCP 适配器
-#   - BaseTool            : 自定义工具基类
-openai==1.51.0
-hello-agents==0.1.0        # 私有源或本地安装
-
-# 缓存（MemoryTool / RAGTool 工厂使用）
+# ============ 缓存 / 文档解析 / 监控 / 测试 ============
 cachetools==5.5.0
-
-# 文档解析（供 RAGTool 底层使用）
 pypdf==5.0.1
 python-docx==1.1.2
 markdown==3.7
 beautifulsoup4==4.12.3
-
-# 工具与监控
-httpx==0.27.2
+markitdown[pdf,docx]>=0.1.5     # RAG pipeline 的 PDF/DOCX 增强转换
 tenacity==9.0.0
 prometheus-client==0.21.0
-structlog==24.4.0
-
-# 测试
 pytest==8.3.3
 pytest-asyncio==0.24.0
 pytest-cov==6.0.0
 testcontainers==4.8.2
 ```
+
+> v1.x 列的 `pgvector==0.3.2` 仍保留在依赖中（供部分历史代码导入），但 **RAG/记忆向量实际都存 Qdrant**，PG 无 vector 列；`openai==1.51.0` 已不再直接声明（由 hello-agents 间接依赖）。
 
 ### 2.3 前端依赖（package.json 关键项）
 
@@ -286,12 +317,17 @@ smart-cs/
 │   │   │       ├── sessions.py
 │   │   │       ├── memory.py
 │   │   │       ├── knowledge.py
-│   │   │       └── admin.py
+│   │   │       ├── admin.py              # Agent/MCP 管理
+│   │   │       ├── admin_inquiries.py    # 跨客户咨询 + CSV 导出
+│   │   │       ├── admin_tickets.py      # 工单增改查
+│   │   │       └── admin_traces.py       # 请求链路（只读）
 │   │   ├── core/
 │   │   │   ├── config.py
 │   │   │   ├── security.py
 │   │   │   ├── logging.py
 │   │   │   ├── exceptions.py
+│   │   │   ├── database.py
+│   │   │   ├── tracing.py               # request_traces 采集（旁路）
 │   │   │   ├── context_engineer.py
 │   │   │   ├── bootstrap.py
 │   │   │   └── constants.py
@@ -319,6 +355,8 @@ smart-cs/
 │   │   │   ├── mcp_loader.py
 │   │   │   └── custom/
 │   │   │       ├── __init__.py
+│   │   │       ├── base.py                # BaseTool 适配层（async run(**kwargs)）
+│   │   │       ├── mock_data.py           # 固定数据集（进程内工具与 MCP 服务共用）
 │   │   │       ├── order_tool.py
 │   │   │       ├── logistics_tool.py
 │   │   │       ├── ticket_tool.py
@@ -329,16 +367,20 @@ smart-cs/
 │   │   │   ├── chat_service.py
 │   │   │   ├── memory_service.py
 │   │   │   ├── rag_service.py
+│   │   │   ├── qdrant_helper.py          # 直连 Qdrant：分块浏览/按源删除
 │   │   │   └── document_service.py
 │   │   └── utils/
 │   │       ├── sse.py
 │   │       └── text.py
+│   ├── mcp_servers/              # 本地 FastMCP（stdio）演示服务
+│   │   ├── logistics_server.py
+│   │   └── refund_server.py
 │   ├── alembic/
 │   ├── tests/
 │   ├── pyproject.toml
 │   ├── requirements.txt
 │   └── .env.example
-├── frontend/
+├── frontend/                     # Vue3 客户对话端（端口 5173）
 │   ├── src/
 │   │   ├── main.ts
 │   │   ├── App.vue
@@ -347,14 +389,19 @@ smart-cs/
 │   │   ├── router/
 │   │   ├── views/
 │   │   │   ├── customer/
-│   │   │   ├── knowledge/
-│   │   │   ├── memory/
-│   │   │   └── admin/
+│   │   │   └── LoginView.vue
 │   │   ├── components/
 │   │   └── types/
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── tsconfig.json
+├── admin-frontend/               # Vue3 管理后台（独立工程，端口 5174）
+│   ├── src/
+│   │   ├── api/  components/  layouts/  router/  stores/  types/
+│   │   └── views/               # AgentList/KnowledgeBaseView/TicketsView/
+│   │                             # TracesView/MemoryView/InquiriesView/McpServersView/Dashboard
+│   ├── package.json
+│   └── vite.config.ts
 ├── data/
 │   └── knowledge_bases/
 │       ├── cs_default/
@@ -363,10 +410,17 @@ smart-cs/
 ├── docs/
 │   ├── spec.md
 │   ├── api.md
-│   └── runbook.md
+│   ├── runbook.md
+│   └── updates/                 # U01~U09 各已完成功能的详解文档 + 索引 README
 ├── scripts/
 │   ├── init_db.sh
-│   └── seed_data.py
+│   ├── init_db.sql
+│   ├── seed_data.py
+│   ├── rebuild_and_seed.py
+│   ├── seed_memory_via_chat.py
+│   ├── cleanup_traces.py
+│   ├── start_all.ps1
+│   └── stop_all.ps1
 └── README.md
 ```
 
@@ -386,42 +440,54 @@ smart-cs/
 
 ## 4. 数据库 Schema 规范
 
-> 说明：HelloAgents 的 `MemoryTool` 与 `RAGTool` 自带本地持久化。本系统在其上叠加 PostgreSQL 作为**业务级归档与审计**。`MemoryTool` / `RAGTool` 是**运行时的唯一入口**，DB 表用于历史回溯、后台管理与统计。
+> 说明：HelloAgents 的 `MemoryTool` 与 `RAGTool` 自带持久化，**运行时真相在 Qdrant（向量）/ Neo4j（语义，若启用）**。本系统在其上叠加 PostgreSQL 作为**业务级归档、审计与后台管理**。`memories` / `documents` 是归档镜像，非运行时检索入口。
+>
+> **v2.0 关键变更**：① `users` 拆为 `staff_users`（admin/agent）与 `customer_users`（可自助注册）（[U07](updates/07-staff-customer-auth-split.md)）；② 新增 `tickets` 结构化工单表（[U06](updates/06-tickets-cross-round-memory.md)）；③ 新增 `request_traces` 请求链路表（[U04](updates/04-request-tracing.md)）；④ 新增 `knowledge_bases` 命名空间主表，`documents` 加 `kind`（[U08](updates/08-knowledge-base-admin.md)）；⑤ `agents` 支持动态 Agent 列（[U03](updates/03-dynamic-agents.md)）；⑥ UUID 统一用内置 `gen_random_uuid()`，不再依赖 `uuid-ossp`/`vector`。
 
-### 4.1 初始化 SQL（`scripts/init_db.sql`）
+### 4.1 初始化 SQL（`scripts/init_db.sql`，节选）
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "vector";
+-- 默认 UUID 用 PG13+ 内置 gen_random_uuid()，无需 uuid-ossp；RAG 向量存 Qdrant，不依赖 pgvector。
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
--- ========== 用户 ==========
-CREATE TABLE users (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+-- ========== 后台人员（管理员 / 客服坐席） ==========
+CREATE TABLE staff_users (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username        VARCHAR(64) UNIQUE NOT NULL,
-    email           VARCHAR(128) UNIQUE,
     password_hash   VARCHAR(256) NOT NULL,
-    role            VARCHAR(16) NOT NULL DEFAULT 'customer'
-                    CHECK (role IN ('customer','agent','admin')),
+    role            VARCHAR(16) NOT NULL DEFAULT 'agent'
+                    CHECK (role IN ('agent','admin')),
     display_name    VARCHAR(64),
     metadata        JSONB DEFAULT '{}'::jsonb,
     is_active       BOOLEAN DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_staff_users_role ON staff_users(role);
 
--- ========== 会话 ==========
+-- ========== 客户账号（可自助注册） ==========
+CREATE TABLE customer_users (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username        VARCHAR(64) UNIQUE NOT NULL,
+    password_hash   VARCHAR(256) NOT NULL,
+    display_name    VARCHAR(64),
+    metadata        JSONB DEFAULT '{}'::jsonb,
+    is_active       BOOLEAN DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ========== 会话（user_id → customer_users；assigned_agent → staff_users） ==========
 CREATE TABLE sessions (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES customer_users(id) ON DELETE CASCADE,
     title           VARCHAR(128) DEFAULT '新对话',
     status          VARCHAR(16) NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active','closed','handover')),
-    assigned_agent  UUID REFERENCES users(id),
+    assigned_agent  UUID REFERENCES staff_users(id),
     memory_tool_uid VARCHAR(64),
     rag_namespace   VARCHAR(64),
-    last_route_to   VARCHAR(64),
+    last_route_to   VARCHAR(64),        -- 上一轮路由 Agent，供追问续接
     metadata        JSONB DEFAULT '{}'::jsonb,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -430,7 +496,7 @@ CREATE INDEX idx_sessions_user_created ON sessions(user_id, created_at DESC);
 
 -- ========== 消息 ==========
 CREATE TABLE messages (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id      UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     role            VARCHAR(16) NOT NULL
                     CHECK (role IN ('user','assistant','system','tool')),
@@ -445,10 +511,10 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_session_created ON messages(session_id, created_at ASC);
 
--- ========== 记忆归档（MemoryTool 的镜像） ==========
+-- ========== 记忆归档（MemoryTool 的镜像，user_id → customer_users） ==========
 CREATE TABLE memories (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES customer_users(id) ON DELETE CASCADE,
     memory_uid      VARCHAR(64) NOT NULL,
     session_id      UUID REFERENCES sessions(id) ON DELETE SET NULL,
     type            VARCHAR(16) NOT NULL
@@ -467,41 +533,60 @@ CREATE INDEX idx_memories_user_type ON memories(user_id, type);
 CREATE INDEX idx_memories_importance ON memories(importance DESC);
 CREATE INDEX idx_memories_content_trgm ON memories USING gin (content gin_trgm_ops);
 
--- ========== 知识库文档归档 ==========
+-- ========== 知识库命名空间（管理后台维护，namespace 主键） ==========
+CREATE TABLE knowledge_bases (
+    namespace     VARCHAR(64) PRIMARY KEY,
+    display_name  VARCHAR(128) NOT NULL,
+    description   TEXT,
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ========== 知识库文档归档（kind: upload|manual） ==========
 CREATE TABLE documents (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title           VARCHAR(256) NOT NULL,
-    source          VARCHAR(512),
+    source          VARCHAR(512),          -- 向量 source_path（Qdrant 侧按此删除）
     content_type    VARCHAR(64),
     size_bytes      BIGINT,
+    kind            VARCHAR(16) NOT NULL DEFAULT 'upload'
+                    CHECK (kind IN ('upload','manual')),
     status          VARCHAR(16) NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','processing','ready','failed')),
     error_message   TEXT,
     rag_namespace   VARCHAR(64) NOT NULL,
     chunk_count     INT NOT NULL DEFAULT 0,
-    uploaded_by     UUID REFERENCES users(id),
-    metadata        JSONB DEFAULT '{}'::jsonb,
+    uploaded_by     UUID REFERENCES staff_users(id),
+    metadata        JSONB DEFAULT '{}'::jsonb,   -- 存 archive_path / original_filename（原文归档）
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_documents_status ON documents(status);
 CREATE INDEX idx_documents_namespace ON documents(rag_namespace);
+CREATE INDEX idx_documents_kind ON documents(kind);
 
--- ========== Agent 元数据注册（仅管理用途） ==========
+-- ========== Agent 元数据注册（代码托管 code + 动态后台 dynamic 混合） ==========
 CREATE TABLE agents (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(64) UNIQUE NOT NULL,
     display_name    VARCHAR(128),
     description     TEXT,
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     sort_order      INT DEFAULT 0,
+    source          VARCHAR(16) NOT NULL DEFAULT 'code',   -- code | dynamic
+    system_prompt   TEXT,                                   -- dynamic 必填
+    llm_model       VARCHAR(128) NOT NULL DEFAULT '',       -- 空则用默认 LLM_MODEL_ID
+    rag_namespace   VARCHAR(64),
+    search_all_knowledge_bases BOOLEAN NOT NULL DEFAULT FALSE,  -- 通用问答覆盖全部启用知识库
+    mcp_tool_names  JSONB NOT NULL DEFAULT '[]'::jsonb,     -- 动态 Agent ↔ MCP 工具绑定
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ========== 工具注册 ==========
+-- ========== 工具注册（含 MCP 服务 config：transport/endpoint|command/args/timeout） ==========
 CREATE TABLE tools (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(64) UNIQUE NOT NULL,
     type            VARCHAR(16) NOT NULL CHECK (type IN ('mcp','custom','builtin')),
     schema          JSONB NOT NULL,
@@ -525,13 +610,72 @@ CREATE TABLE audit_logs (
 );
 CREATE INDEX idx_audit_user_created ON audit_logs(user_id, created_at DESC);
 CREATE INDEX idx_audit_action ON audit_logs(action);
+
+-- ========== 客诉工单（结构化增改查，取代此前埋在 audit_logs.payload 的工单记录） ==========
+CREATE TABLE IF NOT EXISTS tickets (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_no   VARCHAR(32) UNIQUE NOT NULL,       -- TK-XXXXXXXX，业务与后台都以它回查
+    user_id     UUID,                              -- UUID 但不建外键（示例客户名非 UUID 会降级为 NULL）
+    session_id  UUID,
+    category    VARCHAR(32) NOT NULL DEFAULT 'general',
+    urgency     VARCHAR(16) NOT NULL DEFAULT 'medium' CHECK (urgency IN ('low','medium','high')),
+    status      VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_progress','escalated','resolved','closed')),
+    title       VARCHAR(256),
+    content     TEXT NOT NULL DEFAULT '',
+    updates     JSONB NOT NULL DEFAULT '[]'::jsonb, -- 追加式补录历史（每项带 UTC 时间戳）
+    metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_status_created ON tickets(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tickets_user_created ON tickets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tickets_session ON tickets(session_id);
+
+-- ========== 请求链路（一轮对话一行，明细存 spans JSONB） ==========
+CREATE TABLE IF NOT EXISTS request_traces (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trace_id            VARCHAR(64) NOT NULL,       -- 与 structlog / X-Trace-Id 一致
+    session_id          UUID,
+    user_id             UUID,
+    user_message_id     UUID,
+    assistant_message_id UUID,
+    intent_count        INT NOT NULL DEFAULT 0,
+    agent_names         TEXT[] DEFAULT '{}',         -- 高频过滤维度拍平为数组列，GIN 命中
+    agent_sources       TEXT[] DEFAULT '{}',
+    llm_models          TEXT[] DEFAULT '{}',
+    mcp_server_names    TEXT[] DEFAULT '{}',
+    tool_names          TEXT[] DEFAULT '{}',
+    rag_namespaces      TEXT[] DEFAULT '{}',
+    memory_hit_count    INT NOT NULL DEFAULT 0,
+    rag_chunk_count     INT NOT NULL DEFAULT 0,
+    tool_call_count     INT NOT NULL DEFAULT 0,
+    tool_error_count    INT NOT NULL DEFAULT 0,
+    confidence          REAL,
+    outcome             VARCHAR(16),                 -- answered | handover | error
+    handover_reason     VARCHAR(32),
+    error_code          INT,
+    error_message       TEXT,
+    ttft_ms             INT,
+    total_latency_ms    INT,
+    response_chars      INT NOT NULL DEFAULT 0,
+    spans               JSONB NOT NULL DEFAULT '[]'::jsonb,  -- 时间线明细（router.llm/agent.build/tool.call/...）
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_traces_trace_id ON request_traces(trace_id);
+CREATE INDEX IF NOT EXISTS idx_traces_assistant_msg ON request_traces(assistant_message_id);
+CREATE INDEX IF NOT EXISTS idx_traces_session_created ON request_traces(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_traces_user_created ON request_traces(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_traces_outcome_created ON request_traces(outcome, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_traces_agents ON request_traces USING gin (agent_names);
+CREATE INDEX IF NOT EXISTS idx_traces_tools ON request_traces USING gin (tool_names);
+CREATE INDEX IF NOT EXISTS idx_traces_mcp ON request_traces USING gin (mcp_server_names);
 ```
 
-### 4.2 迁移规范（Alembic）
+### 4.2 迁移与 Schema 演进
 
-- 每次 Schema 变更必须生成迁移脚本
-- 迁移脚本命名：`{revision}_{short_description}.py`
-- 提交前必须通过 `alembic upgrade head` 与 `alembic downgrade -1` 双向测试
+- **本项目处开发阶段，schema 频繁变动**（如 `users` 拆分、工单迁表、链路表新增）。改 ORM 模型后**无需手写增量迁移**，直接对目标库全量重建 + 灌种子（⚠️ 清空业务数据，仅限开发）：`python scripts/rebuild_and_seed.py`（DROP 旧表含遗留 `users` → `create_all` 建表 → seed；单往返 simple query 适配云库代理）。
+- `init_db.sql` 与 ORM（`models/entities.py`）保持一致；新增列/表在 SQL 里用 `CREATE TABLE IF NOT EXISTS` 便于既有库增量补建。
+- 进入稳定期后再引入 Alembic：`alembic upgrade head` / `alembic downgrade -1`，提交前双向测试。
 
 ---
 
@@ -572,7 +716,9 @@ class PaginatedData(BaseModel, Generic[T]):
 
 ### 5.3 鉴权接口
 
-#### `POST /api/v1/auth/login`
+> 人员/客户分表后登录入口分离（[U07](updates/07-staff-customer-auth-split.md)）：后台 `POST /auth/staff/login`（读 `staff_users`）、客户 `POST /auth/customer/login`（读 `customer_users`，账号不存在返回 `2004`）、客户自助注册 `POST /auth/customer/register`。以下以 `POST /auth/customer/login` 为例：
+
+#### `POST /api/v1/auth/customer/login`
 
 ```json
 // 请求
@@ -616,13 +762,15 @@ class PaginatedData(BaseModel, Generic[T]):
 | event type | data 结构 | 说明 |
 |-----------|-----------|------|
 | `session` | `{"session_id":"uuid"}` | 首帧返回会话 ID |
-| `route` | `{"agent_name":"order_service","confidence":0.92}` | 路由结果 |
-| `text` | `{"content":"您"}` | 文本增量 |
+| `route` | `{"agent_name","confidence","reason","intents":[...],"intent_total"}` | 路由结果；`agent_name/confidence/reason` 为主意图，`intents` 为按主次排序的意图清单（最多 `ROUTER_MAX_INTENTS` 个）（[U02](updates/02-multi-intent-routing.md)） |
+| `agent_start` | `{"agent_name","intent_index","intent_total","confidence","reason"}` | 一个意图分支开始应答 |
+| `agent_end` | `{"agent_name","intent_index","intent_total"}` | 该意图分支应答结束 |
+| `text` | `{"content":"您"}` | 文本增量（多意图时次要分支前先下发 `\n\n---\n\n` 分块分隔） |
 | `tool_call` | `{"id":"call_1","name":"query_order","args":{...}}` | 工具调用开始 |
-| `tool_result` | `{"id":"call_1","name":"query_order","result":{...},"error":null}` | 工具返回 |
+| `tool_result` | `{"id":"call_1","name":"query_order","result":{...},"error":null}` | 工具返回（[U09](updates/09-async-tool-execution.md) 真实执行） |
 | `memory_write` | `{"type":"episodic","id":"uuid"}` | 记忆写入通知 |
-| `handover` | `{"reason":"low_confidence","agent_id":"uuid"}` | 转人工 |
-| `done` | `{"message_id":"uuid","usage":{...}}` | 结束 |
+| `handover` | `{"reason":"low_confidence","confidence":0.3}` | 转人工 |
+| `done` | `{"message_id":"uuid","trace_id":"..."}` | 结束；`trace_id` 可在后台链路页定位本轮（[U04](updates/04-request-tracing.md)） |
 | `error` | `{"code":5001,"message":"..."}` | 错误 |
 
 **示例：**
@@ -1897,6 +2045,18 @@ export const useChatStore = defineStore('chat', () => {
 
 ## 12. 鉴权与安全规范
 
+### 12.0 双入口鉴权（人员/客户分表，[U07](updates/07-staff-customer-auth-split.md)）
+
+`users` 已拆为 `staff_users`（`agent`/`admin`）与 `customer_users`（可自助注册），登录入口分离：
+
+| 入口 | 端点 | 读表 | 说明 |
+|------|------|------|------|
+| 后台人员 | `POST /auth/staff/login` | `staff_users` | admin-frontend 使用 |
+| 客户 | `POST /auth/customer/login` | `customer_users` | 账号不存在返回 `2004`，引导注册 |
+| 客户自助注册 | `POST /auth/customer/register` | `customer_users` | 成功即下发 Token 自动登录 |
+
+Token `sub`=用户ID、`role`∈`{customer,agent,admin}`；`/auth/refresh` 按 `role` 回查对应表。依赖注入：`current_customer`（客户端，仅本人）、`require_staff`（agent+admin）、`require_admin`。
+
 ### 12.1 JWT
 
 - 算法：HS256
@@ -1908,12 +2068,14 @@ export const useChatStore = defineStore('chat', () => {
 
 | 资源 | customer | agent | admin |
 |------|----------|-------|-------|
-| 自己的会话 | RW | RW | RW |
-| 他人会话 | - | R | RW |
-| 自己的记忆 | R | R | R |
+| 自己的会话 | RW | - | - |
+| 他人会话（跨客户咨询） | - | R | RW |
+| 自己的记忆 | R | - | - |
 | 他人记忆 | - | RW | RW |
-| 知识库 | - | R | RW |
-| Agent 管理 | - | - | RW |
+| 知识库 / 文档 | - | R | RW |
+| 工单（tickets） | - | R/W 流转 | R/W 流转 |
+| 请求链路（traces） | - | R | R |
+| Agent / MCP 管理（写） | - | - | RW |
 
 ### 12.3 输入输出安全
 
@@ -1952,7 +2114,9 @@ SENSITIVE_PATTERNS = [
 | 2001 | 401 | 未认证 |
 | 2002 | 401 | Token 过期 |
 | 2003 | 403 | 无权限 |
+| 2004 | 404 | 账号不存在，请先注册（客户登录引导） |
 | 3001 | 404 | 资源不存在 |
+| 3002 | 409 | 资源冲突（重名 / 仍被引用） |
 | 4001 | 400 | 工具参数校验失败 |
 | 4003 | 400 | 输入包含不安全内容 |
 | 4029 | 429 | 请求过于频繁 |
@@ -2226,8 +2390,12 @@ async for event in agent.stream_run("用户问题"):
 
 ### 17.2 核心 API 速查表
 
+> 本表仅为概览；**完整、准确的端点清单以 [`api.md`](api.md) 为准**。
+
 ```
-POST   /api/v1/auth/login
+POST   /api/v1/auth/staff/login        # 后台人员登录
+POST   /api/v1/auth/customer/login     # 客户登录（不存在→2004）
+POST   /api/v1/auth/customer/register  # 客户自助注册
 POST   /api/v1/auth/refresh
 GET    /api/v1/auth/me
 
@@ -2241,13 +2409,33 @@ GET    /api/v1/memory/me
 GET    /api/v1/memory/users/{user_id}
 POST   /api/v1/memory/search
 
+# 知识库：命名空间 CRUD / 文档 / 手工条目 / 分块 / 检索
+GET    /api/v1/knowledge/bases
+POST   /api/v1/knowledge/bases
 POST   /api/v1/knowledge/documents
+GET    /api/v1/knowledge/documents/{id}/raw
+POST   /api/v1/knowledge/entries
+GET    /api/v1/knowledge/chunks
 POST   /api/v1/knowledge/search
 
+# Agent（代码+动态混合）/ MCP
 GET    /api/v1/admin/agents
+POST   /api/v1/admin/agents               # 创建动态 Agent
+PUT    /api/v1/admin/agents/{name}
+DELETE /api/v1/admin/agents/{name}
 PATCH  /api/v1/admin/agents/{name}/toggle
+GET    /api/v1/admin/mcp-servers
+POST   /api/v1/admin/mcp-servers
+POST   /api/v1/admin/mcp-servers/test
 GET    /api/v1/admin/tools
 GET    /api/v1/admin/metrics
+
+# 工单 / 跨客户咨询 / 链路
+GET    /api/v1/admin/tickets
+PATCH  /api/v1/admin/tickets/{ticket_no}/status
+GET    /api/v1/admin/inquiries/sessions
+GET    /api/v1/admin/traces
+GET    /api/v1/admin/traces/{trace_ref}
 
 GET    /health
 GET    /metrics
@@ -2258,13 +2446,15 @@ GET    /metrics
 | event | 触发时机 | 必带字段 |
 |-------|---------|---------|
 | `session` | 流开始 | session_id |
-| `route` | 路由完成 | agent_name, confidence |
+| `route` | 路由完成 | agent_name, confidence, reason, intents, intent_total |
+| `agent_start` | 意图分支开始 | agent_name, intent_index, intent_total, confidence, reason |
+| `agent_end` | 意图分支结束 | agent_name, intent_index, intent_total |
 | `text` | 文本增量 | content |
 | `tool_call` | 工具调用开始 | id, name, args |
 | `tool_result` | 工具返回 | id, name, result, error |
 | `memory_write` | 记忆写入 | type, id |
-| `handover` | 转人工 | reason, agent_id |
-| `done` | 流结束 | message_id, usage |
+| `handover` | 转人工 | reason, confidence |
+| `done` | 流结束 | message_id, trace_id |
 | `error` | 异常 | code, message |
 
 ### 17.4 核心组件清单
