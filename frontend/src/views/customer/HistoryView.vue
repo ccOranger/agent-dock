@@ -9,14 +9,17 @@
       </template>
       <el-table :data="sessions" v-loading="loading">
         <el-table-column prop="title" label="标题" />
-        <el-table-column prop="status" label="状态" width="100" />
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">{{ STATUS_LABELS[row.status] || row.status }}</template>
+        </el-table-column>
         <el-table-column prop="last_route_to" label="最近路由" width="150" />
         <el-table-column label="创建时间" width="180">
           <template #default="{ row }">{{ dayjs(row.created_at).format('YYYY-MM-DD HH:mm:ss') }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="160">
+        <el-table-column label="操作" width="220">
           <template #default="{ row }">
             <el-button size="small" @click="viewMessages(row.id)">查看</el-button>
+            <el-button v-if="row.status === 'active'" size="small" type="warning" plain @click="close(row.id)">结束</el-button>
             <el-button size="small" type="danger" plain @click="remove(row.id)">删除</el-button>
           </template>
         </el-table-column>
@@ -43,8 +46,8 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
-import { ElMessageBox } from 'element-plus'
-import { apiDeleteSession, apiListSessions, apiSessionMessages } from '@/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { apiCloseSession, apiDeleteSession, apiListSessions, apiSessionMessages } from '@/api'
 import type { Message, SessionInfo } from '@/types'
 import MessageBubble from '@/components/MessageBubble.vue'
 
@@ -76,6 +79,15 @@ async function viewMessages(id: string) {
 async function remove(id: string) {
   await ElMessageBox.confirm('确认删除该会话？', '提示', { type: 'warning' })
   await apiDeleteSession(id)
+  load()
+}
+
+const STATUS_LABELS: Record<string, string> = { active: '进行中', closed: '已结束', handover: '转人工' }
+
+async function close(id: string) {
+  await ElMessageBox.confirm('确认结束该会话？短期记忆将归档为长期记忆。', '提示', { type: 'warning' })
+  await apiCloseSession(id)
+  ElMessage.success('会话已结束')
   load()
 }
 

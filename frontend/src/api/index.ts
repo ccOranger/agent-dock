@@ -42,6 +42,9 @@ export const apiSessionMessages = (sessionId: string, page = 1, pageSize = 50) =
 
 export const apiDeleteSession = (sessionId: string) => http.delete(`/sessions/${sessionId}`)
 
+// 结束会话：后端触发该会话 working 记忆全量晋升为长期记忆（spec 8.6）
+export const apiCloseSession = (sessionId: string) => http.patch(`/sessions/${sessionId}`, { status: 'closed' })
+
 // ===== Memory =====
 export const apiMyMemories = (type?: string) =>
   unwrap(http.get<never, { data: { data: MemoryItem[] } }>('/memory/me', { params: { type } }))

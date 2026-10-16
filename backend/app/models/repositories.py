@@ -1,8 +1,11 @@
 """仓储层：对 ORM 的异步封装（Repo 模式）"""
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import SessionLocal
@@ -20,6 +23,16 @@ from app.models.entities import (
     Ticket,
     ToolMeta,
 )
+
+
+@asynccontextmanager
+async def _session(db: AsyncSession | None) -> AsyncIterator[AsyncSession]:
+    """外部传入 db 则复用（事务由调用方控制），否则自开自管一个 session。"""
+    if db is not None:
+        yield db
+    else:
+        async with SessionLocal() as own:
+            yield own
 
 
 class StaffRepo:
@@ -74,16 +87,23 @@ class CustomerRepo:
 
 class SessionRepo:
     @staticmethod
-    async def get_or_create(user_id: uuid.UUID | str, session_id: uuid.UUID | str | None) -> Session:
-        async with SessionLocal() as db:
+    async def get_or_create(
+        user_id: uuid.UUID | str,
+        session_id: uuid.UUID | str | None,
+        db: AsyncSession | None = None,
+    ) -> Session:
+        own = db is None
+        async with _session(db) as s:
             if session_id:
-                sess = await db.get(Session, uuid.UUID(str(session_id)))
+                sess = await s.get(Session, uuid.UUID(str(session_id)))
                 if sess and str(sess.user_id) == str(user_id):
                     return sess
             sess = Session(user_id=uuid.UUID(str(user_id)))
-            db.add(sess)
-            await db.commit()
-            await db.refresh(sess)
+            s.add(sess)
+            await s.flush()
+            if own:
+                await s.commit()
+                await s.refresh(sess)
             return sess
 
     @staticmethod
@@ -118,14 +138,6 @@ class SessionRepo:
                 )
             ).scalars().all()
             return list(rows), total
-
-    @staticmethod
-    async def set_last_route_to(session_id: uuid.UUID | str, agent_name: str) -> None:
-        async with SessionLocal() as db:
-            sess = await db.get(Session, uuid.UUID(str(session_id)))
-            if sess:
-                sess.last_route_to = agent_name
-                await db.commit()
 
     @staticmethod
     def _apply_filters(stmt, user_id, status, last_route_to, date_from, date_to):
@@ -249,14 +261,51 @@ class MessageRepo:
         role: str,
         content: str,
         routed_to: str | None = None,
+        db: AsyncSession | None = None,
         **kw,
     ) -> Message:
-        async with SessionLocal() as db:
-            msg = Message(session_id=uuid.UUID(str(session_id)), role=role, content=content, routed_to=routed_to, **kw)
-            db.add(msg)
-            await db.commit()
-            await db.refresh(msg)
+        own = db is None
+        async with _session(db) as s:
+            msg = Message(
+                session_id=uuid.UUID(str(session_id)), role=role, content=content, routed_to=routed_to, **kw
+            )
+            s.add(msg)
+            await s.flush()
+            if own:
+                await s.commit()
+                await s.refresh(msg)
             return msg
+
+    @staticmethod
+    async def list_recent(
+        session_id: uuid.UUID | str,
+        limit: int = 50,
+        db: AsyncSession | None = None,
+    ) -> list[dict]:
+        """取最近 N 条消息（时间正序），供聊天上下文使用；不带 trace 关联，避免冗余 JOIN。"""
+        async with _session(db) as s:
+            rows = (
+                (
+                    await s.execute(
+                        select(Message)
+                        .where(Message.session_id == uuid.UUID(str(session_id)))
+                        .order_by(Message.created_at.desc())
+                        .limit(max(1, limit))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                {
+                    "id": str(r.id),
+                    "role": r.role,
+                    "content": r.content,
+                    "routed_to": r.routed_to,
+                    "created_at": r.created_at.isoformat(),
+                }
+                for r in reversed(rows)
+            ]
 
     @staticmethod
     async def list_by_session(
@@ -297,34 +346,119 @@ class MemoryRepo:
         importance: float = 0.5,
         session_id: uuid.UUID | str | None = None,
         metadata: dict | None = None,
+        db: AsyncSession | None = None,
     ) -> Memory:
+        """原子 upsert：依赖 (user_id, memory_uid) 唯一约束，避免先查后插的并发重复。"""
+        own = db is None
+        async with _session(db) as s:
+            uid = uuid.UUID(str(user_id))
+            insert_values = {
+                Memory.__table__.c.id: uuid.uuid4(),
+                Memory.__table__.c.user_id: uid,
+                Memory.__table__.c.memory_uid: memory_uid,
+                Memory.__table__.c.type: type_,
+                Memory.__table__.c.content: content,
+                Memory.__table__.c.importance: importance,
+                Memory.__table__.c.session_id: uuid.UUID(str(session_id)) if session_id else None,
+            }
+            # metadata 列名与 Table.metadata 属性同名，用 ORM 属性反查 Column 对象，规避 key 歧义
+            insert_values[Memory.metadata_.property.columns[0]] = metadata or {}
+            stmt = (
+                pg_insert(Memory)
+                .values(insert_values)
+                .on_conflict_do_update(
+                    index_elements=["user_id", "memory_uid"],
+                    set_={
+                        "content": content,
+                        "importance": importance,
+                        # 只允许 working → 更高层的单向晋升，避免重复写入把已晋升行降回 working
+                        "type": case(
+                            (Memory.__table__.c.type == "working", type_),
+                            else_=Memory.__table__.c.type,
+                        ),
+                        "updated_at": func.now(),
+                    },
+                )
+                .returning(Memory)
+            )
+            row = (await s.execute(stmt)).scalar_one()
+            if own:
+                await s.commit()
+            return row
+
+    @staticmethod
+    async def touch_access(user_id: uuid.UUID | str, prefixes: list[str]) -> list[Memory]:
+        """按内容前缀命中镜像记忆行，递增 access_count / 刷新 last_accessed_at。
+
+        召回结果是截断后的内容前缀，故用等值 OR 前缀匹配；同前缀多行会被连带计数（概率极低）。
+        返回本次被更新的行，晋升判定（type/access_count）由调用方完成。
+        """
+        touched: list[Memory] = []
+        seen: set[str] = set()
         async with SessionLocal() as db:
             uid = uuid.UUID(str(user_id))
-            existing = (
-                await db.execute(
-                    select(Memory).where(Memory.user_id == uid, Memory.memory_uid == memory_uid)
+            for prefix in prefixes:
+                if not prefix or prefix in seen:
+                    continue
+                seen.add(prefix)
+                escaped = (
+                    prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 )
-            ).scalar_one_or_none()
-            if existing:
-                existing.content = content
-                existing.importance = importance
-                existing.updated_at = datetime.now()
-                await db.commit()
-                await db.refresh(existing)
-                return existing
-            row = Memory(
-                user_id=uid,
-                memory_uid=memory_uid,
-                type=type_,
-                content=content,
-                importance=importance,
-                session_id=uuid.UUID(str(session_id)) if session_id else None,
-                metadata_=metadata or {},
-            )
-            db.add(row)
+                rows = (
+                    await db.execute(
+                        update(Memory)
+                        .where(
+                            Memory.user_id == uid,
+                            or_(Memory.content == prefix, Memory.content.like(escaped + "%")),
+                        )
+                        .values(
+                            access_count=Memory.access_count + 1,
+                            last_accessed_at=func.now(),
+                        )
+                        .returning(Memory)
+                    )
+                ).scalars().all()
+                touched.extend(rows)
             await db.commit()
-            await db.refresh(row)
-            return row
+        return touched
+
+    @staticmethod
+    async def promote_working_by_session(
+        user_id: uuid.UUID | str, session_id: uuid.UUID | str
+    ) -> list[Memory]:
+        """会话结束时把该会话未晋升的 working 行全量晋升为 episodic（spec 8.6）。
+
+        返回被晋升的行，供调用方补写 hello_agents 长期层。
+        """
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    update(Memory)
+                    .where(
+                        Memory.user_id == uuid.UUID(str(user_id)),
+                        Memory.session_id == uuid.UUID(str(session_id)),
+                        Memory.type == "working",
+                    )
+                    .values(type="episodic", updated_at=func.now())
+                    .returning(Memory)
+                )
+            ).scalars().all()
+            await db.commit()
+        return list(rows)
+
+    @staticmethod
+    async def purge_expired_working(ttl_seconds: int) -> int:
+        """清理超过 TTL 仍未晋升的 working 镜像行（spec 8.1：working 只有 30 分钟寿命）。
+
+        已晋升行 type 已翻转为 episodic/semantic，不在删除条件内。
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)
+        async with SessionLocal() as db:
+            result = await db.execute(
+                delete(Memory).where(Memory.type == "working", Memory.created_at < cutoff)
+            )
+            await db.commit()
+            return result.rowcount or 0
 
     @staticmethod
     async def list_by_user(user_id: uuid.UUID | str, type_: str | None = None) -> list[Memory]:

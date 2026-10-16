@@ -5,6 +5,7 @@
         <span class="title">智能客服</span>
         <AgentBadge v-if="store.currentAgent" :agent="store.currentAgent" />
         <div class="spacer" />
+        <el-button size="small" @click="onClose" :disabled="!store.sessionId || store.streaming">结束会话</el-button>
         <el-button size="small" @click="onNew">新建会话</el-button>
         <el-button size="small" @click="router.push('/history')">历史</el-button>
         <el-button size="small" @click="goAdmin" v-if="isAdminOrAgent()">管理后台</el-button>
@@ -41,7 +42,8 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { apiCloseSession } from '@/api'
 import { streamChat } from '@/api/chat'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
@@ -123,6 +125,23 @@ function onNew() {
   abort()
   store.reset()
   handoverReason.value = ''
+}
+
+async function onClose() {
+  if (!store.sessionId) return
+  try {
+    await ElMessageBox.confirm(
+      '结束后，本次会话的短期记忆将自动归档为长期记忆。确认结束当前会话？',
+      '结束会话',
+      { type: 'warning' },
+    )
+  } catch {
+    return // 用户取消
+  }
+  await apiCloseSession(store.sessionId)
+  store.reset()
+  handoverReason.value = ''
+  ElMessage.success('会话已结束，短期记忆已归档')
 }
 
 function onLogout() {

@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -84,6 +84,7 @@ class Message(Base):
 
 class Memory(Base, TimestampMixin):
     __tablename__ = "memories"
+    __table_args__ = (UniqueConstraint("user_id", "memory_uid", name="uq_memories_user_uid"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customer_users.id", ondelete="CASCADE"))

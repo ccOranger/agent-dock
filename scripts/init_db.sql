@@ -80,7 +80,7 @@ CREATE TABLE memories (
     metadata        JSONB DEFAULT '{}'::jsonb,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(user_id, memory_uid)
+    CONSTRAINT uq_memories_user_uid UNIQUE (user_id, memory_uid)
 );
 CREATE INDEX idx_memories_user_type ON memories(user_id, type);
 CREATE INDEX idx_memories_importance ON memories(importance DESC);

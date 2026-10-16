@@ -23,28 +23,39 @@ class FakeSession:
 def _install_fakes(monkeypatch, *, events, inserted: list, raiser: Exception | None = None, outcome=OUTCOME_ANSWERED):
     sess = FakeSession()
 
-    async def fake_get_or_create(user_id, session_id):
+    class FakeDB:
+        async def commit(self):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSessionFactory:
+        def __call__(self):
+            return FakeDB()
+
+    async def fake_get_or_create(user_id, session_id, db=None):
         return sess
 
-    async def fake_add(session_id, role, content, routed_to=None):
+    async def fake_add(session_id, role, content, routed_to=None, db=None):
         seq = "3" if role == "user" else "4"
         return SimpleNamespace(id=f"{seq}" * 32, content=content, role=role)
 
-    async def fake_list_by_session(session_id):
+    async def fake_list_recent(session_id, limit=50, db=None):
         return []
-
-    async def fake_set_last_route_to(session_id, name):
-        sess.last_route_to = name
 
     async def fake_insert(row):
         if raiser:
             raise raiser
         inserted.append(row)
 
+    monkeypatch.setattr(cs_mod, "SessionLocal", FakeSessionFactory())
     monkeypatch.setattr(cs_mod.SessionRepo, "get_or_create", fake_get_or_create)
-    monkeypatch.setattr(cs_mod.SessionRepo, "set_last_route_to", fake_set_last_route_to)
     monkeypatch.setattr(cs_mod.MessageRepo, "add", fake_add)
-    monkeypatch.setattr(cs_mod.MessageRepo, "list_by_session", fake_list_by_session)
+    monkeypatch.setattr(cs_mod.MessageRepo, "list_recent", fake_list_recent)
     monkeypatch.setattr(cs_mod.TraceRepo, "insert", fake_insert)
 
     service = ChatService()
