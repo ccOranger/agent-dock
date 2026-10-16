@@ -19,6 +19,9 @@ class BaseBusinessAgent(ABC):
     llm_model: str = ""
     max_iterations: int = 5
     rag_namespace: str | None = None
+    # 显式多知识库：非空时与 rag_namespace 合并去重后作为检索范围（优先于「单库」、次于「全部库」开关）。
+    # 用于业务 Agent 需要跨若干指定知识库检索（如订单 Agent 同时查 cs_order + cs_after_sales）。
+    rag_namespaces: list[str] = []
     # 为 True 时，知识库检索覆盖全部启用中的知识库（而非仅 rag_namespace），
     # 用于通用问答 Agent，确保管理后台新建的知识库无需改代码即可被命中。
     search_all_knowledge_bases: bool = False

@@ -117,6 +117,7 @@ class DynamicAgentCreate(BaseModel):
     system_prompt: str = Field(min_length=1)
     llm_model: str = Field(default="", max_length=128)  # 空则用默认 LLM_MODEL_ID
     rag_namespace: str | None = Field(default=None, max_length=64)
+    rag_namespaces: list[str] = Field(default_factory=list)  # 显式多知识库（与 rag_namespace 合并去重）
     search_all_knowledge_bases: bool = False
     mcp_tool_names: list[str] = Field(default_factory=list)
     enabled: bool = True
@@ -131,6 +132,7 @@ class DynamicAgentUpdate(BaseModel):
     system_prompt: str | None = Field(default=None, min_length=1)
     llm_model: str | None = Field(default=None, max_length=128)
     rag_namespace: str | None = Field(default=None, max_length=64)
+    rag_namespaces: list[str] | None = None
     search_all_knowledge_bases: bool | None = None
     mcp_tool_names: list[str] | None = None
     enabled: bool | None = None

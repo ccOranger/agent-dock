@@ -54,6 +54,7 @@ async def agents(user=Depends(require_admin)):
                 "enabled": meta.enabled,
                 "display_name": meta.display_name or meta.name,
                 "system_prompt": meta.system_prompt,
+                "rag_namespaces": list(meta.rag_namespaces or []),
                 "search_all_knowledge_bases": meta.search_all_knowledge_bases,
                 "sort_order": meta.sort_order,
             }
@@ -76,6 +77,7 @@ async def agent_detail(name: str, user=Depends(require_admin)):
                 "enabled": meta.enabled,
                 "display_name": meta.display_name or meta.name,
                 "system_prompt": meta.system_prompt,
+                "rag_namespaces": list(meta.rag_namespaces or []),
                 "search_all_knowledge_bases": meta.search_all_knowledge_bases,
             }
         )
@@ -95,6 +97,7 @@ async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
     await _validate_mcp_bindings(body.mcp_tool_names)
     if body.rag_namespace and await KnowledgeBaseRepo.get(body.rag_namespace) is None:
         raise ParamError(f"知识库 namespace 不存在: {body.rag_namespace}")
+    await _validate_rag_namespaces(body.rag_namespaces)
 
     row = await AgentRepo.create_dynamic(
         name=body.name,
@@ -103,6 +106,7 @@ async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
         system_prompt=body.system_prompt,
         llm_model=body.llm_model,
         rag_namespace=body.rag_namespace,
+        rag_namespaces=body.rag_namespaces,
         search_all_knowledge_bases=body.search_all_knowledge_bases,
         mcp_tool_names=body.mcp_tool_names,
         enabled=body.enabled,
@@ -121,6 +125,8 @@ async def update_agent(name: str, body: DynamicAgentUpdate, user=Depends(require
         await _validate_mcp_bindings(body.mcp_tool_names)
     if body.rag_namespace and await KnowledgeBaseRepo.get(body.rag_namespace) is None:
         raise ParamError(f"知识库 namespace 不存在: {body.rag_namespace}")
+    if body.rag_namespaces is not None:
+        await _validate_rag_namespaces(body.rag_namespaces)
 
     fields = body.model_dump(exclude_unset=True)
     if fields:
@@ -306,6 +312,16 @@ async def _validate_mcp_bindings(names: list[str]) -> None:
             raise ParamError(f"MCP 工具不存在: {n}")
         if not row.enabled:
             raise ParamError(f"MCP 工具已禁用: {n}")
+
+
+async def _validate_rag_namespaces(names: list[str]) -> None:
+    """校验显式多知识库的每个 namespace 均存在（启用与否不强制，交由检索时过滤）。"""
+    if not names:
+        return
+    existing = {r.namespace for r in await KnowledgeBaseRepo.list_all()}
+    for n in names:
+        if n not in existing:
+            raise ParamError(f"知识库 namespace 不存在: {n}")
 
 
 def _build_mcp_config(body: MCPServerCreate) -> dict:

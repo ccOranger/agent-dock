@@ -1,4 +1,6 @@
 """Orchestrator 多意图分发：串行执行、分块事件、阈值与 max_intents 语义（Router/业务 Agent 全 mock）"""
+from types import SimpleNamespace
+
 import pytest
 
 from app.agents import orchestrator as orch_mod
@@ -168,3 +170,51 @@ async def test_history_and_last_route_passed_to_router(monkeypatch):
     call = orch.router.calls[0]
     assert call["history"] == history
     assert call["last_route_to"] == "order_service"
+
+
+# ===== rag namespace 解析：单库 + 显式多库合并去重 / 全部库开关 =====
+class _NsAgent:
+    def __init__(self, rag_namespace=None, rag_namespaces=None, search_all=False):
+        self.rag_namespace = rag_namespace
+        self.rag_namespaces = rag_namespaces or []
+        self.search_all_knowledge_bases = search_all
+
+
+@pytest.mark.asyncio
+async def test_resolve_rag_namespaces_merges_single_and_multi():
+    agent = _NsAgent(rag_namespace="cs_order", rag_namespaces=["cs_after_sales", "cs_order", "cs_default"])
+    result = await Orchestrator._resolve_rag_namespaces(agent)
+    # 自身默认库前置，与显式多库合并去重，保持声明顺序
+    assert result == ["cs_order", "cs_after_sales", "cs_default"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_rag_namespaces_only_multi():
+    agent = _NsAgent(rag_namespace=None, rag_namespaces=["cs_a", "cs_b"])
+    assert await Orchestrator._resolve_rag_namespaces(agent) == ["cs_a", "cs_b"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_rag_namespaces_empty():
+    assert await Orchestrator._resolve_rag_namespaces(_NsAgent()) == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_rag_namespaces_search_all_prepends_declared(monkeypatch):
+    from app.models import repositories as repo_mod
+
+    bases = [
+        SimpleNamespace(namespace="cs_x", is_active=True),
+        SimpleNamespace(namespace="cs_order", is_active=True),
+        SimpleNamespace(namespace="cs_off", is_active=False),
+    ]
+
+    async def fake_list_all():
+        return bases
+
+    monkeypatch.setattr(repo_mod.KnowledgeBaseRepo, "list_all", fake_list_all)
+    agent = _NsAgent(rag_namespace="cs_order", rag_namespaces=["cs_y"], search_all=True)
+    result = await Orchestrator._resolve_rag_namespaces(agent)
+    # 自身默认库与显式多库前置，再补齐其余启用库（禁用库 cs_off 不入）
+    assert result == ["cs_order", "cs_y", "cs_x"]
+

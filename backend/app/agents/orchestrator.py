@@ -511,23 +511,28 @@ class Orchestrator:
     async def _resolve_rag_namespaces(business_agent) -> list[str]:
         """解析业务 Agent 实际检索的知识库命名空间列表。
 
-        - search_all_knowledge_bases=True：覆盖所有启用中的知识库（含自身默认空间），
+        优先级：
+        - search_all_knowledge_bases=True：覆盖所有启用中的知识库（含自身默认空间 + 显式多库），
           使管理后台新建的知识库无需改代码即可被命中。
-        - 否则：仅使用 Agent 自身声明的 rag_namespace。
+        - 否则：rag_namespace（单库）与 rag_namespaces（显式多库）合并去重，按声明顺序检索。
         """
         own = business_agent.rag_namespace
+        extra = list(getattr(business_agent, "rag_namespaces", []) or [])
+
+        def _dedupe(seq: list[str | None]) -> list[str]:
+            seen: set[str] = set()
+            ordered: list[str] = []
+            for ns in seq:
+                if ns and ns not in seen:
+                    seen.add(ns)
+                    ordered.append(ns)
+            return ordered
+
         if getattr(business_agent, "search_all_knowledge_bases", False):
             from app.models.repositories import KnowledgeBaseRepo
 
             bases = await KnowledgeBaseRepo.list_all()
             namespaces = [b.namespace for b in bases if b.is_active]
-            if own:
-                namespaces.insert(0, own)
-            seen: set[str] = set()
-            ordered: list[str] = []
-            for ns in namespaces:
-                if ns and ns not in seen:
-                    seen.add(ns)
-                    ordered.append(ns)
-            return ordered
-        return [own] if own else []
+            # 自身默认空间与显式多库前置（优先级更高），再补齐其余启用库
+            return _dedupe(([own] if own else []) + extra + namespaces)
+        return _dedupe(([own] if own else []) + extra)

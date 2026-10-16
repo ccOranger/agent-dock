@@ -22,12 +22,15 @@ class DynamicBusinessAgent(BaseBusinessAgent):
         self.system_prompt = meta.system_prompt or ""
         self.llm_model = meta.llm_model or ""
         self.rag_namespace = meta.rag_namespace
+        self.rag_namespaces = list(meta.rag_namespaces or [])
         self.search_all_knowledge_bases = bool(meta.search_all_knowledge_bases)
         self.mcp_tools = list(meta.mcp_tool_names or [])
 
     def build_tools(self, registry: ToolRegistry) -> None:
         # 动态 Agent 必挂 memory 工具
         registry.register_tool(get_memory_tool(self.user_id))
-        # 绑定了知识库时挂 RAG 检索工具
-        if self.rag_namespace:
-            registry.register_tool(get_rag_tool(self.rag_namespace))
+        # 模型可调用的 RAG 工具挂主库（自身默认库或显式多库首个）；
+        # 多库跨空检索上下文由 ContextEngineer 按解析后的 rag_namespaces 自动注入。
+        primary = self.rag_namespace or (self.rag_namespaces[0] if self.rag_namespaces else None)
+        if primary:
+            registry.register_tool(get_rag_tool(primary))

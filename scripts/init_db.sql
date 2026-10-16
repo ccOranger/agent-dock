@@ -138,6 +138,7 @@ CREATE TABLE agents (
     system_prompt   TEXT,                                   -- dynamic 必填
     llm_model       VARCHAR(128) NOT NULL DEFAULT '',       -- 空则用默认 LLM_MODEL_ID
     rag_namespace   VARCHAR(64),
+    rag_namespaces  JSONB NOT NULL DEFAULT '[]'::jsonb,      -- 显式多知识库（与 rag_namespace 合并去重）
     search_all_knowledge_bases BOOLEAN NOT NULL DEFAULT FALSE,
     mcp_tool_names  JSONB NOT NULL DEFAULT '[]'::jsonb,     -- Agent ↔ MCP 工具绑定
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

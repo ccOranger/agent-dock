@@ -169,6 +169,7 @@ export interface AgentInfo {
   description: string
   model: string
   rag_namespace: string | null
+  rag_namespaces?: string[]
   mcp_tools: string[]
   enabled: boolean
   display_name?: string
@@ -229,6 +230,7 @@ export interface DynamicAgentPayload {
   system_prompt: string
   llm_model?: string
   rag_namespace?: string | null
+  rag_namespaces?: string[]
   search_all_knowledge_bases?: boolean
   mcp_tool_names: string[]
   enabled?: boolean

@@ -17,7 +17,32 @@
         </template>
       </el-table-column>
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
-      <el-table-column prop="rag_namespace" label="Namespace" width="140" />
+      <el-table-column width="200">
+        <template #header>
+          知识库
+          <el-tooltip placement="top" content="标签依次为：主知识库、附加知识库；开启全部知识库时显示「全部库」。悬停各标签无额外说明，具体含义见编辑弹窗的问号提示。">
+            <span class="q-help">?</span>
+          </el-tooltip>
+        </template>
+        <template #default="{ row }">
+          <el-tag v-if="row.rag_namespace" size="small" style="margin-right: 4px">{{ row.rag_namespace }}</el-tag>
+          <el-tag
+            v-for="ns in row.rag_namespaces"
+            :key="ns"
+            size="small"
+            type="info"
+            style="margin-right: 4px"
+          >{{ ns }}</el-tag>
+          <span
+            v-if="row.search_all_knowledge_bases"
+            class="muted"
+          >全部库</span>
+          <span
+            v-if="!row.rag_namespace && (!row.rag_namespaces || !row.rag_namespaces.length) && !row.search_all_knowledge_bases"
+            class="muted"
+          >—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="MCP 工具" width="200">
         <template #default="{ row }">
           <el-tag v-for="t in row.mcp_tools" :key="t" size="small" style="margin-right: 4px">{{ t }}</el-tag>
@@ -63,12 +88,53 @@
       <el-form-item label="模型">
         <el-input v-model="form.llm_model" placeholder="留空使用默认模型（LLM_MODEL_ID）" />
       </el-form-item>
-      <el-form-item label="知识库 Namespace">
-        <el-select v-model="form.rag_namespace" clearable placeholder="可选，绑定单个知识库">
+      <el-form-item>
+        <template #label>
+          主知识库
+          <el-tooltip placement="top" content="模型主动调用 RAG 工具时默认检索的库，并在跨库检索中排在最前。">
+            <span class="q-help">?</span>
+          </el-tooltip>
+        </template>
+        <el-select v-model="form.rag_namespace" clearable placeholder="可选，本 Agent 归属的主知识库">
           <el-option v-for="kb in knowledgeBases" :key="kb.namespace" :label="kb.display_name" :value="kb.namespace" />
         </el-select>
       </el-form-item>
-      <el-form-item label="检索全部知识库">
+      <el-form-item>
+        <template #label>
+          附加知识库
+          <el-tooltip
+            placement="top"
+            content="对话时会自动一并检索的其他库（可与主库组成多个库）。注意：模型主动调用 RAG 工具仍只检索主知识库，附加库通过检索上下文自动注入。"
+          >
+            <span class="q-help">?</span>
+          </el-tooltip>
+        </template>
+        <el-select
+          v-model="form.rag_namespaces"
+          multiple
+          clearable
+          :disabled="form.search_all_knowledge_bases"
+          placeholder="可选，额外跨库检索（与主库合并去重）"
+        >
+          <el-option
+            v-for="kb in knowledgeBases"
+            :key="kb.namespace"
+            :label="kb.display_name"
+            :value="kb.namespace"
+          />
+        </el-select>
+        <div v-if="form.search_all_knowledge_bases" class="muted hint">已开启“全部知识库”，此处选择被忽略</div>
+      </el-form-item>
+      <el-form-item>
+        <template #label>
+          全部知识库
+          <el-tooltip
+            placement="top"
+            content="开启后覆盖全部启用中的知识库（含后台新建的库，无需改代码），并忽略上方主知识库 / 附加知识库的单独选择。"
+          >
+            <span class="q-help">?</span>
+          </el-tooltip>
+        </template>
         <el-switch v-model="form.search_all_knowledge_bases" />
       </el-form-item>
       <el-form-item label="MCP 工具">
@@ -123,6 +189,7 @@ const emptyForm = (): DynamicAgentPayload => ({
   system_prompt: '',
   llm_model: '',
   rag_namespace: null,
+  rag_namespaces: [],
   search_all_knowledge_bases: false,
   mcp_tool_names: [],
   enabled: true,
@@ -166,6 +233,7 @@ function openEdit(row: AgentInfo) {
     system_prompt: row.system_prompt ?? '',
     llm_model: row.model ?? '',
     rag_namespace: row.rag_namespace ?? null,
+    rag_namespaces: [...(row.rag_namespaces ?? [])],
     search_all_knowledge_bases: row.search_all_knowledge_bases ?? false,
     mcp_tool_names: [...(row.mcp_tools ?? [])],
     enabled: row.enabled,
@@ -219,5 +287,24 @@ onMounted(load)
 }
 .muted {
   color: #909399;
+}
+.hint {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.q-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: #909399;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
 }
 </style>
