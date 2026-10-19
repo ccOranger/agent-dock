@@ -39,6 +39,29 @@ export const useChatStore = defineStore('chat', () => {
     pending.value = ''
     streamEnded = false
     messages.value.push({ id: nanoid(), role: 'user', content })
+    // 立即放一个"思考中"占位气泡，statusText 随后由 SSE status 事件按真实阶段推进，
+    // 避免路由/构建阶段的数秒空窗
+    messages.value.push({
+      id: nanoid(),
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      statusText: '思考中…',
+    })
+  }
+
+  /** status 事件：更新占位气泡的阶段文案（已开始出正文则不再覆盖） */
+  function setStatus(text: string) {
+    const msg = currentStreamMessage()
+    if (msg && !msg.content && !pending.value && text) msg.statusText = text
+  }
+
+  /** 一轮结束仍无正文（转人工/出错/空应答）：移除占位气泡，不留空气泡壳 */
+  function dropEmptyStream() {
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant' && !last.content && !pending.value) {
+      messages.value.splice(messages.value.indexOf(last), 1)
+    }
   }
 
   function currentStreamMessage(): Message | undefined {
@@ -68,12 +91,14 @@ export const useChatStore = defineStore('chat', () => {
       const step = Math.min(pending.value.length, Math.max(1, Math.ceil(pending.value.length / 10)))
       msg.content += pending.value.slice(0, step)
       pending.value = pending.value.slice(step)
+      msg.statusText = '' // 正文已开始，撤下阶段进度行
       onReveal?.()
     } else if (streamEnded) {
       // 缓冲清空且流已结束：收尾
       msg.streaming = false
       streaming.value = false
       stopReveal()
+      dropEmptyStream()
     }
   }
 
@@ -126,6 +151,7 @@ export const useChatStore = defineStore('chat', () => {
       if (msg) msg.streaming = false
       streaming.value = false
       stopReveal()
+      dropEmptyStream()
     } else {
       startReveal()
     }
@@ -139,6 +165,7 @@ export const useChatStore = defineStore('chat', () => {
     streaming.value = false
     streamEnded = false
     stopReveal()
+    dropEmptyStream()
   }
 
   return {
@@ -149,6 +176,7 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls,
     reset,
     pushUser,
+    setStatus,
     appendText,
     addToolCall,
     finishToolCall,

@@ -237,6 +237,25 @@ CREATE INDEX IF NOT EXISTS idx_traces_agents ON request_traces USING gin (agent_
 CREATE INDEX IF NOT EXISTS idx_traces_tools ON request_traces USING gin (tool_names);
 CREATE INDEX IF NOT EXISTS idx_traces_mcp ON request_traces USING gin (mcp_server_names);
 
+-- ========== 高频固定话术（硬模板，后台可维护；内置三条由 seed_data.py 从代码写入） ==========
+-- 命中即在路由之前逐字应答，所以匹配只开放两样：问法主干（归一化后整句全等）
+-- 与关键词（包含即命中），不存正则：误吞一句真实业务问法的代价比少命中大得多。
+CREATE TABLE IF NOT EXISTS canned_scripts (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key         VARCHAR(64) UNIQUE NOT NULL,            -- 业务可读标识：identity / capability / probing / ...
+    title       VARCHAR(128),
+    category    VARCHAR(16) NOT NULL DEFAULT 'business', -- identity | capability | probing | business
+    patterns    JSONB NOT NULL DEFAULT '[]'::jsonb,      -- 问法主干数组（整句全等）
+    keywords    JSONB NOT NULL DEFAULT '[]'::jsonb,      -- 关键词数组（包含即命中）
+    reply_text  TEXT NOT NULL DEFAULT '',
+    priority    INT NOT NULL DEFAULT 0,                  -- 小者优先；探听 10 / 身份 20 / 能力 30 / 自定义 100
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    is_builtin  BOOLEAN NOT NULL DEFAULT FALSE,          -- 内置项可改文案/停用，不可删
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_canned_scripts_enabled_priority ON canned_scripts(enabled, priority);
+
 -- ========== 存量库增量迁移（幂等，可重复执行；新建库已在上方 CREATE TABLE 中包含） ==========
 -- 记忆溯源列：指向产生该记忆的当轮用户消息，随消息删除级联
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS source_message_id UUID REFERENCES messages(id) ON DELETE CASCADE;

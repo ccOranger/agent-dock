@@ -42,9 +42,30 @@ http.interceptors.response.use(
       clearTokens()
       window.location.href = '/login'
     }
-    return Promise.reject(err)
+    // 把后端错误转成人话：业务错走 detail.message，参数校验失败（422）走 pydantic 的
+    // detail 数组。不转的话页面只能拿到 "Request failed with status code 422"，
+    // 运维看不出是“关键词超出上限”还是“正文为空”。
+    return Promise.reject(toReadableError(err))
   },
 )
+
+function toReadableError(err: any): Error {
+  const detail = err?.response?.data?.detail
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0] ?? {}
+    // loc 形如 ["body", "keywords"]：去掉请求位置，只留字段名
+    const field = Array.isArray(first.loc) ? first.loc.slice(1).join('.') : ''
+    const msg = String(first.msg ?? '请求参数不合法')
+    return new Error(field ? `${field}: ${msg}` : msg)
+  }
+  if (detail && typeof detail === 'object' && typeof detail.message === 'string') {
+    return new Error(detail.message || '请求失败')
+  }
+  if (typeof err?.response?.data?.message === 'string') {
+    return new Error(err.response.data.message)
+  }
+  return new Error(err?.message || '请求失败')
+}
 
 export async function unwrap<T>(resp: Promise<{ data: { data: T } }>): Promise<T> {
   const r = await resp

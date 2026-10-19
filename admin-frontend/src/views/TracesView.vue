@@ -2,31 +2,8 @@
   <div>
     <el-card>
       <template #header>
-        <div class="head">
-          <b>请求链路</b>
-          <div class="head-tools">
-            <el-select v-model="usageField" size="small" style="width: 150px" @change="loadUsage">
-              <el-option label="工具使用分布" value="tool_names" />
-              <el-option label="Agent 使用分布" value="agent_names" />
-              <el-option label="MCP 使用分布" value="mcp_server_names" />
-            </el-select>
-            <el-select v-model="usageDays" size="small" style="width: 110px" @change="loadUsage">
-              <el-option label="近 7 天" :value="7" />
-              <el-option label="近 30 天" :value="30" />
-              <el-option label="近 90 天" :value="90" />
-            </el-select>
-          </div>
-        </div>
+        <b>请求链路</b>
       </template>
-
-      <!-- 依赖使用度：没人用 / 长期失败的依赖一眼看出来 -->
-      <div v-if="usage.length" class="usage">
-        <div v-for="u in usage.slice(0, 12)" :key="u.name" class="usage-item">
-          <span class="usage-name">{{ u.name }}</span>
-          <el-progress :percentage="percent(u.count)" :stroke-width="8" :show-text="false" />
-          <span class="usage-count">{{ u.count }} 轮</span>
-        </div>
-      </div>
 
       <div class="filters">
         <el-select v-model="filters.outcome" placeholder="结局" clearable style="width: 120px">
@@ -148,8 +125,8 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { apiListAgents, apiListTraces, apiTraceDetail, apiTraceUsage, type TraceUsageField } from '@/api'
-import type { AgentInfo, RequestTraceDetail, RequestTraceSummary, TraceUsageItem } from '@/types'
+import { apiListAgents, apiListTraces, apiTraceDetail } from '@/api'
+import type { AgentInfo, RequestTraceDetail, RequestTraceSummary } from '@/types'
 import TraceTimeline from '@/components/TraceTimeline.vue'
 
 const route = useRoute()
@@ -161,10 +138,6 @@ const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
 const agents = ref<AgentInfo[]>([])
-
-const usage = ref<TraceUsageItem[]>([])
-const usageField = ref<TraceUsageField>('tool_names')
-const usageDays = ref(7)
 
 const filters = ref<{
   outcome?: string
@@ -198,10 +171,6 @@ function outcomeTag(outcome?: string | null) {
   if (outcome === 'answered') return { type: 'success' as const, text: '已应答' }
   return { type: 'info' as const, text: outcome || '未知' }
 }
-function percent(count: number) {
-  const max = usage.value.reduce((m, u) => Math.max(m, u.count), 0)
-  return max ? Math.round((count / max) * 100) : 0
-}
 
 function buildParams() {
   const p: Record<string, unknown> = {}
@@ -226,14 +195,6 @@ async function load() {
     ElMessage.error(e?.message || '加载链路失败')
   } finally {
     loading.value = false
-  }
-}
-
-async function loadUsage() {
-  try {
-    usage.value = await apiTraceUsage(usageField.value, usageDays.value)
-  } catch {
-    /* 用量是附加信息，失败不打扰 */
   }
 }
 
@@ -288,7 +249,6 @@ onMounted(() => {
   const sid = route.query.session_id as string | undefined
   if (sid) filters.value.session_id = sid
   load()
-  loadUsage()
   const trace = route.query.trace as string | undefined
   if (trace) openDetail({ id: trace, trace_id: trace } as RequestTraceSummary)
   apiListAgents()
@@ -300,49 +260,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.head-tools {
-  display: flex;
-  gap: 8px;
-}
 .filters {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
-}
-.usage {
-  display: flex;
-  gap: 18px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
-  padding: 10px 12px;
-  background: #f7f9fc;
-  border-radius: 6px;
-}
-.usage-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 220px;
-}
-.usage-name {
-  font-size: 12px;
-  color: #606266;
-  width: 110px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.usage-count {
-  font-size: 12px;
-  color: #909399;
-  width: 52px;
-  text-align: right;
 }
 .chip {
   margin-right: 4px;

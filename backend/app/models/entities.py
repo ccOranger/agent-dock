@@ -127,6 +127,36 @@ class KnowledgeBase(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class CannedScript(Base, TimestampMixin):
+    """高频固定话术（硬模板）：命中则逐字下发，不进路由也不走模型生成。
+
+    可后台维护的意义在于“新增一条营业时间回复”这类需求不应该再要求改代码发版，但
+    匹配只开放两样东西（问法主干 + 关键词），不开放正则：正则交给运营容易写出灾难性回溯
+    或过宽误吞的规则，而误吞的代价是把真实业务诉求用一句模板打发掉，比少命中严重得多。
+    """
+
+    __tablename__ = "canned_scripts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    # 业务可读唯一标识（如 identity / capability / probing / business_hours）
+    key: Mapped[str] = mapped_column(String(64), unique=True)
+    title: Mapped[str | None] = mapped_column(String(128))
+    # 分组：identity | capability | probing | business（探听类在种子里给了最高优先级）
+    category: Mapped[str] = mapped_column(String(16), default="business")
+    # 问法主干（字符串数组）：归一化（去标点/语气词）后与整句全等才算命中，不会误吞复合问句
+    patterns: Mapped[list] = mapped_column(JSONB, default=list)
+    # 关键词（字符串数组）：整句里出现即命中，用于“提示词”“内部指令”这类强特征词
+    keywords: Mapped[list] = mapped_column(JSONB, default=list)
+    # 逐字下发的应答正文（支持 markdown，前端 StreamRenderer 已渲染）
+    reply_text: Mapped[str] = mapped_column(Text, default="")
+    # 小者优先；多条都能命中时决定哪一条胜出
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 种子三条（seed_data.py 建库时写入）：可改文案、可停用，但不可删除。运行时只读本表，
+    # 代码里没有兜底规则，删掉探听拒答就等于把泄露面重新打开
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class AgentMeta(Base, TimestampMixin):
     __tablename__ = "agents"
 

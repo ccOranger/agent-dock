@@ -2,7 +2,7 @@
   <div class="bubble" :class="message.role">
     <div class="meta">
       <AgentBadge v-if="message.routed_to" :agent="message.routed_to" />
-      <span v-if="message.streaming" class="typing">输入中…</span>
+      <span v-if="message.streaming" class="typing">{{ message.statusText || '输入中…' }}</span>
     </div>
     <StreamRenderer v-if="message.role === 'assistant'" :content="message.content" />
     <span v-else>{{ message.content }}</span>
@@ -38,5 +38,15 @@ defineProps<{ message: Message }>()
 .typing {
   font-size: 12px;
   color: #909399;
+  animation: typing-blink 1.2s ease-in-out infinite;
+}
+@keyframes typing-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 </style>

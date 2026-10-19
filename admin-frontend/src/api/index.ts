@@ -1,6 +1,9 @@
 import { downloadBlob, http, unwrap } from './http'
 import type {
   AgentInfo,
+  CannedMatchResult,
+  CannedScript,
+  CannedScriptPayload,
   ChunkList,
   CustomToolSpec,
   DynamicAgentPayload,
@@ -252,6 +255,25 @@ export const apiToggleCustomTool = (name: string, enabled: boolean) =>
   http.patch(`/admin/custom-tools/${name}/toggle`, { enabled })
 
 export const apiDeleteCustomTool = (name: string) => http.delete(`/admin/custom-tools/${name}`)
+
+// ===== Admin：高频固定话术 =====
+export const apiListCannedScripts = () =>
+  unwrap(http.get<never, { data: { data: CannedScript[] } }>('/admin/canned-scripts'))
+
+export const apiCreateCannedScript = (body: CannedScriptPayload) =>
+  unwrap(http.post<never, { data: { data: CannedScript } }>('/admin/canned-scripts', body))
+
+export const apiUpdateCannedScript = (key: string, body: Partial<CannedScriptPayload>) =>
+  unwrap(http.put<never, { data: { data: CannedScript } }>(`/admin/canned-scripts/${key}`, body))
+
+export const apiToggleCannedScript = (key: string, enabled: boolean) =>
+  http.patch(`/admin/canned-scripts/${key}/toggle`, { enabled })
+
+export const apiDeleteCannedScript = (key: string) => http.delete(`/admin/canned-scripts/${key}`)
+
+// 命中测试：用真实问法验证规则，不写库、不产生会话消息
+export const apiCannedScriptMatch = (query: string) =>
+  unwrap(http.post<never, { data: { data: CannedMatchResult } }>('/admin/canned-scripts/match', { query }))
 
 // ===== Admin：Memory =====
 export const apiMyMemories = (type?: string) =>

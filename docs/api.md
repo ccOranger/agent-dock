@@ -115,6 +115,22 @@ PATCH  /api/v1/admin/custom-tools/{name}/toggle  # 启用/禁用（body: enabled
 DELETE /api/v1/admin/custom-tools/{name}     # 取消登记（被动态 Agent 引用→1001）
 ```
 
+## Admin · Canned Scripts（高频固定话术，require_admin 写 / require_staff 读）
+
+（[U16](updates/16-canned-scripts-db.md)）命中即在路由与大模型之前逐字下发；运行时只读这张表（代码里无兜底规则，
+空表/全部停用 = 该能力关闭）；规则只开放 `patterns`（问法主干，归一化后整句全等）与 `keywords`（包含即命中，
+归一化后至少 2 字），**不开放正则**；两者全空→1001。列表长度上限 `patterns` 100 / `keywords` 60（超→422；
+该上限必须高于种子规模，因为后台保存是把整份列表原样提交回来）。
+
+```
+GET    /api/v1/admin/canned-scripts            # 全量（含停用项），按 priority 升序，与运行时判定顺序一致
+POST   /api/v1/admin/canned-scripts            # 新增（key 重复→3002；空规则/单字关键词/问法归一化后为空→1001）
+PUT    /api/v1/admin/canned-scripts/{key}      # 更新（只改一侧时另一侧沿用已存值，避免改空规则）
+PATCH  /api/v1/admin/canned-scripts/{key}/toggle  # 启用/停用（body: enabled）
+DELETE /api/v1/admin/canned-scripts/{key}      # 删除（is_builtin 种子三条不可删→1001，只能停用）
+POST   /api/v1/admin/canned-scripts/match      # 命中测试（body: query；不写库，返回 normalized/matched/key/reply_text，未命中即本轮走路由）
+```
+
 ## Admin · MCP Servers（require_admin 写 / require_staff 读）
 
 （[U05](updates/05-stdio-mcp-demo.md)）

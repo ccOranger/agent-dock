@@ -27,6 +27,9 @@
         <el-menu-item index="/custom-tools" v-if="isAdmin">
           <span>自定义工具管理</span>
         </el-menu-item>
+        <el-menu-item index="/canned-scripts" v-if="isAdmin">
+          <span>固定话术</span>
+        </el-menu-item>
         <el-menu-item index="/memory">
           <span>记忆管理</span>
         </el-menu-item>

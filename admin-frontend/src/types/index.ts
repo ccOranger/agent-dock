@@ -69,7 +69,7 @@ export type TraceOutcome = 'answered' | 'handover' | 'error'
 export interface TraceSpan {
   span_id: string
   parent_id?: string | null
-  /** router.llm / route.intent / context.memory / context.rag / agent.resolve /
+  /** router.llm / route.intent / canned.script / context.memory / context.rag / agent.resolve /
    *  agent.build / agent.run / tool.call / memory.persist / context.budget */
   type: string
   name: string
@@ -376,4 +376,54 @@ export const TICKET_URGENCY_LABELS: Record<TicketUrgency, string> = {
   low: '低',
   medium: '中',
   high: '高',
+}
+
+// ===== 高频固定话术（硬模板）=====
+export type CannedScriptCategory = 'identity' | 'capability' | 'probing' | 'business'
+
+export interface CannedScript {
+  id: string
+  key: string
+  title?: string | null
+  category: CannedScriptCategory
+  /** 问法主干：归一化后整句全等才命中 */
+  patterns: string[]
+  /** 关键词：整句包含即命中，判定更宽，误吞风险也更高 */
+  keywords: string[]
+  reply_text: string
+  priority: number
+  enabled: boolean
+  /** 种子三条（建库时写入）：可改文案、可停用，不可删除；运行时只读这张表，代码里无兜底规则 */
+  is_builtin: boolean
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface CannedScriptPayload {
+  key: string
+  title?: string | null
+  category: CannedScriptCategory
+  patterns: string[]
+  keywords: string[]
+  reply_text: string
+  priority: number
+  enabled: boolean
+}
+
+export interface CannedMatchResult {
+  query: string
+  normalized: string
+  matched: boolean
+  key?: string | null
+  category?: CannedScriptCategory | null
+  title?: string | null
+  reply_text?: string | null
+  rule_snapshot: CannedScript[]
+}
+
+export const CANNED_CATEGORY_LABELS: Record<CannedScriptCategory, string> = {
+  identity: '身份介绍',
+  capability: '能力介绍',
+  probing: '探听拒答',
+  business: '业务话术',
 }

@@ -152,6 +152,7 @@ function barStyle(s: TraceSpan) {
 const TYPE_META: Record<string, { label: string; color: string }> = {
   'router.llm': { label: '路由', color: '#e6a23c' },
   'route.intent': { label: '意图', color: '#f0a020' },
+  'canned.script': { label: '固定话术', color: '#13c2c2' },
   'context.memory': { label: '记忆检索', color: '#909399' },
   'context.rag': { label: 'RAG 检索', color: '#909399' },
   'context.budget': { label: '上下文预算', color: '#c0c4cc' },

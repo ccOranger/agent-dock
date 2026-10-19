@@ -19,6 +19,8 @@ export interface Message {
   content: string
   routed_to?: string | null
   streaming?: boolean
+  /** 占位气泡的阶段进度文案（后端 status 事件驱动，正文到达后清空） */
+  statusText?: string
   created_at?: string
 }
 

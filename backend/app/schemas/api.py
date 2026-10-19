@@ -186,6 +186,43 @@ class CustomToolToggle(BaseModel):
     enabled: bool
 
 
+# ===== 管理后台：高频固定话术（硬模板）=====
+class CannedScriptCreate(BaseModel):
+    """新增一条固定话术。种子三条只能改文案/启停，不可删除（见后台接口）。"""
+
+    key: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    title: str | None = Field(default=None, max_length=128)
+    category: Literal["identity", "capability", "probing", "business"] = "business"
+    # 问法主干：归一化后整句全等才命中（不会误吞带后半句的业务问法）
+    # 上限只是防手滑、不是安全边界：种子里的 probing 已经有 32 个关键词，
+    # 所以两条上限必须高于种子规模，否则后台编辑种子时原样提交就会被 422 拒掉。
+    patterns: list[str] = Field(default_factory=list, max_length=100)
+    # 关键词：整句包含即命中，判定比问法宽，后台需要命中测试辅助把关
+    keywords: list[str] = Field(default_factory=list, max_length=60)
+    reply_text: str = Field(min_length=1, max_length=2000)
+    priority: int = Field(default=100, ge=0, le=1000)
+    enabled: bool = True
+
+
+class CannedScriptUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=128)
+    category: Literal["identity", "capability", "probing", "business"] | None = None
+    patterns: list[str] | None = Field(default=None, max_length=100)
+    keywords: list[str] | None = Field(default=None, max_length=60)
+    reply_text: str | None = Field(default=None, min_length=1, max_length=2000)
+    priority: int | None = Field(default=None, ge=0, le=1000)
+
+
+class CannedScriptToggle(BaseModel):
+    enabled: bool
+
+
+class CannedScriptMatchRequest(BaseModel):
+    """命中测试：不写库，只告知这句客户原话会落到哪条话术（或未命中）。"""
+
+    query: str = Field(min_length=1, max_length=500)
+
+
 # ===== 管理后台：咨询信息 =====
 class InquirySessionOut(BaseModel):
     id: str

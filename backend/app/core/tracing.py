@@ -24,6 +24,8 @@ SPAN_BUILD = "agent.build"
 SPAN_RUN = "agent.run"
 SPAN_TOOL = "tool.call"
 SPAN_PERSIST = "memory.persist"
+# 高频固定话术命中（身份/能力/探听配置）：不经路由与 Agent，单独留一条 span 便于后台核查话术命中情况
+SPAN_CANNED = "canned.script"
 
 # ===== 请求结局 =====
 OUTCOME_ANSWERED = "answered"

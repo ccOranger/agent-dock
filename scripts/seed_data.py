@@ -15,12 +15,20 @@ from app.core.security import hash_password  # noqa: E402
 from app.models.entities import (  # noqa: E402
     AgentMeta,
     Base,
+    CannedScript,
     CustomerUser,
     Document,
     StaffUser,
     ToolMeta,
 )
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+
+# 固定话术的后台显示名（规则内容以 app.agents.canned_scripts.SEED_RULES 为准，只在建库时写入表）
+CANNED_TITLES = {
+    "identity": "身份介绍（你是谁）",
+    "capability": "能力与服务范围（你能做什么）",
+    "probing": "探听系统配置的拒答",
+}
 
 
 # 后台人员（管理后台 admin-frontend 登录）
@@ -225,9 +233,32 @@ async def main() -> None:
             ).scalar_one_or_none()
             if row is None:
                 db.add(Document(**d))
+        # 固定话术：从种子定义落库（运行时只读表，代码里无兜底）；存过就不覆盖（后台可能改过文案），只补种子标记
+        from app.agents.canned_scripts import SEED_RULES
+
+        for rule in SEED_RULES:
+            row = (
+                await db.execute(select(CannedScript).where(CannedScript.key == rule.key))
+            ).scalar_one_or_none()
+            if row is None:
+                db.add(
+                    CannedScript(
+                        key=rule.key,
+                        title=CANNED_TITLES.get(rule.key, rule.key),
+                        category=rule.category,
+                        patterns=sorted(rule.patterns),
+                        keywords=list(rule.keywords),
+                        reply_text=rule.text,
+                        priority=rule.priority,
+                        enabled=True,
+                        is_builtin=True,
+                    )
+                )
+            elif not row.is_builtin:
+                row.is_builtin = True
         await db.commit()
     print(
-        "✅ seed 完成：2 后台人员(admin/service01) + 1 客户(alice) + 3 MCP 工具(2 本地stdio + 1 npx everything) + 3 代码 Agent + 1 动态 Agent + 3 示例文档"
+        "✅ seed 完成：2 后台人员(admin/service01) + 1 客户(alice) + 3 MCP 工具(2 本地stdio + 1 npx everything) + 3 代码 Agent + 1 动态 Agent + 3 示例文档 + 3 条固定话术"
     )
 
 

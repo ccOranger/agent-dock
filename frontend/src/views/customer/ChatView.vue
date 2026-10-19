@@ -85,6 +85,10 @@ function send() {
     session: (d: any) => {
       store.sessionId = d.session_id
     },
+    status: (d: any) => {
+      // 后端真实阶段进度（routing/preparing/generating）驱动占位气泡文案
+      store.setStatus(d?.text || '')
+    },
     route: (d: any) => {
       store.setRoute(d.agent_name)
     },

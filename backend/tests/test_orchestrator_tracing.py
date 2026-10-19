@@ -110,13 +110,17 @@ def _make_orch(monkeypatch, intents, agents, known=None, stream_events=None):
     return orch
 
 
-async def _run(orch, collector):
-    return [
+async def _run(orch, collector, include_status: bool = False):
+    events = [
         e
         async for e in orch.dispatch(
             user_id="u1", session_id="s1", query="查一下订单并解释退货政策", history=[], collector=collector
         )
     ]
+    # status 是前端进度提示，与业务事件契约正交，默认过滤掉不影响各用例的精确序列断言
+    if not include_status:
+        events = [e for e in events if e["type"] != "status"]
+    return events
 
 
 def _of_type(collector, type_):
@@ -291,3 +295,18 @@ async def test_dispatch_works_without_collector(monkeypatch):
     orch = _make_orch(monkeypatch, [_intent("order_service")], {"order_service": FakeAgent("order_service")})
     events = await _run(orch, collector=None)
     assert [e["type"] for e in events] == ["route", "agent_start", "text", "agent_end"]
+
+
+@pytest.mark.asyncio
+async def test_status_events_report_progress_stages(monkeypatch):
+    """status 事件按真实阶段下发：路由→构建准备→生成，且先于 route 事件。"""
+    orch = _make_orch(monkeypatch, [_intent("order_service")], {"order_service": FakeAgent("order_service")})
+    events = await _run(orch, collector=None, include_status=True)
+
+    assert events[0]["type"] == "status" and events[0]["data"]["stage"] == "routing"
+    stages = [e["data"]["stage"] for e in events if e["type"] == "status"]
+    assert stages == ["routing", "preparing", "generating"]
+    # 进度事件不改变业务事件序列（过滤 status 后契约不变）
+    assert [e["type"] for e in events if e["type"] != "status"] == [
+        "route", "agent_start", "text", "agent_end",
+    ]

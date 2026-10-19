@@ -1,5 +1,6 @@
 """
 Orchestrator：调度器
+  0. 高频固定话术（身份/能力/探听配置）命中时直接下发硬模板，后续步骤全部跳过
   1. 调用 RouterAgent 识别意图（可多意图）
   2. 从注册表取出业务 Agent 类
   3. 实例化业务 Agent
@@ -15,6 +16,7 @@ from typing import Any, AsyncIterator, Iterator
 from hello_agents import Message
 from hello_agents.agents import SimpleAgent
 
+from app.agents.canned_scripts import match_canned_script
 from app.agents.registry import AGENT_REGISTRY, resolve_business_agent
 from app.agents.router_agent import RouterAgent
 from app.core.config import settings
@@ -24,6 +26,7 @@ from app.core.tracing import (
     OUTCOME_ERROR,
     OUTCOME_HANDOVER,
     SPAN_BUILD,
+    SPAN_CANNED,
     SPAN_RESOLVE,
     SPAN_RUN,
 )
@@ -271,7 +274,23 @@ class Orchestrator:
         """
         max_intents = max(1, int(max_intents if max_intents is not None else settings.router_max_intents))
 
+        # ---- 0. 高频固定话术（身份 / 能力 / 探听配置）：命中则逐字下发硬模板 ----
+        # 不进路由、不建 Agent：措辞完全可控，同时省掉路由 LLM + MCP 建连 + RAG/记忆检索的数秒等待。
+        # 不发 route 事件——本轮确实没有 Agent 参与，last_route_to 保留上一轮的真实承接方，
+        # 后续追问续接才不会被一个并不存在的 Agent 名干扰；记忆归档也一并跳过（无业务信息量）。
+        canned = await match_canned_script(query)
+        if canned is not None:
+            logger.info(f"[canned] 命中固定话术 {canned.key}，跳过路由与 Agent 执行")
+            if collector:
+                collector.add(SPAN_CANNED, canned.key, category=canned.category, text_chars=len(canned.text))
+                collector.mark_first_token()
+                collector.record_outcome(OUTCOME_ANSWERED)
+            yield {"type": "text", "data": {"content": canned.text}}
+            return
+
         # ---- 1. 路由（可多意图） ----
+        # status 事件：前端"思考中"占位气泡的真实阶段进度（不计入 produced 内容）
+        yield {"type": "status", "data": {"stage": "routing", "text": "正在分析问题意图…"}}
         intent_result = await self.router.route(
             query, history=history, last_route_to=last_route_to, collector=collector
         )
@@ -411,7 +430,9 @@ class Orchestrator:
                     text_chars += len(data.get("content") or "")
                     if collector:
                         collector.mark_first_token()
-                produced = True
+                # 进度提示不算产出：只有真实内容/工具事件才视为该分支应答成功
+                if etype != "status":
+                    produced = True
                 yield event
 
             if collector:
@@ -466,6 +487,7 @@ class Orchestrator:
     ) -> AsyncIterator[dict]:
         """构建并流式执行单个业务 Agent（含 MCP 预取与上下文工程）。"""
         agent_name = getattr(business_agent, "name", "?")
+        yield {"type": "status", "data": {"stage": "preparing", "text": "正在连接工具与检索知识库…"}}
         # ---- 在主 event loop 上预取 MCP 配置（避免 build() 跨循环访问 DB）----
         mcp_configs: dict[str, dict | None] = {}
         if business_agent.mcp_tools:
@@ -514,6 +536,7 @@ class Orchestrator:
         # 把最近若干轮对话注入 Agent._history，赋予跨轮记忆：业务 Agent 每轮新建，
         # 不注入则模型看不到上一轮，既接不住追问也不知道刚创建的工单号（无法 update_ticket）
         self._seed_history(simple_agent, history)
+        yield {"type": "status", "data": {"stage": "generating", "text": "正在生成回答…"}}
         async for event in self._astream(
             simple_agent,
             enriched_query,

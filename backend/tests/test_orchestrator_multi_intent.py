@@ -76,12 +76,15 @@ class SimpleNamedAgent:
 
 async def _collect(orch, **kw):
     history = kw.pop("history", [])
-    return [
+    events = [
         e
         async for e in orch.dispatch(
             user_id="u1", session_id="s1", query="q", history=history, **kw
         )
     ]
+    # status 是前端进度提示（本文件里 _run_business_agent 被 mock，只剩 routing 一条），
+    # 与业务事件契约正交，默认过滤以保持各用例既有的精确序列/下标断言
+    return [e for e in events if e["type"] != "status"]
 
 
 @pytest.mark.asyncio

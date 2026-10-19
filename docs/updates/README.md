@@ -25,6 +25,7 @@
 | U13 | 路由分发器后台只读视图 | 后台可查路由参数/提示词模板/实时生效提示词与各候选 Agent 的线索完整度（不可改） | [13-router-agent-readonly.md](13-router-agent-readonly.md) |
 | U14 | 兜底意图应答通道 | 兜底意图带 `is_fallback` 标记不再被低置信阈值拦掉（`ROUTER_FALLBACK_ANSWER`）；knowledge_qa 认领「你是谁」类元问题 | [14-fallback-answer-path.md](14-fallback-answer-path.md) |
 | U15 | 链路详情显示路由意图依据 | 每个意图回显命中的路由关键词与 `clue_basis`（命中/配了没中/没配），后台时间线单独成块 | [15-route-intent-evidence.md](15-route-intent-evidence.md) |
+| U16 | 高频固定话术（硬模板 + 后台可配） | 身份/能力/探听三类在路由之前逐字应答（毫秒级、不进模型），规则入库可后台改，排版软约束统一进基类提示词 | [16-canned-scripts-db.md](16-canned-scripts-db.md) |
 
 ## 与三份主文档的关系
 

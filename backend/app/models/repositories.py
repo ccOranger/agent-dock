@@ -12,6 +12,7 @@ from app.core.database import SessionLocal
 from app.models.entities import (
     AgentMeta,
     AuditLog,
+    CannedScript,
     CustomerUser,
     Document,
     KnowledgeBase,
@@ -612,6 +613,106 @@ class KnowledgeBaseRepo:
             if row:
                 await db.delete(row)
                 await db.commit()
+
+
+class CannedScriptRepo:
+    """高频固定话术仓储（热路径每轮读一次，只走 enabled+priority 的窄查询）。"""
+
+    @staticmethod
+    async def list_enabled() -> list[CannedScript]:
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(CannedScript)
+                    .where(CannedScript.enabled == True)  # noqa: E712
+                    .order_by(CannedScript.priority, CannedScript.created_at)
+                )
+            ).scalars().all()
+            return list(rows)
+
+    @staticmethod
+    async def list_all() -> list[CannedScript]:
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(select(CannedScript).order_by(CannedScript.priority, CannedScript.created_at))
+            ).scalars().all()
+            return list(rows)
+
+    @staticmethod
+    async def get_by_key(key: str) -> CannedScript | None:
+        async with SessionLocal() as db:
+            return (
+                await db.execute(select(CannedScript).where(CannedScript.key == key))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def create(**fields) -> CannedScript:
+        async with SessionLocal() as db:
+            row = CannedScript(**fields)
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def update(key: str, **fields) -> CannedScript | None:
+        async with SessionLocal() as db:
+            row = (
+                await db.execute(select(CannedScript).where(CannedScript.key == key))
+            ).scalar_one_or_none()
+            if not row:
+                return None
+            for k, v in fields.items():
+                if v is not None and hasattr(row, k):
+                    setattr(row, k, v)
+            row.updated_at = datetime.now()
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def set_enabled(key: str, enabled: bool) -> CannedScript | None:
+        async with SessionLocal() as db:
+            row = (
+                await db.execute(select(CannedScript).where(CannedScript.key == key))
+            ).scalar_one_or_none()
+            if not row:
+                return None
+            row.enabled = enabled
+            row.updated_at = datetime.now()
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def delete(key: str) -> bool:
+        """物理删除（调用方需先挡住 is_builtin，种子话术只允许停用不允许删）。"""
+        async with SessionLocal() as db:
+            row = (
+                await db.execute(select(CannedScript).where(CannedScript.key == key))
+            ).scalar_one_or_none()
+            if not row:
+                return False
+            await db.delete(row)
+            await db.commit()
+            return True
+
+    @staticmethod
+    def to_dict(row: CannedScript) -> dict:
+        return {
+            "id": str(row.id),
+            "key": row.key,
+            "title": row.title,
+            "category": row.category,
+            "patterns": list(row.patterns or []),
+            "keywords": list(row.keywords or []),
+            "reply_text": row.reply_text or "",
+            "priority": row.priority,
+            "enabled": row.enabled,
+            "is_builtin": row.is_builtin,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
 
 
 class AgentRepo:

@@ -52,8 +52,11 @@
 | 新建的动态 Agent 总路由不到 | 后台「路由分发器」→「候选 Agent 清单」定位原因：不在表里 = 被禁用/未启用；在表里但「线索完整度 = 仅描述」= 没填 `routing_keywords`，提示词里只有一行适用范围；填了多条却不命中 = 超出前 12 个未注入，或关键词/典型问法与客户真实说法不贴合（[U12](updates/12-agent-routing-clues.md)） |
 | 启动日志告警「DB 中存在未在代码注册的 code Agent（已失效）」 | 代码已下线但 agents 表残留 `source=code` 行；**不再阻断启动**，该类行在后台 Agent 列表标「已失效」，可直接在后台删除（见 [U11](updates/11-code-agent-transparency-state.md)） |
 | 启动因连接失败中断，日志涉及 Neo4j | `MEMORY_TYPES` 含 `semantic` 但未部署 Neo4j；去掉 `semantic` 或起 Neo4j |
-| SSE 无 `route` 事件 | 检查 LLM_API_KEY / 路由模型可达性；看日志 `路由结果解析失败` |
-| 寒暄/「你是谁」这类提问直接转人工、无任何应答 | 该轮被判「不贴合任何 Agent」→ 兜底意图（置信度固定 0.3）低于阈值即整轮 `handover(low_confidence)`。确认 `ROUTER_FALLBACK_ANSWER=true`（默认）且兜底 Agent 的 `routing_keywords` 已认领元问题（[U14](updates/14-fallback-answer-path.md)）；链路页 `route.intent` span 的 `is_fallback` 可辨识兜底轮 |
+| SSE 无 `route` 事件 | 检查 LLM_API_KEY / 路由模型可达性；看日志 `路由结果解析失败`；**例外**：命中固定话术的轮次本来就没有 `route` 事件，链路里只有一个 `canned.script` span（[U16](updates/16-canned-scripts-db.md)） |
+| 寒暄/「你是谁」这类提问直接转人工、无任何应答 | 先看链路：这三类正常应由固定话术在路由之前逐字应答（[U16](updates/16-canned-scripts-db.md)），出现 `handover` 说明对应话术被停用、被删掉，或表里压根没数据（代码里无兜底，新库必须跑 `scripts/seed_data.py`）：后台「固定话术」页用命中测试确认。走路由的轮次才是该轮被判「不贴合任何 Agent」→ 兜底意图（置信度固定 0.3）低于阈值即整轮 `handover(low_confidence)`：确认 `ROUTER_FALLBACK_ANSWER=true`（默认）且兜底 Agent 的 `routing_keywords` 已认领元问题（[U14](updates/14-fallback-answer-path.md)）；链路页 `route.intent` span 的 `is_fallback` 可辨识兜底轮 |
+| 后台改了固定话术却不生效 | 运行时只读 `canned_scripts` 表（代码里无兜底）：先查该行的 `enabled` 与 `reply_text`（正文为空视为未配，会被丢弃）；日志 `固定话术读取失败，本轮跳过话术判定` 说明表缺失/读挂，此时话术完全不生效（对话不受影响），跑 `scripts/seed_data.py` 补建表与种子 |
+| 后台编辑固定话术保存报 422 | 多为规则列表超长：`patterns` 上限 100、`keywords` 上限 60（探听种子已占 32 个关键词，所以上限不能低于种子规模，否则改一个标点也被拒）；页面会显示当前条数，弹窗现在会把后端 `detail` 转成「字段名: 原因」，按字段定位是哪侧超了（[U16](updates/16-canned-scripts-db.md) §8） |
+| 客户真实业务诉求被一句模板打发掉（误吞） | 误吞只可能来自 `keywords`（包含即命中）：后台「固定话术」页删掉过宽的词，新增时用命中测试先拿业务问法验一句；问法（`patterns`）是全等语义，不会吞掉带后半句的复合提问 |
 | 多意图消息只应答一个诉求 | 看日志 `[route] ... intents=N`：`intents=1` 是模型没拆意图（调提示词/换路由模型）；`intents≥2` 但只走一个分支则受 `ROUTER_MAX_INTENTS` 或 `ROUTER_CONFIDENCE_THRESHOLD` 限制（低于阈值的次要意图会被丢弃） |
 | 想知道「这句凭什么判给这个 Agent」/ 路由判错 Agent | 链路详情 `route.intent` 的「意图依据」：`keyword_hit` 看命中词（本地子串匹配，仅参考，不是模型真实判据）；`keyword_miss` 说明靠语义判的，应去 Agent 管理补与客户真实说法贴合的关键词；`no_keywords` 说明该 Agent 压根没配线索（[U15](updates/15-route-intent-evidence.md)） |
 | 工具「调了却没落库」/模型自演假结果 `[TOOL_CALL...]` | 自定义工具是 `async run(**kwargs)`，必须由 `orchestrator._execute_tool` 经 `run_coroutine_threadsafe` 回投主 loop 执行（[U09](updates/09-async-tool-execution.md)）；勿绕回框架同步 `_execute_tool_call` |
