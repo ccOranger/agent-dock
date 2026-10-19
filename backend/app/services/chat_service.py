@@ -15,6 +15,18 @@ logger = logging.getLogger(__name__)
 # 每轮对话仅取最近 N 条历史作为路由/跨轮记忆上下文，避免长会话全量加载
 HISTORY_FETCH_LIMIT = 50
 
+# 与 SessionRepo/entities 中 Session.title 的默认值保持一致：
+# 只要标题仍是这个占位值，就认为会话还没被命名过，可以用首条消息自动补全
+DEFAULT_SESSION_TITLE = "新对话"
+
+
+def derive_session_title(message: str, max_len: int = 24) -> str:
+    """用用户首条消息生成会话标题：折叠换行/连续空白，超长截断。"""
+    cleaned = " ".join(message.split())
+    if not cleaned:
+        return ""
+    return cleaned[:max_len] + ("…" if len(cleaned) > max_len else "")
+
 
 class ChatService:
     def __init__(self):
@@ -39,6 +51,12 @@ class ChatService:
     ) -> AsyncIterator[str]:
         async with SessionLocal() as db:
             session = await SessionRepo.get_or_create(user_id, session_id, db=db)
+            # 新建会话默认标题是占位值"新对话"，历史列表里区分度差；
+            # 用户手动重命名过（不再是占位值）的会话不覆盖。
+            if session.title == DEFAULT_SESSION_TITLE:
+                derived = derive_session_title(message)
+                if derived:
+                    session.title = derived
             user_msg = await MessageRepo.add(session.id, role="user", content=message, db=db)
             # 用户消息先落库：后续异常 / 客户端断连也不丢用户输入
             await db.commit()
@@ -117,6 +135,10 @@ class ChatService:
             raise UnsafeInput()
         async with SessionLocal() as db:
             session = await SessionRepo.get_or_create(user_id, session_id, db=db)
+            if session.title == DEFAULT_SESSION_TITLE:
+                derived = derive_session_title(message)
+                if derived:
+                    session.title = derived
             user_msg = await MessageRepo.add(session.id, role="user", content=message, db=db)
             await db.commit()
 

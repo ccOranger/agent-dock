@@ -18,6 +18,12 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // Prometheus 指标端点（后端 main.py 根路径 /metrics，无需鉴权），
+      // Dashboard 通过相对链接 /metrics 访问，必须显式代理，否则被 Vite SPA 回退吞掉。
+      '/metrics': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

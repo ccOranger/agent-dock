@@ -18,6 +18,8 @@ class FakeSession:
         self.id = "11111111-1111-1111-1111-111111111111"
         self.user_id = "22222222-2222-2222-2222-222222222222"
         self.last_route_to = "order_service"
+        # 与真实 ORM 默认值保持一致：新建会话标题是占位值，等待首条消息自动补全
+        self.title = "新对话"
 
 
 def _install_fakes(monkeypatch, *, events, inserted: list, raiser: Exception | None = None, outcome=OUTCOME_ANSWERED):
@@ -239,3 +241,35 @@ async def test_collector_disabled_skips_write(monkeypatch):
     assert inserted == []
     # 开关关闭仍要回带 trace_id，日志关联不能断
     assert _payload(chunks[-1], "done")["trace_id"] == "tid-off"
+
+
+@pytest.mark.asyncio
+async def test_stream_sets_title_from_first_message(monkeypatch):
+    """新建会话默认标题为占位值时，用首条用户消息自动命名（折叠空白+截断）。"""
+    inserted: list[dict] = []
+    service, sess = _install_fakes(
+        monkeypatch,
+        events=[{"type": "text", "data": {"content": "已发货"}}],
+        inserted=inserted,
+    )
+    long_msg = "我想\n\n查询一下   这个订单到底什么时候能送到，急用！！！"
+    await _drain(service.stream(user_id=sess.user_id, session_id=None, message=long_msg))
+
+    assert sess.title.startswith("我想 查询一下")  # 换行/连续空白被折叠成单个空格
+    assert len(sess.title) <= 25  # 24 字 + 省略号
+    assert sess.title.endswith("…")
+
+
+@pytest.mark.asyncio
+async def test_renamed_session_title_not_overwritten(monkeypatch):
+    """已被手动重命名的会话（不再是占位值）不能再被首条消息覆盖。"""
+    inserted: list[dict] = []
+    service, sess = _install_fakes(
+        monkeypatch,
+        events=[{"type": "text", "data": {"content": "已发货"}}],
+        inserted=inserted,
+    )
+    sess.title = "我的售后问题"
+    await _drain(service.stream(user_id=sess.user_id, session_id=None, message="另一个问题"))
+
+    assert sess.title == "我的售后问题"
