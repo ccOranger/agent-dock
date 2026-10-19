@@ -257,6 +257,7 @@ class Orchestrator:
         session_id: str,
         query: str,
         history: list[dict],
+        user_message_id: str | None = None,
         last_route_to: str | None = None,
         max_intents: int | None = None,
         collector=None,
@@ -265,6 +266,7 @@ class Orchestrator:
 
         - history / last_route_to 一并交给路由，使追问能续接上一轮的 Agent
         - max_intents：本轮最多执行的意图数，默认取 settings.router_max_intents
+        - user_message_id：本轮用户消息 id，归档记忆时写入溯源列
         - collector：链路采集器（app.core.tracing.TraceCollector），为空则不采集
         """
         max_intents = max(1, int(max_intents if max_intents is not None else settings.router_max_intents))
@@ -274,6 +276,8 @@ class Orchestrator:
             query, history=history, last_route_to=last_route_to, collector=collector
         )
         intents: list[dict] = intent_result["intents"]
+        # 本轮生效的兜底 Agent（由路由层从生效清单派生，避免指向已禁用的 Agent）
+        fallback_agent = intent_result.get("fallback_agent")
         if collector:
             collector.record_intents(intents, max_intents)
         primary = intents[0]
@@ -299,26 +303,50 @@ class Orchestrator:
         #          仅次要意图不达标则丢弃该分支、主意图照常应答）----
         qualified = [i for i in intents if i["confidence"] >= CONFIDENCE_THRESHOLD]
         if not qualified:
-            if collector:
-                collector.record_outcome(OUTCOME_HANDOVER, reason="low_confidence")
-                collector.mark_finished()
-            yield {
-                "type": "handover",
-                "data": {"reason": "low_confidence", "confidence": confidence},
-            }
-            return
+            # 例外：兜底意图的 confidence 是提示词约定的固定低值（见 router_agent.FALLBACK_CONFIDENCE），
+            # 不属于“模型拿不准”，默认交给兜底 Agent 应答而不是整轮转人工（可用 ROUTER_FALLBACK_ANSWER 关闭）
+            fallback_intents = [i for i in intents if i.get("is_fallback")]
+            if settings.router_fallback_answer and fallback_intents:
+                qualified = fallback_intents
+                logger.info(f"路由未命中具体业务，由兜底 Agent 应答: {fallback_intents[0]['agent_name']}")
+            else:
+                if collector:
+                    collector.record_outcome(OUTCOME_HANDOVER, reason="low_confidence")
+                    collector.mark_finished()
+                yield {
+                    "type": "handover",
+                    "data": {"reason": "low_confidence", "confidence": confidence},
+                }
+                return
 
         targets = qualified[:max_intents]
 
         # ---- 3~6. 逐意图串行：解析 Agent → 上下文工程 → 流式执行，分块下发 ----
         streamed = False
         handled: list[str] = []
+        fallback_attempted = False
         for intent in targets:
             intent_name = intent["agent_name"]
             # 代码注册表优先，其次 DB 动态 Agent
             business_agent = await resolve_business_agent(
                 intent_name, user_id=user_id, session_id=session_id
             )
+            if business_agent is None and not fallback_attempted:
+                # 意图 Agent 不可用（后台禁用/已删除/模型臆造名称）：回落一次兜底 Agent，
+                # 而非直接给客户的整轮报 5006
+                if (
+                    fallback_agent
+                    and fallback_agent != intent_name
+                    and fallback_agent not in handled
+                ):
+                    fallback_attempted = True
+                    logger.warning(f"意图 {intent_name} 的 Agent 不可用，回落兜底 Agent: {fallback_agent}")
+                    business_agent = await resolve_business_agent(
+                        fallback_agent, user_id=user_id, session_id=session_id
+                    )
+                    if business_agent is not None:
+                        intent_name = fallback_agent
+                        intent = {**intent, "agent_name": fallback_agent}
             if business_agent is None:
                 logger.error(f"未注册的 Agent: {intent_name}")
                 if collector:
@@ -415,13 +443,14 @@ class Orchestrator:
         if collector:
             collector.record_outcome(OUTCOME_ANSWERED)
 
-        # ---- 7. 异步归档记忆（一轮只归档一次，记在主意图名下） ----
+        # ---- 7. 异步归档记忆（一轮只归档一次，记在主意图名下；主意图回落时记实际承接的 Agent） ----
         await self.ctx_engineer.persist_after_run(
             user_id=user_id,
             session_id=session_id,
             query=query,
-            agent_name=agent_name,
+            agent_name=handled[0] if handled else agent_name,
             history=history,
+            message_id=user_message_id,
             collector=collector,
         )
 

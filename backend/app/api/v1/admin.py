@@ -51,6 +51,8 @@ async def agents(user=Depends(require_admin)):
                 {
                     "name": meta.name,
                     "description": meta.description or meta.name,
+                    "routing_keywords": list(meta.routing_keywords or []),
+                    "routing_examples": list(meta.routing_examples or []),
                     "model": meta.llm_model or "",
                     "rag_namespace": meta.rag_namespace,
                     "mcp_tools": list(meta.mcp_tool_names or []),
@@ -94,6 +96,8 @@ async def agent_detail(name: str, user=Depends(require_admin)):
             data={
                 "name": meta.name,
                 "description": meta.description or meta.name,
+                "routing_keywords": list(meta.routing_keywords or []),
+                "routing_examples": list(meta.routing_examples or []),
                 "model": meta.llm_model or "",
                 "rag_namespace": meta.rag_namespace,
                 "mcp_tools": list(meta.mcp_tool_names or []),
@@ -151,6 +155,8 @@ async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
         name=body.name,
         display_name=body.display_name,
         description=body.description,
+        routing_keywords=[k.strip() for k in body.routing_keywords if str(k).strip()],
+        routing_examples=[e.strip() for e in body.routing_examples if str(e).strip()],
         system_prompt=body.system_prompt,
         llm_model=body.llm_model,
         rag_namespace=body.rag_namespace,
@@ -180,6 +186,9 @@ async def update_agent(name: str, body: DynamicAgentUpdate, user=Depends(require
         await _validate_custom_tool_bindings(body.custom_tool_names)
 
     fields = body.model_dump(exclude_unset=True)
+    for key in ("routing_keywords", "routing_examples"):
+        if fields.get(key) is not None:
+            fields[key] = [str(v).strip() for v in fields[key] if str(v).strip()]
     if fields:
         updated = await AgentRepo.update_dynamic(name, **fields)
         if updated is None:

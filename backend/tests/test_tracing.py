@@ -154,6 +154,36 @@ def test_record_intents_flattens_count_and_confidence():
     assert [s["attributes"]["intent_index"] for s in intent_spans] == [0, 1]
 
 
+def test_record_intents_carries_evidence_fields():
+    """意图依据（命中词 + 命中状况）要进 span，后台才能看出这句话为何判给该 Agent。"""
+    c = _collector()
+    c.record_intents(
+        [
+            {
+                "agent_name": "order_service",
+                "confidence": 0.9,
+                "reason": "查订单",
+                "matched_keywords": ["订单", "物流"],
+                "clue_basis": "keyword_hit",
+            },
+            {
+                "agent_name": "refund_service",
+                "confidence": 0.8,
+                "reason": "退款",
+                "matched_keywords": [],
+                "clue_basis": "no_keywords",
+            },
+        ],
+        max_intents=2,
+    )
+    first, second = [s for s in c.spans if s["type"] == "route.intent"]
+    assert first["attributes"]["matched_keywords"] == ["订单", "物流"]
+    assert first["attributes"]["clue_basis"] == "keyword_hit"
+    # 没命中就不写空数组，保持 span 精简；但状况字段仍要留下（前端要区分“没中”与“没配”）
+    assert "matched_keywords" not in second["attributes"]
+    assert second["attributes"]["clue_basis"] == "no_keywords"
+
+
 def test_add_unique_dedupes_dimension_lists():
     c = _collector()
     for _ in range(3):

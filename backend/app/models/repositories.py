@@ -345,6 +345,7 @@ class MemoryRepo:
         content: str,
         importance: float = 0.5,
         session_id: uuid.UUID | str | None = None,
+        source_message_id: uuid.UUID | str | None = None,
         metadata: dict | None = None,
         db: AsyncSession | None = None,
     ) -> Memory:
@@ -352,6 +353,7 @@ class MemoryRepo:
         own = db is None
         async with _session(db) as s:
             uid = uuid.UUID(str(user_id))
+            src_mid = uuid.UUID(str(source_message_id)) if source_message_id else None
             insert_values = {
                 Memory.__table__.c.id: uuid.uuid4(),
                 Memory.__table__.c.user_id: uid,
@@ -360,24 +362,31 @@ class MemoryRepo:
                 Memory.__table__.c.content: content,
                 Memory.__table__.c.importance: importance,
                 Memory.__table__.c.session_id: uuid.UUID(str(session_id)) if session_id else None,
+                Memory.__table__.c.source_message_id: src_mid,
             }
             # metadata 列名与 Table.metadata 属性同名，用 ORM 属性反查 Column 对象，规避 key 歧义
             insert_values[Memory.metadata_.property.columns[0]] = metadata or {}
+            conflict_set = {
+                "content": content,
+                "importance": importance,
+                # 只允许 working → 更高层的单向晋升，避免重复写入把已晋升行降回 working
+                "type": case(
+                    (Memory.__table__.c.type == "working", type_),
+                    else_=Memory.__table__.c.type,
+                ),
+                "updated_at": func.now(),
+            }
+            if src_mid is not None:
+                # 已有溯源则保留：后续重写（如晋升）传入的 id 不覆盖初次写入的原始消息
+                conflict_set["source_message_id"] = func.coalesce(
+                    Memory.__table__.c.source_message_id, src_mid
+                )
             stmt = (
                 pg_insert(Memory)
                 .values(insert_values)
                 .on_conflict_do_update(
                     index_elements=["user_id", "memory_uid"],
-                    set_={
-                        "content": content,
-                        "importance": importance,
-                        # 只允许 working → 更高层的单向晋升，避免重复写入把已晋升行降回 working
-                        "type": case(
-                            (Memory.__table__.c.type == "working", type_),
-                            else_=Memory.__table__.c.type,
-                        ),
-                        "updated_at": func.now(),
-                    },
+                    set_=conflict_set,
                 )
                 .returning(Memory)
             )

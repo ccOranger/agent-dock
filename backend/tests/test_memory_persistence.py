@@ -23,7 +23,13 @@ class _RecordingMemoryTool:
         return ""
 
 
-def _row(memory_uid="s1:abc", type_="working", access_count=3, content="我的订单到哪了"):
+def _row(
+    memory_uid="s1:abc",
+    type_="working",
+    access_count=3,
+    content="我的订单到哪了",
+    source_message_id=None,
+):
     return SimpleNamespace(
         user_id="22222222-2222-2222-2222-222222222222",
         memory_uid=memory_uid,
@@ -32,6 +38,7 @@ def _row(memory_uid="s1:abc", type_="working", access_count=3, content="我的�
         content=content,
         importance=0.42,
         session_id=None,
+        source_message_id=source_message_id,
         metadata_={"agent_name": "order_service"},
     )
 
@@ -133,6 +140,41 @@ async def test_persist_promotes_on_importance_and_entity(monkeypatch):
     assert mirrored["type"] == "semantic"
 
 
+@pytest.mark.asyncio
+async def test_persist_records_source_message_id(monkeypatch):
+    """镜像行必须溯源到当轮用户消息（与 messages 表的同源文本建立关联）。"""
+    mirrored: dict = {}
+
+    async def fake_upsert_mirror(user_id, memory_uid, type_, content, **kw):
+        mirrored["source_message_id"] = kw.get("source_message_id")
+
+    monkeypatch.setattr(settings, "memory_importance_threshold", 0.95)
+    monkeypatch.setattr(ce_mod, "get_memory_tool", lambda user_id: _RecordingMemoryTool())
+    monkeypatch.setattr(repo_mod.MemoryRepo, "upsert_mirror", fake_upsert_mirror)
+
+    message_id = "33333333-3333-3333-3333-333333333333"
+    await ContextEngineer().persist_after_run(
+        user_id="u1",
+        session_id="11111111-1111-1111-1111-111111111111",
+        query="你好",
+        agent_name="general",
+        history=[],
+        message_id=message_id,
+    )
+    assert mirrored["source_message_id"] == message_id
+
+    # 未传 message_id（如后台手工修正）不能报错，落库为 None
+    mirrored.clear()
+    await ContextEngineer().persist_after_run(
+        user_id="u1",
+        session_id="11111111-1111-1111-1111-111111111111",
+        query="你好",
+        agent_name="general",
+        history=[],
+    )
+    assert mirrored["source_message_id"] is None
+
+
 def test_hit_prefixes_parses_memory_tool_format():
     """召回结果行需解析出内容前缀；截断产生的 ... 后缀要剥掉，头部行不参与计数。"""
     long_content = "订" * 100
@@ -151,14 +193,18 @@ async def test_count_and_promote_on_access_threshold(monkeypatch):
     """spec 8.6：working 行 access_count 达阈 → 补写长期层并翻转镜像行类型。"""
     tool = _RecordingMemoryTool()
     upserts: list[dict] = []
+    MID = "33333333-3333-3333-3333-333333333333"
 
     async def fake_touch_access(user_id, prefixes):
         assert prefixes == ["我要投诉"]
-        # 一条达阈 working + 一条已晋升的 episodic（不应再次晋升）
-        return [_row(type_="working", access_count=3), _row(memory_uid="s2:x", type_="episodic", access_count=9)]
+        # 一条达阈 working（带溯源消息）+ 一条已晋升的 episodic（不应再次晋升）
+        return [
+            _row(type_="working", access_count=3, source_message_id=MID),
+            _row(memory_uid="s2:x", type_="episodic", access_count=9),
+        ]
 
     async def fake_upsert_mirror(user_id, memory_uid, type_, content, **kw):
-        upserts.append({"memory_uid": memory_uid, "type": type_})
+        upserts.append({"memory_uid": memory_uid, "type": type_, "mid": kw.get("source_message_id")})
 
     monkeypatch.setattr(settings, "memory_access_threshold", 3)
     monkeypatch.setattr(ce_mod, "get_memory_tool", lambda user_id: tool)
@@ -167,7 +213,8 @@ async def test_count_and_promote_on_access_threshold(monkeypatch):
 
     await ContextEngineer()._count_and_promote("u1", ["我要投诉"])
 
-    assert upserts == [{"memory_uid": "s1:abc", "type": "episodic"}]
+    # 晋升重写时原溯源消息 id 必须随行携带，不能被抹成 NULL
+    assert upserts == [{"memory_uid": "s1:abc", "type": "episodic", "mid": MID}]
     assert len(tool.calls) == 1
     assert tool.calls[0]["action"] == "add" and tool.calls[0]["memory_type"] == "episodic"
 

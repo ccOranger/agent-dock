@@ -26,6 +26,11 @@ class BaseBusinessAgent(ABC):
     # 用于通用问答 Agent，确保管理后台新建的知识库无需改代码即可被命中。
     search_all_knowledge_bases: bool = False
     mcp_tools: list[str] = []
+    # ---- 路由线索（与动态 Agent 的 agents.routing_keywords / routing_examples 同构）----
+    # 路由提示词只依这些声明选 Agent，不再硬编码任何具名优先规则；
+    # 未声明时降级为仅依 description 判定。
+    routing_keywords: list[str] = []
+    routing_examples: list[str] = []
 
     def __init__(self, user_id: str, session_id: str | None = None):
         self.user_id = user_id

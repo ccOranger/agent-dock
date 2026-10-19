@@ -90,6 +90,8 @@ class Memory(Base, TimestampMixin):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customer_users.id", ondelete="CASCADE"))
     memory_uid: Mapped[str] = mapped_column(String(64))
     session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
+    # 溯源到产生该记忆的那条用户消息；随消息删除级联（注意：删会话会连带删掉其来源记忆行）
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"))
     type: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
@@ -132,6 +134,11 @@ class AgentMeta(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(64), unique=True)
     display_name: Mapped[str | None] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text)
+    # ---- 路由线索：供路由 Agent 判定“何时选我”，代码/动态 Agent 均适用 ----
+    # 触发关键词（字符串数组），如 ["发票", "开票", "税号"]
+    routing_keywords: Mapped[list] = mapped_column(JSONB, default=list)
+    # 典型用户问法（字符串数组），每个 2~3 条即可，用于帮模型建立语义映射
+    routing_examples: Mapped[list] = mapped_column(JSONB, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     # ---- 动态 Agent 支持：区分来源，dynamic 才可在后台增删改 ----

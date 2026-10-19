@@ -14,6 +14,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'traces', component: () => import('@/views/TracesView.vue'), meta: { title: '链路追踪' } },
       { path: 'knowledge', component: () => import('@/views/KnowledgeBaseView.vue'), meta: { title: '知识库维护' } },
       { path: 'agents', component: () => import('@/views/AgentList.vue'), meta: { title: 'Agent 管理', roles: ['admin'] } },
+      { path: 'router', component: () => import('@/views/RouterInfoView.vue'), meta: { title: '路由分发器', roles: ['admin'] } },
       { path: 'mcp-servers', component: () => import('@/views/McpServersView.vue'), meta: { title: 'MCP 服务管理', roles: ['admin'] } },
       { path: 'custom-tools', component: () => import('@/views/CustomToolsView.vue'), meta: { title: '自定义工具', roles: ['admin'] } },
       { path: 'memory/:userId?', component: () => import('@/views/MemoryView.vue'), meta: { title: '记忆管理', roles: ['agent', 'admin'] } },

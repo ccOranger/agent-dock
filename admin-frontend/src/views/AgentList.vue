@@ -94,6 +94,45 @@
       <el-form-item label="System Prompt" required>
         <el-input v-model="form.system_prompt" type="textarea" :rows="5" placeholder="动态 Agent 的核心提示词" />
       </el-form-item>
+      <el-form-item>
+        <template #label>
+          路由关键词
+          <el-tooltip
+            placement="top"
+            content="告诉路由分发器“什么样的客户提问该派给我”。输入一个词后回车添加，可添多个；代码 Agent 的关键词在 Python 类里声明，此处仅维护动态 Agent。"
+          >
+            <span class="q-help">?</span>
+          </el-tooltip>
+        </template>
+        <el-input-tag
+          v-model="form.routing_keywords"
+          :max="20"
+          :token-separators="[',', '，']"
+          clearable
+          placeholder="输入关键词后回车添加，如：发票、开票、税号（逗号也可分隔）"
+          style="width: 100%"
+        />
+        <div class="muted hint">建议 5~12 个，写客户口语说法（“快递到哪了”）而非内部术语；不填则路由只能依描述猜测适用范围。实际注入了哪几条，可在「路由分发器」页查看</div>
+      </el-form-item>
+      <el-form-item>
+        <template #label>
+          典型问法
+          <el-tooltip
+            placement="top"
+            content="写 2~3 句客户真实会说的话，帮助模型建立语义映射：关键词管字面命中，典型问法管语义贴合。"
+          >
+            <span class="q-help">?</span>
+          </el-tooltip>
+        </template>
+        <el-input-tag
+          v-model="form.routing_examples"
+          :max="5"
+          clearable
+          placeholder="输入一句客户问法后回车添加，如：帮我开张发票"
+          style="width: 100%"
+        />
+        <div class="muted hint">仅前 3 条会注入路由提示词，建议写 2~3 条即可</div>
+      </el-form-item>
       <el-form-item label="模型">
         <el-input v-model="form.llm_model" placeholder="留空使用默认模型（LLM_MODEL_ID）" />
       </el-form-item>
@@ -217,6 +256,14 @@
           >—</span>
         </el-descriptions-item>
         <el-descriptions-item label="描述" :span="2">{{ detail.description || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="路由关键词" :span="2">
+          <el-tag v-for="k in detail.routing_keywords" :key="k" size="small" style="margin-right: 4px">{{ k }}</el-tag>
+          <span v-if="!detail.routing_keywords || !detail.routing_keywords.length" class="muted">—（未配置，路由仅依描述判定）</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="典型问法" :span="2">
+          <div v-for="e in detail.routing_examples" :key="e">{{ e }}</div>
+          <span v-if="!detail.routing_examples || !detail.routing_examples.length" class="muted">—</span>
+        </el-descriptions-item>
         <el-descriptions-item label="MCP 工具" :span="2">
           <el-tag v-for="t in detail.mcp_tools" :key="t" size="small" style="margin-right: 4px">{{ t }}</el-tag>
           <span v-if="!detail.mcp_tools || !detail.mcp_tools.length" class="muted">—</span>
@@ -278,6 +325,8 @@ const emptyForm = (): DynamicAgentPayload => ({
   name: '',
   display_name: '',
   description: '',
+  routing_keywords: [],
+  routing_examples: [],
   system_prompt: '',
   llm_model: '',
   rag_namespace: null,
@@ -342,6 +391,8 @@ function openEdit(row: AgentInfo) {
     name: row.name,
     display_name: row.display_name ?? '',
     description: row.description,
+    routing_keywords: [...(row.routing_keywords ?? [])],
+    routing_examples: [...(row.routing_examples ?? [])],
     system_prompt: row.system_prompt ?? '',
     llm_model: row.model ?? '',
     rag_namespace: row.rag_namespace ?? null,

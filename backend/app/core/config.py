@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     router_confidence_threshold: float = 0.5
     # 单条消息最多分发的业务意图数（多意图串行执行上限）
     router_max_intents: int = 2
+    # 路由判定“不贴合任何 Agent”时（兜底意图，置信度为提示词约定的固定低值）：
+    # true = 交给兜底 Agent 先应答，false = 仍按低置信走转人工
+    router_fallback_answer: bool = True
 
     # ===== 链路追踪（request_traces）=====
     trace_enabled: bool = True

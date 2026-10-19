@@ -12,6 +12,17 @@ class ComplaintAgent(BaseBusinessAgent):
     system_prompt = COMPLAINT_SYSTEM_PROMPT
     rag_namespace = "cs_after_sales"
 
+    # 路由线索（供路由 Agent 判定）
+    routing_keywords = [
+        "投诉", "不满", "差评", "虐待", "态度差", "太慢了", "欺骗",
+        "赔偿", "敷衍", "找领导", "曝光", "12315", "监管",
+    ]
+    routing_examples = [
+        "我要投诉，快递太慢了",
+        "你们这服务太差了，必须给我个说法",
+        "再不处理我就去消费者协会投诉",
+    ]
+
     def build_tools(self, registry: ToolRegistry) -> None:
         registry.register_tool(get_memory_tool(self.user_id))
         registry.register_tool(CreateTicketTool())

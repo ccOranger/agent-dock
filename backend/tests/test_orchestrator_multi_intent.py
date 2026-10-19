@@ -5,15 +5,22 @@ import pytest
 
 from app.agents import orchestrator as orch_mod
 from app.agents.orchestrator import Orchestrator
+from app.core.config import settings
 
 
 def _intent(name, conf=0.9, reason="r"):
     return {"agent_name": name, "confidence": conf, "reason": reason}
 
 
+def _fallback_intent(name="knowledge_qa", conf=0.3):
+    """路由判定“不贴合任何 Agent”时给出的兜底意图（置信度为提示词约定的固定低值）。"""
+    return {"agent_name": name, "confidence": conf, "reason": "解析失败", "is_fallback": True}
+
+
 class FakeRouter:
-    def __init__(self, intents):
+    def __init__(self, intents, fallback_agent=None):
         self.intents = intents
+        self.fallback_agent = fallback_agent
         self.calls: list[dict] = []
 
     async def route(self, query, history=None, last_route_to=None, collector=None):
@@ -26,6 +33,7 @@ class FakeRouter:
             "agent_name": primary["agent_name"],
             "confidence": primary["confidence"],
             "reason": primary["reason"],
+            "fallback_agent": self.fallback_agent,
         }
 
 
@@ -40,9 +48,9 @@ class FakeCtx:
         self.persisted.append(kw)
 
 
-def _make_orch(monkeypatch, intents, known=("knowledge_qa", "order_service", "complaint_handler")):
+def _make_orch(monkeypatch, intents, known=("knowledge_qa", "order_service", "complaint_handler"), fallback_agent=None):
     orch = Orchestrator()
-    orch.router = FakeRouter(intents)
+    orch.router = FakeRouter(intents, fallback_agent)
     orch.ctx_engineer = FakeCtx()
 
     async def fake_business_agent(business_agent, user_id, query, session_id="", history=None, collector=None, intent_index=0):
@@ -127,6 +135,30 @@ async def test_primary_low_confidence_hands_over(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fallback_intent_is_answered_not_handed_over(monkeypatch):
+    """兜底意图不能被“低置信转人工”吞掉，否则“你是谁”这类提问永远没人接。"""
+    monkeypatch.setattr(settings, "router_fallback_answer", True)
+    orch = _make_orch(monkeypatch, [_fallback_intent("knowledge_qa")])
+    events = await _collect(orch)
+    assert not any(e["type"] == "handover" for e in events)
+    starts = [e["data"] for e in events if e["type"] == "agent_start"]
+    assert [s["agent_name"] for s in starts] == ["knowledge_qa"]
+    assert any(e["type"] == "text" for e in events)
+    # 路由未命中具体业务：route 事件仍原样带出 is_fallback，前端/链路可辨
+    assert events[0]["data"]["intents"][0]["is_fallback"] is True
+
+
+@pytest.mark.asyncio
+async def test_fallback_answer_disabled_falls_back_to_handover(monkeypatch):
+    """ROUTER_FALLBACK_ANSWER=false 时恢复旧行为：兜底也按低置信转人工。"""
+    monkeypatch.setattr(settings, "router_fallback_answer", False)
+    orch = _make_orch(monkeypatch, [_fallback_intent("knowledge_qa")])
+    events = await _collect(orch)
+    assert [e["type"] for e in events] == ["route", "handover"]
+    assert events[1]["data"]["reason"] == "low_confidence"
+
+
+@pytest.mark.asyncio
 async def test_max_intents_caps_branches(monkeypatch):
     orch = _make_orch(
         monkeypatch,
@@ -160,6 +192,30 @@ async def test_all_unregistered_reports_5006(monkeypatch):
     assert events[-1]["type"] == "error"
     assert events[-1]["data"]["code"] == 5006
     assert orch.ctx_engineer.persisted == []
+
+
+@pytest.mark.asyncio
+async def test_unavailable_intent_agent_falls_back_to_fallback(monkeypatch):
+    """路由命中的 Agent 不可用（被禁用/已删）且路由带了兜底 Agent：回落应答，不再整轮 5006。"""
+    orch = _make_orch(monkeypatch, [_intent("ghost_agent")], fallback_agent="knowledge_qa")
+    events = await _collect(orch)
+    assert not any(e["type"] == "error" for e in events)
+    assert [e["data"]["agent_name"] for e in events if e["type"] == "agent_start"] == ["knowledge_qa"]
+    assert [e["data"]["content"] for e in events if e["type"] == "text"] == ["<knowledge_qa>"]
+    # 记忆归档记在实际上承接的 Agent 名下
+    assert orch.ctx_engineer.persisted[0]["agent_name"] == "knowledge_qa"
+
+
+@pytest.mark.asyncio
+async def test_fallback_attempted_only_once_per_turn(monkeypatch):
+    """多个不可用意图也只回落一次兜底，避免一轮里反复重复兜底回答。"""
+    orch = _make_orch(
+        monkeypatch,
+        [_intent("ghost_a"), _intent("ghost_b", 0.8)],
+        fallback_agent="knowledge_qa",
+    )
+    events = await _collect(orch, max_intents=2)
+    assert [e["data"]["agent_name"] for e in events if e["type"] == "agent_start"] == ["knowledge_qa"]
 
 
 @pytest.mark.asyncio

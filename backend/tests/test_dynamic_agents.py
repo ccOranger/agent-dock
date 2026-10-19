@@ -17,6 +17,8 @@ def _dyn_meta(name="dyn1", **kw):
         source="dynamic",
         enabled=True,
         description=kw.get("description", "动态描述"),
+        routing_keywords=kw.get("routing_keywords", ["发票", "开票"]),
+        routing_examples=kw.get("routing_examples", ["帮我开张发票"]),
         system_prompt=kw.get("system_prompt", "你是动态助手"),
         llm_model=kw.get("llm_model", ""),
         rag_namespace=kw.get("rag_namespace", None),
@@ -104,6 +106,27 @@ async def test_list_effective_agents_excludes_disabled_code(monkeypatch):
     assert "knowledge_qa" in names
 
 
+@pytest.mark.asyncio
+async def test_list_dynamic_agents_carries_routing_clues(monkeypatch):
+    """动态 Agent 的路由线索必须随清单输出，否则提示词里只有光秃秃一行描述。"""
+
+    async def fake_list_dynamic(enabled_only=True):
+        return [_dyn_meta(name="invoice_service", description="开票服务", routing_keywords=["发票", "税号"])]
+
+    monkeypatch.setattr(AgentRepo, "list_dynamic", fake_list_dynamic)
+    items = await registry.list_dynamic_agents()
+    assert items[0]["name"] == "invoice_service"
+    assert items[0]["routing_keywords"] == ["发票", "税号"]
+    assert items[0]["routing_examples"] == ["帮我开张发票"]
+
+
+def test_code_agents_declare_routing_clues():
+    """三个代码 Agent 已声明路由线索（提示词不再硬编码具名优先规则，靠它们补足判别依据）。"""
+    for item in registry.list_agents():
+        assert item["routing_keywords"], f"{item['name']} 缺 routing_keywords"
+        assert item["routing_examples"], f"{item['name']} 缺 routing_examples"
+
+
 # ===== API：动态 Agent CRUD =====
 @pytest.fixture
 def admin_client(make_test_app):
@@ -147,6 +170,8 @@ def test_create_dynamic_agent_success(admin_client, monkeypatch):
             "name": "my_dyn",
             "display_name": "我的动态",
             "description": "退款场景",
+            "routing_keywords": ["退款", " 到账 ", ""],
+            "routing_examples": ["退款什么时候到账"],
             "system_prompt": "你是退款助手",
             "mcp_tool_names": [],
         },
@@ -154,6 +179,9 @@ def test_create_dynamic_agent_success(admin_client, monkeypatch):
     assert resp.status_code == 200
     assert captured["fields"]["name"] == "my_dyn"
     assert captured["fields"]["system_prompt"] == "你是退款助手"
+    # 空串被剔除、首尾空白被清理（避免提示词里出现空关键词）
+    assert captured["fields"]["routing_keywords"] == ["退款", "到账"]
+    assert captured["fields"]["routing_examples"] == ["退款什么时候到账"]
 
 
 def test_delete_code_agent_forbidden(admin_client, monkeypatch):
@@ -177,6 +205,10 @@ def test_agents_list_merges_source(admin_client, monkeypatch):
     assert data["knowledge_qa"]["source"] == "code"
     assert data["dyn1"]["source"] == "dynamic"
     assert data["dyn1"]["mcp_tools"] == ["mcp_refund"]
+    # 路由线索随列表回显（后台编辑表单靠它回填）
+    assert data["dyn1"]["routing_keywords"] == ["发票", "开票"]
+    assert data["dyn1"]["routing_examples"] == ["帮我开张发票"]
+    assert data["knowledge_qa"]["routing_keywords"]
     # 代码 Agent 也应带出系统提示词/注册工具/MCP（从代码静态解析，无需 DB）
     order = data["order_service"]
     assert order["system_prompt"]
@@ -224,6 +256,8 @@ def _code_meta(name="legacy_agent", **kw):
         source="code",
         enabled=kw.get("enabled", True),
         description=kw.get("description", "已下线的代码 Agent"),
+        routing_keywords=kw.get("routing_keywords", []),
+        routing_examples=kw.get("routing_examples", []),
         system_prompt=kw.get("system_prompt", None),
         llm_model=kw.get("llm_model", ""),
         rag_namespace=kw.get("rag_namespace", None),

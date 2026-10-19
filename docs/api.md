@@ -84,15 +84,24 @@ POST   /api/v1/knowledge/search                   # 检索测试（body: namespa
 
 ## Admin · Agents（代码 + 动态混合注册，require_admin 写）
 
-（[U03](updates/03-dynamic-agents.md)、[U11](updates/11-code-agent-transparency-state.md)）
+（[U03](updates/03-dynamic-agents.md)、[U11](updates/11-code-agent-transparency-state.md)、[U12](updates/12-agent-routing-clues.md)）
 
 ```
 GET    /api/v1/admin/agents                 # 代码注册表 + DB 动态 Agent 合并（code 带出 system_prompt/registered_tools/custom_tool_names/mcp_tools；孤儿 code 行标 stale）
 GET    /api/v1/admin/agents/{name}          # Agent 详情（代码/动态均含注册工具；stale 行回显 DB 镜像）
-POST   /api/v1/admin/agents                 # 创建动态 Agent（重名/冲突→3002；校验 MCP 绑定、自定义工具与 namespace）
-PUT    /api/v1/admin/agents/{name}          # 编辑动态 Agent（仅 source=dynamic 可编辑）
+POST   /api/v1/admin/agents                 # 创建动态 Agent（重名/冲突→3002；校验 MCP 绑定、自定义工具与 namespace；可带 routing_keywords/routing_examples）
+PUT    /api/v1/admin/agents/{name}          # 编辑动态 Agent（仅 source=dynamic 可编辑；routing_* 传入即更新，空串项自动剔除）
 DELETE /api/v1/admin/agents/{name}          # 删除（在册代码 Agent 不可删→1001；代码已下线的孤儿行可删）
 PATCH  /api/v1/admin/agents/{name}/toggle   # 启用/禁用（body: enabled；禁用后路由与解析真正不命中）
+```
+
+## Admin · Router（路由分发器，只读，require_admin）
+
+（[U13](updates/13-router-agent-readonly.md)）路由 Agent 的定义在代码 + `.env` 中，**不入库也不可在线修改**，因此本组只有两个 GET（写方法返回 405）。
+
+```
+GET    /api/v1/admin/router            # 基本档案：职责/模型/意图上限/置信阈值/兜底候选与兜底应答模式（fallback_confidence、fallback_answer）/上下文与线索上限/提示词模板原文与占位符说明（editable 恒为 false）
+GET    /api/v1/admin/router/prompt     # 当前生效提示词预览（按生效清单实时渲染）+ 每个候选 Agent 的线索与实际注入部分
 ```
 
 ## Admin · Custom Tools（代码自定义工具登记，require_admin 写 / require_staff 读）
@@ -149,6 +158,11 @@ GET    /api/v1/admin/traces/sessions/{id}    # 某会话按轮次链路摘要（
 GET    /api/v1/admin/traces/{trace_ref}      # 单条详情（含 spans 时间线；trace_ref=行ID/HTTP trace_id/助手消息ID）
 ```
 
+> 链路详情的 `spans` 中，`route.intent`（每个路由意图）除 `intent_index`/`confidence`/`reason`/`is_fallback` 外，
+> 还带意图依据 `matched_keywords`（原句命中的路由关键词，**本地子串匹配、仅供参考**，路由实际由 LLM 语义判定）
+> 与 `clue_basis`（`keyword_hit` / `keyword_miss` 配了关键词但未出现 / `no_keywords` 未配关键词），
+> 见 [U15](updates/15-route-intent-evidence.md)。数据只存 `spans` JSONB，无额外列。
+
 ## Admin · Tools / Metrics
 
 ```
@@ -163,7 +177,7 @@ GET    /metrics                             # Prometheus 全局抓取端点
 | event | data | 说明 |
 |-------|------|------|
 | `session` | `{session_id}` | 首帧会话 ID |
-| `route` | `{agent_name, confidence, reason, intents, intent_total}` | 路由结果；`agent_name/confidence/reason` 为主意图，`intents` 为按主次排序的意图清单（最多 `ROUTER_MAX_INTENTS` 个）（[U02](updates/02-multi-intent-routing.md)） |
+| `route` | `{agent_name, confidence, reason, intents, intent_total}` | 路由结果；`agent_name/confidence/reason` 为主意图，`intents` 为按主次排序的意图清单（最多 `ROUTER_MAX_INTENTS` 个，[U02](updates/02-multi-intent-routing.md)）；兜底意图额外带 `is_fallback: true`（[U14](updates/14-fallback-answer-path.md)）；每个意图额外带 `matched_keywords`/`clue_basis` 意图依据（[U15](updates/15-route-intent-evidence.md)） |
 | `agent_start` | `{agent_name, intent_index, intent_total, confidence, reason}` | 一个意图分支开始应答 |
 | `agent_end` | `{agent_name, intent_index, intent_total}` | 该意图分支应答结束 |
 | `text` | `{content}` | 文本增量 |
@@ -175,6 +189,8 @@ GET    /metrics                             # Prometheus 全局抓取端点
 | `error` | `{code, message}` | 错误 |
 
 > 多意图：一条消息被识别为多个意图时，各业务 Agent **串行**执行，`intent_index > 0` 的分支前会先下发一段 `text`（`\n\n---\n\n`）作分块分隔；主意图置信度低于 `ROUTER_CONFIDENCE_THRESHOLD` 时整轮 `handover`，仅次要意图低于阈值则该分支直接丢弃。
+>
+> 例外（[U14](updates/14-fallback-answer-path.md)）：路由判定“不贴合任何 Agent”而给出的兜底意图（`is_fallback: true`，置信度为提示词约定的固定低值 0.3）**不受阈值影响**，默认由兜底 Agent 先应答；置 `ROUTER_FALLBACK_ANSWER=false` 可恢复“也转人工”的旧行为。
 
 ## 错误码（`app/core/exceptions.py`）
 

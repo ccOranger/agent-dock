@@ -114,6 +114,9 @@ class DynamicAgentCreate(BaseModel):
     name: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_]+$")
     display_name: str | None = Field(default=None, max_length=128)
     description: str = Field(min_length=1, max_length=512)
+    # 路由线索：告知路由分发器“什么样的客户消息该选我”，不填则仅依 description 判定
+    routing_keywords: list[str] = Field(default_factory=list, max_length=20)
+    routing_examples: list[str] = Field(default_factory=list, max_length=5)
     system_prompt: str = Field(min_length=1)
     llm_model: str = Field(default="", max_length=128)  # 空则用默认 LLM_MODEL_ID
     rag_namespace: str | None = Field(default=None, max_length=64)
@@ -130,6 +133,8 @@ class DynamicAgentUpdate(BaseModel):
 
     display_name: str | None = Field(default=None, max_length=128)
     description: str | None = Field(default=None, max_length=512)
+    routing_keywords: list[str] | None = Field(default=None, max_length=20)
+    routing_examples: list[str] | None = Field(default=None, max_length=5)
     system_prompt: str | None = Field(default=None, min_length=1)
     llm_model: str | None = Field(default=None, max_length=128)
     rag_namespace: str | None = Field(default=None, max_length=64)

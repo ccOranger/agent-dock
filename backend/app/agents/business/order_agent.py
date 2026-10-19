@@ -13,6 +13,17 @@ class OrderAgent(BaseBusinessAgent):
     system_prompt = ORDER_SYSTEM_PROMPT
     rag_namespace = "cs_order"
 
+    # 路由线索（供路由 Agent 判定）
+    routing_keywords = [
+        "订单", "订单号", "物流", "快递", "发货", "配送", "签收",
+        "退换货", "改地址", "取消订单", "SO2024", "ORD",
+    ]
+    routing_examples = [
+        "我的订单 ORD123456 到哪了",
+        "帮我把收货地址改成公司",
+        "这个快递什么时候能送到",
+    ]
+
     # 本业务使用的 MCP 工具
     mcp_tools = ["mcp_logistics", "mcp_refund"]
 

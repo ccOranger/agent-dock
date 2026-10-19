@@ -66,6 +66,7 @@ class ChatService:
                     session_id=str(session.id),
                     query=message,
                     history=history,
+                    user_message_id=str(user_msg.id),
                     # 上一轮承接的 Agent：供路由判定追问续接
                     last_route_to=session.last_route_to,
                     collector=collector,
@@ -138,6 +139,7 @@ class ChatService:
                     session_id=str(session.id),
                     query=message,
                     history=history,
+                    user_message_id=str(user_msg.id),
                     last_route_to=session.last_route_to,
                     collector=collector,
                 ):

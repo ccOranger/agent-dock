@@ -298,6 +298,7 @@ class ContextEngineer:
                 content=row.content,
                 importance=row.importance,
                 session_id=row.session_id,
+                source_message_id=getattr(row, "source_message_id", None),
                 metadata=row.metadata_ or {},
             )
 
@@ -318,6 +319,7 @@ class ContextEngineer:
         query: str,
         agent_name: str,
         history: list[dict],
+        message_id: str | None = None,
         collector=None,
     ) -> None:
         """会话轮次结束后异步归档记忆：每轮写 working 层，达标晋升长期（spec 8.1/8.6）"""
@@ -369,6 +371,8 @@ class ContextEngineer:
                 content=query,
                 importance=importance,
                 session_id=session_id,
+                # 溯源到当轮用户消息，避免与 messages 表成为两份无关联的同源文本
+                source_message_id=message_id,
                 metadata=metadata,
             )
             # 顺手触发过期 working 行清理（内部节流，绝大多数轮次直接返回）

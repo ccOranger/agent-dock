@@ -513,6 +513,8 @@ CREATE TABLE memories (
     user_id         UUID NOT NULL REFERENCES customer_users(id) ON DELETE CASCADE,
     memory_uid      VARCHAR(64) NOT NULL,
     session_id      UUID REFERENCES sessions(id) ON DELETE SET NULL,
+    -- 溯源：产生该记忆的当轮用户消息（content 与该行文本同源，此列建立关联而非重复存储）
+    source_message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
     type            VARCHAR(16) NOT NULL
                     CHECK (type IN ('working','episodic','semantic','perceptual')),
     content         TEXT NOT NULL,
@@ -526,6 +528,7 @@ CREATE TABLE memories (
     UNIQUE(user_id, memory_uid)
 );
 CREATE INDEX idx_memories_user_type ON memories(user_id, type);
+CREATE INDEX idx_memories_source_message ON memories(source_message_id);
 CREATE INDEX idx_memories_importance ON memories(importance DESC);
 CREATE INDEX idx_memories_content_trgm ON memories USING gin (content gin_trgm_ops);
 
@@ -568,6 +571,8 @@ CREATE TABLE agents (
     name            VARCHAR(64) UNIQUE NOT NULL,
     display_name    VARCHAR(128),
     description     TEXT,
+    routing_keywords JSONB NOT NULL DEFAULT '[]'::jsonb,    -- 路由线索：触发关键词
+    routing_examples JSONB NOT NULL DEFAULT '[]'::jsonb,    -- 路由线索：典型用户问法
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     sort_order      INT DEFAULT 0,
     source          VARCHAR(16) NOT NULL DEFAULT 'code',   -- code | dynamic
@@ -1210,26 +1215,53 @@ class RouterAgent:
 
 **文件：`backend/app/agents/prompts/router.py`**
 
+> 规则不得硬编码任何具体 Agent 名（旧版曾写“涉及订单→order_service”等具名优先条款，
+> 会使后台新建的动态 Agent 抢不到路由）。“何时选我”由各 Agent 的路由线索提供：
+> 代码 Agent 在 Python 类属性 `routing_keywords` / `routing_examples` 声明，
+> 动态 Agent 在 `agents.routing_keywords` / `agents.routing_examples` 维护（后台表单可编）。
+> 兜底 Agent 名由生效清单派生（`RouterAgent.resolve_fallback_agent`，首选 `knowledge_qa`，
+> 被禁用则降级到首个生效 Agent），作为 `{fallback_agent}` 注入提示词。
+
 ```python
 ROUTER_SYSTEM_PROMPT = """你是智能客服系统的路由分发器。
-根据用户消息，判断应该由哪个业务 Agent 处理。
+根据用户消息（必要时结合最近对话），判断应由哪些业务 Agent 处理，并按主次顺序输出意图。
 
-可用业务 Agent：
+可用业务 Agent（每个 Agent 列出其适用范围、触发关键词、典型问法）：
 {agent_list}
 
-请只输出 JSON（不要任何解释）：
+最近对话（可能为“（无）”）：
+{conversation}
+
+上一轮承接的业务 Agent（可能为“（无）”）：
+{last_agent}
+
+请只输出 JSON（不要任何解释、不要代码块标记）：
 {{
-  "agent_name": "<上述业务 Agent 名称之一>",
-  "confidence": 0.0~1.0 之间的置信度,
-  "reason": "一句话说明分类依据"
+  "intents": [
+    {{
+      "agent_name": "<上述业务 Agent 名称之一>",
+      "confidence": 0.0~1.0 之间的置信度,
+      "reason": "一句话说明分类依据"
+    }}
+  ]
 }}
 
 规则：
-- 若无法明确判断，agent_name 填 "knowledge_qa"，confidence 填 0.3
-- 若涉及订单号/物流/退换，优先 order_service
-- 若包含投诉/不满/差评，优先 complaint_handler
-- 若是一般知识问题，knowledge_qa
+- 一条消息最多输出 {max_intents} 个意图，按“主意图在前”排序；只有一个诉求时只输出 1 个元素
+- agent_name 必须逐字照抄清单中冒号前的名称，不得重复、不得臆造、不得自行翻译或改写
+- 选择依据只看各 Agent 声明的适用范围/关键词/典型问法与用户消息的贴合度，不要凭名称猜测职责，也不要偏向某个特定 Agent
+- 用户消息同时落入多个 Agent 的适用范围时（如既要查订单又要开票），按主次输出多个意图
+- 若当前消息只是对上一轮的追问或补充，只输出上一轮承接的业务 Agent 一个意图
+- 与任何 Agent 的适用范围都不贴合时，只输出一个意图：agent_name 填 {fallback_agent}，confidence 填 0.3
 """
+```
+
+`{agent_list}` 的渲染格式（`RouterAgent._format_agent_list`，线索缺失时降级为一行描述）：
+
+```
+- invoice_service：开票服务：受理开票申请、修改抬头
+  关键词：发票、开票、抬头、税号
+  典型问法：帮我开张发票 / 发票抬头写错了能改吗
 ```
 
 ### 7.4 业务 Agent 示例（每个独立开发）

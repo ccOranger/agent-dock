@@ -167,6 +167,9 @@ export interface SearchResult {
 export interface AgentInfo {
   name: string
   description: string
+  /** 路由线索：触发关键词 / 典型用户问法 */
+  routing_keywords?: string[]
+  routing_examples?: string[]
   model: string
   rag_namespace: string | null
   rag_namespaces?: string[]
@@ -180,6 +183,64 @@ export interface AgentInfo {
   system_prompt?: string | null
   search_all_knowledge_bases?: boolean
   sort_order?: number
+}
+
+// ===== 路由分发器（只读）=====
+export interface RouterPlaceholderInfo {
+  name: string
+  desc: string
+}
+
+/** 路由 Agent 由代码 + .env 定义，后台只能看不能改 */
+export interface RouterAgentInfo {
+  name: string
+  agent_type: string
+  source: 'code'
+  editable: boolean
+  responsibility: string
+  model: string
+  max_intents: number
+  confidence_threshold: number
+  confidence_threshold_effect: string
+  fallback_candidates: string[]
+  fallback_agent_default: string
+  /** 兜底意图的约定置信度（固定低值，不是模型真实判断） */
+  fallback_confidence: number
+  /** 兜底意图是否交给兜底 Agent 应答（false = 仍按低置信转人工） */
+  fallback_answer: boolean
+  fallback_answer_effect: string
+  history_turns: number
+  history_chars: number
+  keywords_limit: number
+  examples_limit: number
+  system_prompt_template: string
+  placeholders: RouterPlaceholderInfo[]
+  definition_files: { agent: string; prompt: string }
+  env_keys: Record<string, string>
+}
+
+export type RouterClueLevel = 'full' | 'keywords_only' | 'examples_only' | 'description_only'
+
+export interface RouterCandidate {
+  name: string
+  description: string
+  source: 'code' | 'dynamic'
+  routing_keywords: string[]
+  routing_examples: string[]
+  keywords_total: number
+  examples_total: number
+  keywords_injected: string[]
+  examples_injected: string[]
+  clue_level: RouterClueLevel
+}
+
+export interface RouterPromptPreview {
+  prompt: string
+  prompt_chars: number
+  candidate_count: number
+  fallback_agent: string
+  fallback_from_candidates: boolean
+  candidates: RouterCandidate[]
 }
 
 export type MCPTransport = 'sse' | 'http' | 'stdio'
@@ -242,6 +303,9 @@ export interface DynamicAgentPayload {
   name: string
   display_name?: string | null
   description: string
+  /** 路由线索：不填也能保存，但路由只能依描述猜测适用范围 */
+  routing_keywords?: string[]
+  routing_examples?: string[]
   system_prompt: string
   llm_model?: string
   rag_namespace?: string | null

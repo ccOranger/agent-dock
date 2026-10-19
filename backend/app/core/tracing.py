@@ -188,7 +188,7 @@ class TraceCollector:
             target.append(value)
 
     def record_intents(self, intents: list[dict], max_intents: int) -> None:
-        """路由结果：意图数量、主意图置信度与每个意图的分类理由。"""
+        """路由结果：意图数量、主意图置信度与每个意图的分类依据。"""
         if not self.enabled:
             return
         self.intent_count = len(intents)
@@ -202,6 +202,11 @@ class TraceCollector:
                 intent_index=idx,
                 confidence=intent.get("confidence"),
                 reason=_clip(intent.get("reason"))[0],
+                # 兜底意图的置信度是约定值，打标后后台才能区分“兜底应答”与“模型真低置信”
+                is_fallback=intent.get("is_fallback") or None,
+                # 意图依据：这句话命中的路由关键词（本地子串匹配，参考）+ 命中状况
+                matched_keywords=list(intent.get("matched_keywords") or []) or None,
+                clue_basis=intent.get("clue_basis"),
             )
 
     def record_tool_call(self, name: str, args, agent_name: str | None = None, iteration: int | None = None) -> str:

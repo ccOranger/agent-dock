@@ -70,6 +70,7 @@ CREATE TABLE memories (
     user_id         UUID NOT NULL REFERENCES customer_users(id) ON DELETE CASCADE,
     memory_uid      VARCHAR(64) NOT NULL,
     session_id      UUID REFERENCES sessions(id) ON DELETE SET NULL,
+    source_message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
     type            VARCHAR(16) NOT NULL
                     CHECK (type IN ('working','episodic','semantic','perceptual')),
     content         TEXT NOT NULL,
@@ -132,6 +133,8 @@ CREATE TABLE agents (
     name            VARCHAR(64) UNIQUE NOT NULL,
     display_name    VARCHAR(128),
     description     TEXT,
+    routing_keywords JSONB NOT NULL DEFAULT '[]'::jsonb,    -- 路由线索：触发关键词（供路由 Agent 判定“何时选我”）
+    routing_examples JSONB NOT NULL DEFAULT '[]'::jsonb,    -- 路由线索：典型用户问法（2~3 条即可）
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     sort_order      INT DEFAULT 0,
     source          VARCHAR(16) NOT NULL DEFAULT 'code',   -- code | dynamic
@@ -233,3 +236,17 @@ CREATE INDEX IF NOT EXISTS idx_traces_outcome_created ON request_traces(outcome,
 CREATE INDEX IF NOT EXISTS idx_traces_agents ON request_traces USING gin (agent_names);
 CREATE INDEX IF NOT EXISTS idx_traces_tools ON request_traces USING gin (tool_names);
 CREATE INDEX IF NOT EXISTS idx_traces_mcp ON request_traces USING gin (mcp_server_names);
+
+-- ========== 存量库增量迁移（幂等，可重复执行；新建库已在上方 CREATE TABLE 中包含） ==========
+-- 记忆溯源列：指向产生该记忆的当轮用户消息，随消息删除级联
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS source_message_id UUID REFERENCES messages(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_memories_source_message ON memories(source_message_id);
+-- 存量行回填：按 (会话, 内容相同的用户消息) 匹配最早一条（源消息已删除时仍为 NULL）
+UPDATE memories m SET source_message_id = (
+    SELECT mm.id FROM messages mm
+    WHERE mm.role = 'user' AND mm.session_id = m.session_id AND mm.content = m.content
+    ORDER BY mm.created_at LIMIT 1)
+WHERE m.source_message_id IS NULL AND m.session_id IS NOT NULL;
+-- Agent 路由线索列（代码 Agent 由 Python 类属性声明，动态 Agent 由后台维护）
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS routing_keywords JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS routing_examples JSONB NOT NULL DEFAULT '[]'::jsonb;

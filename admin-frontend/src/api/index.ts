@@ -16,6 +16,8 @@ import type {
   Paginated,
   RequestTraceDetail,
   RequestTraceSummary,
+  RouterAgentInfo,
+  RouterPromptPreview,
   SearchResult,
   TicketDetail,
   TicketSummary,
@@ -208,6 +210,13 @@ export const apiUpdateAgent = (name: string, body: Partial<DynamicAgentPayload>)
   unwrap(http.put<never, { data: { data: { name: string } } }>(`/admin/agents/${name}`, body))
 
 export const apiDeleteAgent = (name: string) => http.delete(`/admin/agents/${name}`)
+
+// ===== Admin：路由分发器（只读，无任何写接口）=====
+export const apiGetRouterInfo = () =>
+  unwrap(http.get<never, { data: { data: RouterAgentInfo } }>('/admin/router'))
+
+export const apiGetRouterPrompt = () =>
+  unwrap(http.get<never, { data: { data: RouterPromptPreview } }>('/admin/router/prompt'))
 
 // ===== Admin：MCP 服务 =====
 export const apiListMcpServers = () =>

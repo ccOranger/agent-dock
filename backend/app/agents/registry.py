@@ -70,6 +70,9 @@ def list_agents() -> list[dict]:
             {
                 "name": cls.name,
                 "description": cls.description,
+                # 路由线索：由类属性声明，与动态 Agent 的 DB 列同构，一并注入路由提示词
+                "routing_keywords": list(cls.routing_keywords),
+                "routing_examples": list(cls.routing_examples),
                 "model": cls.llm_model or settings.llm_model_id,
                 "system_prompt": cls.system_prompt,
                 "rag_namespace": cls.rag_namespace,
@@ -95,6 +98,8 @@ async def list_dynamic_agents(enabled_only: bool = True) -> list[dict]:
         {
             "name": r.name,
             "description": r.description or r.name,
+            "routing_keywords": list(r.routing_keywords or []),
+            "routing_examples": list(r.routing_examples or []),
             "model": r.llm_model or settings.llm_model_id,
             "rag_namespace": r.rag_namespace,
             "mcp_tools": list(r.mcp_tool_names or []),

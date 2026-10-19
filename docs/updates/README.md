@@ -21,6 +21,10 @@
 | U09 | 异步自定义工具执行机制修复 | 自定义 async 工具真正执行、回投主事件循环、落库可用 | [09-async-tool-execution.md](09-async-tool-execution.md) |
 | U10 | 自定义工具管理与 MCP 服务描述 | 代码 BaseTool 目录扫描/登记到 tools 表供动态 Agent 绑定；MCP 增加描述字段 | [10-custom-tool-management.md](10-custom-tool-management.md) |
 | U11 | 代码 Agent 信息透明与状态治理 | 列表/详情带出提示词与注册工具、查看详情、禁用真正生效、孤儿行容错与清理 | [11-code-agent-transparency-state.md](11-code-agent-transparency-state.md) |
+| U12 | Agent 路由线索与兜底动态化 | `routing_keywords`/`routing_examples` 注入路由提示词，规则去具名化，兜底 Agent 由生效清单派生并回落一次 | [12-agent-routing-clues.md](12-agent-routing-clues.md) |
+| U13 | 路由分发器后台只读视图 | 后台可查路由参数/提示词模板/实时生效提示词与各候选 Agent 的线索完整度（不可改） | [13-router-agent-readonly.md](13-router-agent-readonly.md) |
+| U14 | 兜底意图应答通道 | 兜底意图带 `is_fallback` 标记不再被低置信阈值拦掉（`ROUTER_FALLBACK_ANSWER`）；knowledge_qa 认领「你是谁」类元问题 | [14-fallback-answer-path.md](14-fallback-answer-path.md) |
+| U15 | 链路详情显示路由意图依据 | 每个意图回显命中的路由关键词与 `clue_basis`（命中/配了没中/没配），后台时间线单独成块 | [15-route-intent-evidence.md](15-route-intent-evidence.md) |
 
 ## 与三份主文档的关系
 

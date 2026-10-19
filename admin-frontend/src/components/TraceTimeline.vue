@@ -59,7 +59,31 @@
         <div class="bar-track">
           <div class="bar" :style="barStyle(s)" />
         </div>
-        <div v-if="hasDetailAttrs(s)" class="attrs">
+        <!-- 路由意图：把“为什么判给这个 Agent”单独成块，不混在属性列表里 -->
+        <div v-if="isIntentSpan(s)" class="evidence">
+          <div class="ev-row">
+            <el-tag size="small" :type="intentIndex(s) === 0 ? '' : 'info'">
+              {{ intentIndex(s) === 0 ? '主意图' : `次要意图 #${intentIndex(s)}` }}
+            </el-tag>
+            <span class="ev-item">置信 <b>{{ fmtConfidence(numAttr(s, 'confidence')) }}</b></span>
+            <el-tag v-if="attrText(s, 'is_fallback')" size="small" type="warning">兜底意图</el-tag>
+            <template v-if="clueBasis(s)">
+              <el-tag size="small" :type="clueBasisTag(clueBasis(s))">{{ clueBasisText(clueBasis(s)) }}</el-tag>
+              <el-tag v-for="kw in matchedKeywords(s)" :key="kw" size="small" type="success" class="chip">
+                {{ kw }}
+              </el-tag>
+            </template>
+          </div>
+          <div v-if="intentReason(s)" class="ev-reason">
+            <span class="k">模型理由</span>
+            <span class="v">{{ intentReason(s) }}</span>
+          </div>
+          <div v-if="clueBasis(s)" class="ev-note">
+            命中词为本地子串匹配（路由实际由 LLM 语义判定，不走关键词匹配/分词），用于看出是哪个词把请求抢到了这个
+            Agent，或线索与客户真实说法脱节
+          </div>
+        </div>
+        <div v-if="!isIntentSpan(s) && hasDetailAttrs(s)" class="attrs">
           <div v-for="[k, v] in attrEntries(s)" :key="k" class="attr">
             <span class="k">{{ k }}</span>
             <span class="v">{{ fmtAttrValue(v) }}</span>
@@ -140,6 +164,18 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
 
 const HIDDEN_KEYS = new Set(['intent_index'])
 
+// 意图依据三态文案：只看字面命中，所以“配了却没中”与“压根没配”必须区分开
+const CLUE_BASIS_TEXT: Record<string, string> = {
+  keyword_hit: '命中已配置关键词',
+  keyword_miss: '配了关键词但本句未出现（按语义判定）',
+  no_keywords: '该 Agent 未配路由关键词（仅按适用范围判定）',
+}
+const CLUE_BASIS_TAG: Record<string, 'success' | 'warning' | 'info'> = {
+  keyword_hit: 'success',
+  keyword_miss: 'warning',
+  no_keywords: 'info',
+}
+
 function typeLabel(t: string) {
   return TYPE_META[t]?.label || t
 }
@@ -161,6 +197,40 @@ function attrText(s: TraceSpan, key: string) {
   if (v === undefined || v === null || v === '') return ''
   if (Array.isArray(v)) return v.join(', ')
   return String(v)
+}
+
+function isIntentSpan(s: TraceSpan) {
+  return s.type === 'route.intent'
+}
+
+function intentIndex(s: TraceSpan) {
+  return Number(s.attributes?.intent_index ?? 0)
+}
+
+function numAttr(s: TraceSpan, key: string): number | null {
+  const v = s.attributes?.[key]
+  return typeof v === 'number' ? v : null
+}
+
+function matchedKeywords(s: TraceSpan): string[] {
+  const v = s.attributes?.matched_keywords
+  return Array.isArray(v) ? v.map((x) => String(x)) : []
+}
+
+function clueBasis(s: TraceSpan) {
+  return String(s.attributes?.clue_basis || '')
+}
+
+function clueBasisText(basis: string) {
+  return CLUE_BASIS_TEXT[basis] || basis
+}
+
+function clueBasisTag(basis: string) {
+  return CLUE_BASIS_TAG[basis] || 'info'
+}
+
+function intentReason(s: TraceSpan) {
+  return String(s.attributes?.reason || '')
 }
 
 function isTruncated(s: TraceSpan, key: string) {
@@ -290,6 +360,45 @@ function outcomeTag(outcome?: string | null) {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+/* 意图依据块：背景与时间线行拉开，突出“这一轮为何这么判” */
+.evidence {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #fdf6ec;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ev-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ev-item {
+  font-size: 12px;
+  color: #606266;
+}
+.ev-reason {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.ev-reason .k {
+  color: #909399;
+  flex: none;
+}
+.ev-reason .v {
+  color: #303133;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.ev-note {
+  font-size: 11px;
+  line-height: 1.5;
 }
 .attr {
   display: flex;

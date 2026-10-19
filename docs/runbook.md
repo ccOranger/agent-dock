@@ -49,10 +49,13 @@
 
 | 症状 | 排查 |
 |------|------|
+| 新建的动态 Agent 总路由不到 | 后台「路由分发器」→「候选 Agent 清单」定位原因：不在表里 = 被禁用/未启用；在表里但「线索完整度 = 仅描述」= 没填 `routing_keywords`，提示词里只有一行适用范围；填了多条却不命中 = 超出前 12 个未注入，或关键词/典型问法与客户真实说法不贴合（[U12](updates/12-agent-routing-clues.md)） |
 | 启动日志告警「DB 中存在未在代码注册的 code Agent（已失效）」 | 代码已下线但 agents 表残留 `source=code` 行；**不再阻断启动**，该类行在后台 Agent 列表标「已失效」，可直接在后台删除（见 [U11](updates/11-code-agent-transparency-state.md)） |
 | 启动因连接失败中断，日志涉及 Neo4j | `MEMORY_TYPES` 含 `semantic` 但未部署 Neo4j；去掉 `semantic` 或起 Neo4j |
 | SSE 无 `route` 事件 | 检查 LLM_API_KEY / 路由模型可达性；看日志 `路由结果解析失败` |
+| 寒暄/「你是谁」这类提问直接转人工、无任何应答 | 该轮被判「不贴合任何 Agent」→ 兜底意图（置信度固定 0.3）低于阈值即整轮 `handover(low_confidence)`。确认 `ROUTER_FALLBACK_ANSWER=true`（默认）且兜底 Agent 的 `routing_keywords` 已认领元问题（[U14](updates/14-fallback-answer-path.md)）；链路页 `route.intent` span 的 `is_fallback` 可辨识兜底轮 |
 | 多意图消息只应答一个诉求 | 看日志 `[route] ... intents=N`：`intents=1` 是模型没拆意图（调提示词/换路由模型）；`intents≥2` 但只走一个分支则受 `ROUTER_MAX_INTENTS` 或 `ROUTER_CONFIDENCE_THRESHOLD` 限制（低于阈值的次要意图会被丢弃） |
+| 想知道「这句凭什么判给这个 Agent」/ 路由判错 Agent | 链路详情 `route.intent` 的「意图依据」：`keyword_hit` 看命中词（本地子串匹配，仅参考，不是模型真实判据）；`keyword_miss` 说明靠语义判的，应去 Agent 管理补与客户真实说法贴合的关键词；`no_keywords` 说明该 Agent 压根没配线索（[U15](updates/15-route-intent-evidence.md)） |
 | 工具「调了却没落库」/模型自演假结果 `[TOOL_CALL...]` | 自定义工具是 `async run(**kwargs)`，必须由 `orchestrator._execute_tool` 经 `run_coroutine_threadsafe` 回投主 loop 执行（[U09](updates/09-async-tool-execution.md)）；勿绕回框架同步 `_execute_tool_call` |
 | 后台看不到某轮链路 | 确认 `TRACE_ENABLED=true` 且 `request_traces` 表已建（新库需跑 `scripts/rebuild_and_seed.py`）；`TRACE_SAMPLE_RATE<1` 时正常应答会被采样丢弃，但转人工/异常/工具报错轮始终保留 |
 | 链路写入失败告警 | `链路写入失败（不阻塞主流程）`：多为 `request_traces` 缺表/字段与 ORM 不一致；写库是旁路，不影响对话，补跑建表脚本即可 |
@@ -128,7 +131,7 @@ cd d:\project\smart-cs\backend; $env:PYTHONIOENCODING="utf-8"
 | `QDRANT_URL` / `QDRANT_API_KEY` / `QDRANT_COLLECTION` | 空(回退 localhost:6333) / / hello_agents_vectors | 记忆 + RAG 向量库 |
 | `MEMORY_TYPES` | working,episodic,perceptual | 加 `semantic` 需 Neo4j |
 | `LLM_*` / `EMBED_*` | — | 框架直接读环境变量（OpenAI 兼容端点，如 DashScope） |
-| `ROUTER_MODEL` / `ROUTER_CONFIDENCE_THRESHOLD` / `ROUTER_MAX_INTENTS` | deepseek-flash / 0.5 / 2 | 路由模型需与 LLM provider 匹配；`ROUTER_MAX_INTENTS=1` 关闭多意图 |
+| `ROUTER_MODEL` / `ROUTER_CONFIDENCE_THRESHOLD` / `ROUTER_MAX_INTENTS` / `ROUTER_FALLBACK_ANSWER` | deepseek-flash / 0.5 / 2 / true | 路由模型需与 LLM provider 匹配；`ROUTER_MAX_INTENTS=1` 关闭多意图；`ROUTER_FALLBACK_ANSWER=false` 时「不贴合任何 Agent」的兜底轮恢复为直接转人工（[U14](updates/14-fallback-answer-path.md)）。路由分发器不入库、不可后台修改，只读查看见「路由分发器」页（[U13](updates/13-router-agent-readonly.md)） |
 | `RAG_KB_ROOT` / `RAG_DOC_ARCHIVE_ROOT` | ./data/knowledge_bases / ./data/doc_archives | RAG 库根 / 原文归档（后台下载） |
 | `TRACE_ENABLED` / `TRACE_STORE_PAYLOAD` / `TRACE_SAMPLE_RATE` / `TRACE_RETENTION_DAYS` | true / true / 1.0 / 30 | 链路采集开关/存原文/采样/保留 |
 | `JWT_SECRET` / `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | change_me_in_prod / 7200 / 604800 | 生产务必换密钥 |
