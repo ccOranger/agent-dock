@@ -87,8 +87,12 @@ else {
 
 # ---------------- 启动三个服务 ----------------
 Write-Step "启动后端 uvicorn (端口 $BackendPort)"
+# --reload 默认监视整个工作目录(backend/)：调试用的临时脚本落在 backend 根目录时，每写/删一次就触发
+# 一次热重载，而每次重启都要重连云 Postgres 与 Qdrant；短时间反复重启会把连接打成半死状态，
+# 表现为“新建连接第一条语句能过、第二条 19s 后 RST”、启动直接 Application startup failed。
+# 因此用 --reload-dir 把监视面收到真正的代码目录，临时脚本/数据目录/测试用例的改动不再引发重启。
 New-ServiceWindow 'smart-cs backend' $Backend `
-    "& '$VenvPy' -m uvicorn app.main:app --reload --host 0.0.0.0 --port $BackendPort"
+    "& '$VenvPy' -m uvicorn app.main:app --reload --host 0.0.0.0 --port $BackendPort --reload-dir app --reload-dir mcp_servers"
 
 Write-Step '启动客户前端 (Vite :5173)'
 New-ServiceWindow 'smart-cs frontend' $Frontend 'npm run dev'
