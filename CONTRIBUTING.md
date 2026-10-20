@@ -27,9 +27,15 @@ $env:SEED_DEMO="true"; python ..\scripts\seed_data.py
 
 ### 前端
 
+npm workspaces 单仓：锁文件与 `node_modules` 都在仓库根，一次安装覆盖两个前端与 `packages/shared`。
+
 ```powershell
-cd frontend; npm ci
-cd ..\admin-frontend; npm ci
+# 仓库根目录
+npm ci
+
+# 启动（分别在 5173 / 5174）
+npm run dev:chat
+npm run dev:admin
 ```
 
 ## 常用命令
@@ -38,8 +44,8 @@ cd ..\admin-frontend; npm ci
 |---|---|
 | 代码检查 | `cd backend; .\.venv\Scripts\ruff.exe check app tests` |
 | 后端测试 | `cd backend; .\.venv\Scripts\python.exe -m pytest -q` |
-| 客户端构建 | `cd frontend; npm run build` |
-| 管理端构建 | `cd admin-frontend; npm run build` |
+| 客户端构建 | `npm run build -w frontend` |
+| 管理端构建 | `npm run build -w admin-frontend` |
 
 CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest 与两端构建。
 
@@ -50,7 +56,7 @@ CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest
 
 - 运行时依赖在 `backend/requirements.txt`：普通依赖使用下限，存在兼容风险的依赖加上界并注释原因
 - 开发与 CI 工具在 `backend/requirements-dev.txt`，ruff 等工具钉死版本，避免规则升级造成无关告警
-- 两个前端都提交 `package-lock.json`，CI 使用 `npm ci`；升级依赖单独开 PR 并附构建结果
+- 前端使用 npm workspaces，锁文件统一为仓库根 `package-lock.json`，CI 使用 `npm ci`；升级依赖单独开 PR 并附构建结果
 
 ## 分支与提交
 

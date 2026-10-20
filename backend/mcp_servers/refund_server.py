@@ -4,7 +4,7 @@
 - submit_refund(order_id, reason)  提交退款申请，返回退款单号与受理状态
 - query_refund(order_id)           按订单号查询退款进度
 
-数据来源与进程内自定义工具一致：app.tools.custom.mock_data。
+数据来源与进程内自定义工具一致：app.packs.customer_service.tools.mock_data。
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
-from app.tools.custom import mock_data  # noqa: E402
+from app.packs.customer_service.tools import mock_data  # noqa: E402
 
 mcp = FastMCP("mcp_refund")
 

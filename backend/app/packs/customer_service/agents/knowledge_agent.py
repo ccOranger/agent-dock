@@ -1,7 +1,7 @@
 from hello_agents.tools import ToolRegistry
 
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
+from app.packs.customer_service.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
 from app.tools.memory_factory import get_memory_tool
 from app.tools.rag_factory import get_rag_tool
 

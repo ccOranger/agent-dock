@@ -32,7 +32,7 @@
   - [x] 种子脚本显式要求 `SEED_DEMO=true`；
   - [x] 首次登录强制改密，或在初始化向导中生成随机密码并打印一次；
   - [x] README 显著提示"不要在生产使用演示口令"。
-- [ ] `tools/custom/mock_data.py` 的示例数据去标识化（姓名、手机号、订单号均为虚构）。
+- [ ] `packs/customer_service/tools/mock_data.py` 的示例数据去标识化（姓名、手机号、订单号均为虚构）。
 - [ ] 确认没有大文件/构建产物入库：`git count-objects -vH`。
 - [x] 增加 `.gitattributes`（换行符）与统一编码说明（项目含中文，建议 UTF-8）。
 
@@ -113,7 +113,7 @@
   - [x] backend job（Python 3.12，依赖缓存，pytest）
   - [x] frontend job（Node 20，两端 build）
   - [ ] docker job（构建镜像，不推送）
-- [x] 固定版本与锁文件：`requirements.txt` 版本策略、`package-lock.json` 入库。
+- [x] 固定版本与锁文件：`requirements.txt` 版本策略、仓库根 `package-lock.json`（npm workspaces）入库。
 - [ ] 发布流程：打 tag、生成 Release Notes、附镜像构建说明。
 
 ## 8. 发布物料

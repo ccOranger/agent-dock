@@ -3,7 +3,7 @@
 历史版本访问固定假域名 http://logistics-service:8080（不存在）。现改为读取
 共享固定数据集 mock_data；同一份数据也被本地 MCP 服务 mcp_logistics 使用。
 """
-from app.tools.custom import mock_data
+from app.packs.customer_service.tools import mock_data
 from app.tools.custom.base import BaseTool
 
 

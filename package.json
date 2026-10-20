@@ -1,0 +1,21 @@
+{
+  "name": "smart-cs",
+  "version": "1.3.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "frontend",
+    "admin-frontend",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:chat": "npm run dev -w frontend",
+    "dev:admin": "npm run dev -w admin-frontend",
+    "build": "npm run build -w admin-frontend && npm run build -w frontend",
+    "build:chat": "npm run build -w frontend",
+    "build:admin": "npm run build -w admin-frontend"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

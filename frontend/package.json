@@ -15,6 +15,7 @@
     "lint": "eslint . --fix && prettier --write src"
   },
   "dependencies": {
+    "@cs/shared": "*",
     "vue": "^3.5.10",
     "vue-router": "^4.4.5",
     "pinia": "^2.2.4",

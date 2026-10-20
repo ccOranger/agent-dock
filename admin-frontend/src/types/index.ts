@@ -1,30 +1,7 @@
-export interface User {
-  id: string
-  username: string
-  role: 'customer' | 'agent' | 'admin'
-  display_name?: string | null
-}
+// 基础类型由 @cs/shared 维护，这里集中转出，业务代码继续从 '@/types' 导入
+import type { ApiResponse, LoginResult, MemoryItem, Paginated, User } from '@shared'
 
-export interface LoginResult {
-  access_token: string
-  refresh_token: string
-  token_type: string
-  expires_in: number
-  user: User
-}
-
-export interface ApiResponse<T> {
-  code: number
-  message: string
-  data: T
-}
-
-export interface Paginated<T> {
-  items: T[]
-  total: number
-  page: number
-  page_size: number
-}
+export type { ApiResponse, LoginResult, MemoryItem, Paginated, User }
 
 // ===== 咨询管理 =====
 export interface InquirySession {
@@ -315,16 +292,6 @@ export interface DynamicAgentPayload {
   custom_tool_names?: string[]
   enabled?: boolean
   sort_order?: number
-}
-
-export interface MemoryItem {
-  id: string
-  memory_uid: string
-  type: 'working' | 'episodic' | 'semantic' | 'perceptual'
-  content: string
-  importance: number
-  access_count: number
-  created_at: string
 }
 
 /** 记忆类型的中文展示名（后台下拉与时间线共用） */

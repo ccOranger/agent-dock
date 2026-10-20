@@ -1,39 +1,10 @@
-import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { createAuthStore, type User } from '@shared'
+
 import { apiLogin, apiMe, apiRegister } from '@/api'
 import { clearTokens, getToken, setTokens } from '@/api/http'
-import type { User } from '@/types'
 
-export const useAuthStore = defineStore('auth', () => {
-  const user = ref<User | null>(null)
-  const loggedIn = ref(!!getToken())
-
-  async function login(username: string, password: string) {
-    const result = await apiLogin(username, password)
-    setTokens(result.access_token, result.refresh_token)
-    user.value = result.user
-    loggedIn.value = true
-  }
-
-  async function register(username: string, password: string) {
-    // 注册成功后后端直接下发 Token，自动登录
-    const result = await apiRegister(username, password)
-    setTokens(result.access_token, result.refresh_token)
-    user.value = result.user
-    loggedIn.value = true
-  }
-
-  async function fetchMe() {
-    if (!getToken()) return
-    user.value = await apiMe()
-    loggedIn.value = true
-  }
-
-  function logout() {
-    clearTokens()
-    user.value = null
-    loggedIn.value = false
-  }
-
-  return { user, loggedIn, login, register, fetchMe, logout }
+/** 客户侧 auth store：登录 / 注册 / 取用户 / 登出，token 生命周期由 @cs/shared 统一维护 */
+export const useAuthStore = createAuthStore<User>({
+  tokens: { getToken, setTokens, clearTokens },
+  api: { login: apiLogin, me: apiMe, register: apiRegister },
 })

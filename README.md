@@ -20,14 +20,16 @@
 - **自定义工具管理**：代码侧已开发的 `BaseTool` 集中在目录中供后台扫描、登记到 `tools` 表（`type=custom`）并启停，动态 Agent 可按名绑定复用（工具实现永远来自代码，后台只做登记入口）
 - 记忆一律走 HelloAgents `MemoryTool`（四层），知识库一律走 `RAGTool`（多 namespace）
 - 对话接口 SSE 流式输出（session / route / text / tool_call / tool_result / handover / done / error）
-- **管理后台**：独立 `admin-frontend` 工程，提供 Agent 管理、知识库命名空间管理、跨客户工单（咨询）查看/CSV 导出、MCP Servers、记忆时序等能力
+- **管理后台**：同一仓库的 `admin-frontend` 工作区，提供 Agent 管理、知识库命名空间管理、跨客户工单（咨询）查看/CSV 导出、MCP Servers、记忆时序等能力
 
 ## 目录结构
 
 ```
-backend/         FastAPI + HelloAgents（app/{api,core,agents,tools,models,schemas,services,utils}）
+backend/         FastAPI + HelloAgents（app/{api,core,agents,packs,tools,models,schemas,services,utils}）
 frontend/        Vue 3 客户端（客户对话端，src/{api,stores,router,views,components,types}）
-admin-frontend/  Vue 3 管理后台（Agent/知识库/工单/MCP/记忆/登录，独立工程）
+admin-frontend/  Vue 3 管理后台（Agent/知识库/工单/MCP/记忆/登录）
+packages/shared/ npm workspaces 共享包 @cs/shared（http/auth store/SSE/基础类型）
+package.json     仓库根：workspaces 与 dev:chat / dev:admin / build 脚本
 backend/data/    运行时数据：文档归档 doc_archives/、知识库 knowledge_bases/（RAG_KB_ROOT 相对 backend 工作目录；已 .gitignore 排除，勿入库）
 scripts/         init_db.sql（全量 schema）/ init_db.sh（本机一键建库）/ seed_data.py（种子定义，幂等）/ rebuild_and_seed.py（开发阶段全量重建+灌种子）/ seed_memory_via_chat.py（模拟对话造记忆测试数据）
 docs/            spec.md（规范 v2.0）/ api.md（接口速查）/ runbook.md（运维手册）/ updates/（U01~U11 各功能详解文档）
@@ -81,12 +83,13 @@ python ..\scripts\seed_data.py   # 建表 + 系统默认 Agent/工具/话术 + �
 - Swagger 文档：http://localhost:8000/docs
 - 健康检查：http://localhost:8000/health
 
-### 3. 前端
+### 3. 前端（客户对话端）
+
+前端使用 npm workspaces，两个前端与共享包 `packages/shared` 共用仓库根的一份依赖：
 
 ```powershell
-cd frontend
-npm install                      # 或 pnpm install
-npm run dev                      # http://localhost:5173（/api 已代理到后端 8000）
+npm install                      # 在仓库根执行，一次装好两个前端 + @cs/shared
+npm run dev:chat                 # http://localhost:5173（/api 已代理到后端 8000）
 ```
 
 > 请用 **`http://localhost:5173`** 访问，不要用 `127.0.0.1`——Vite dev 可能只监听 IPv6 `::1`，用 `127.0.0.1` 会连不上。
@@ -102,12 +105,10 @@ npm run dev                      # http://localhost:5173（/api 已代理到后�
 ### 4. 管理后台（admin-frontend）
 
 ```powershell
-cd admin-frontend
-npm install                      # 或 pnpm install
-npm run dev                      # http://localhost:5174（/api 已代理到后端 8000）
+npm run dev:admin                # http://localhost:5174（/api 已代理到后端 8000）
 ```
 
-> 管理后台为独立工程，端口 **5174**（与客户前端 5173 分离，共用同一后端）。使用 `admin` 角色账号登录。
+> 管理后台为同一仓库的工作区 `admin-frontend`，端口 **5174**（与客户前端 5173 分离，共用同一后端）。使用 `admin` 角色账号登录。
 > 功能：Agent 列表与动态 Agent 创建/启停、Agent 详情查看（含代码 Agent 的系统提示词/注册工具/MCP，代码已下线的孤儿行标「已失效」可删除）、知识库命名空间与文档管理、跨客户工单查看与 CSV 导出、MCP Servers 配置（含服务描述）、自定义工具管理（扫描代码目录、登记/启停并绑定给动态 Agent）、记忆时序。
 
 ### 5. 测试
@@ -118,7 +119,7 @@ ruff check app tests    # 代码检查（需先激活 .venv）
 pytest                # 纯逻辑单测（无 hello-agents 时自动桩化）
 pytest --cov=app      # 覆盖率
 cd ../frontend
-npm test              # vitest
+npm test              # vitest（也可在仓库根执行 npm test -w frontend）
 ```
 
 ## 核心约束（摘自 Spec 2.5）

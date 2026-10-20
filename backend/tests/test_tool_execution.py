@@ -11,8 +11,8 @@ from hello_agents.agents import SimpleAgent
 from hello_agents.tools import Tool, ToolRegistry
 
 from app.agents.orchestrator import _HISTORY_WINDOW, Orchestrator, _execute_tool, _stream_with_tools
+from app.packs.customer_service.tools.ticket_tool import UpdateTicketTool
 from app.tools.custom.base import BaseTool
-from app.tools.custom.ticket_tool import UpdateTicketTool
 
 
 class _RecordingAsyncTool(BaseTool):

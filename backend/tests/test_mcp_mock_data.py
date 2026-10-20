@@ -1,7 +1,7 @@
 """固定数据集 mock_data 的行为契约测试（纯逻辑，无网络/子进程）"""
 import pytest
 
-from app.tools.custom import mock_data as md
+from app.packs.customer_service.tools import mock_data as md
 
 
 @pytest.fixture(autouse=True)

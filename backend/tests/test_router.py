@@ -7,9 +7,9 @@ VALID = {"knowledge_qa", "order_service", "complaint_handler"}
 
 
 def test_registry_completeness():
-    from app.agents.business.complaint_agent import ComplaintAgent
-    from app.agents.business.knowledge_agent import KnowledgeAgent
-    from app.agents.business.order_agent import OrderAgent
+    from app.packs.customer_service.agents.complaint_agent import ComplaintAgent
+    from app.packs.customer_service.agents.knowledge_agent import KnowledgeAgent
+    from app.packs.customer_service.agents.order_agent import OrderAgent
 
     assert KnowledgeAgent.name in AGENT_REGISTRY
     assert OrderAgent.name in AGENT_REGISTRY
@@ -160,7 +160,7 @@ def test_parse_intents_fallback_to_knowledge_qa(raw):
 def test_knowledge_qa_claims_meta_questions():
     """“你是谁/你能做什么”这类元问题必须由 knowledge_qa 显式认领，
     否则路由会判“不贴合”走兜底，历史上这些提问会直接转人工。"""
-    from app.agents.business.knowledge_agent import KnowledgeAgent
+    from app.packs.customer_service.agents.knowledge_agent import KnowledgeAgent
 
     for kw in ("你是谁", "能做什么"):
         assert kw in KnowledgeAgent.routing_keywords

@@ -5,8 +5,8 @@
 | 服务 | 端口 | 启动方式 | 必需 |
 |------|------|---------|------|
 | cs-backend | 8000 | `uvicorn app.main:app --host 0.0.0.0 --port 8000` | 是 |
-| frontend（客户对话端，Vite 开发） | 5173 | `npm run dev` | 按需 |
-| admin-frontend（管理后台，Vite 开发） | 5174 | `npm run dev` | 按需 |
+| frontend（客户对话端，Vite 开发） | 5173 | `npm run dev:chat`（仓库根） | 按需 |
+| admin-frontend（管理后台，Vite 开发） | 5174 | `npm run dev:admin`（仓库根） | 按需 |
 | PostgreSQL 14+ | 5432 | 系统服务 / 云托管 | 是（业务数据） |
 | Redis 7 | 6379 | 系统服务 | 是（工作记忆/缓存） |
 | Qdrant | 6333 | 系统服务 / 云托管 | 是（记忆 + RAG 向量真相） |
@@ -20,7 +20,7 @@
 ```powershell
 # 拉起后端 + 客户前端(5173) + 管理后台(5174)，各占独立 PowerShell 窗口
 .\scripts\start_all.ps1              # 依赖已就绪时直接启动
-.\scripts\start_all.ps1 -Install     # 首次：先建后端 venv 装依赖 + 前端 npm install 再启动
+.\scripts\start_all.ps1 -Install     # 首次：先建后端 venv 装依赖 + 仓库根 npm install 再启动
 .\scripts\stop_all.ps1               # 关闭上述服务窗口
 ```
 
@@ -32,7 +32,7 @@
 1. PostgreSQL / Redis / Qdrant（如需 semantic 再加 Neo4j）就绪。
 2. 建库：本机 `bash scripts/init_db.sh`；云库推荐直接跑 `python scripts/rebuild_and_seed.py`（单往返 simple query，规避连接池代理断连）。
 3. 后端：确认 `backend/.env`（见 §8）→ 在 `backend` 目录 `python ..\scripts\seed_data.py`（建表 + 灌种子，幂等）→ `uvicorn app.main:app`。
-4. 前端：`cd frontend; npm install; npm run dev`；管理后台：`cd admin-frontend; npm install; npm run dev`。
+4. 前端：仓库根 `npm install`（一次装好两个前端与 `packages/shared`）→ `npm run dev:chat`（5173）/ `npm run dev:admin`（5174）。
 
 启动日志应看到 HelloAgents 初始化（工具 → 注册 → Agent）与 Agent 自动登记；`app/main.py` 会把 stdout/stderr 切到 UTF-8。
 
@@ -98,7 +98,7 @@
 `mcp_logistics` / `mcp_refund` 已实现为**本地 FastMCP 服务**（`backend/mcp_servers/*.py`），以 **stdio 子进程**方式由 `MCPTool` 拉起，**不需要任何端口或外部域名**（[U05](updates/05-stdio-mcp-demo.md)）：
 
 - 服务脚本：`backend/mcp_servers/logistics_server.py`、`refund_server.py`
-- 固定数据源（单一真相）：`backend/app/tools/custom/mock_data.py`；进程内自定义工具（`query_order`/`query_logistics`/`submit_refund` 等）与 MCP 服务共用同一份
+- 固定数据源（单一真相）：`backend/app/packs/customer_service/tools/mock_data.py`；进程内自定义工具（`query_order`/`query_logistics`/`submit_refund` 等）与 MCP 服务共用同一份
 - 配置落库：`tools` 表 `config = {transport: stdio, command: <venv python>, args: [<脚本绝对路径>], timeout_seconds: 20}`（`seed_data.py` 写入并 upsert 覆盖旧数据）
 - 跨环境路径解析：`command`/`args` 由加载器解析为绝对路径，工作目录无关。
 

@@ -1,8 +1,8 @@
 from hello_agents.tools import ToolRegistry
 
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.prompts.complaint import COMPLAINT_SYSTEM_PROMPT
-from app.tools.custom.ticket_tool import CreateTicketTool, EscalateTool, UpdateTicketTool
+from app.packs.customer_service.prompts.complaint import COMPLAINT_SYSTEM_PROMPT
+from app.packs.customer_service.tools.ticket_tool import CreateTicketTool, EscalateTool, UpdateTicketTool
 from app.tools.memory_factory import get_memory_tool
 
 

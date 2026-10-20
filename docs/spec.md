@@ -336,31 +336,33 @@ smart-cs/
 │   │   │   ├── base_business_agent.py
 │   │   │   ├── router_agent.py
 │   │   │   ├── orchestrator.py
-│   │   │   ├── registry.py
+│   │   │   ├── registry.py               # 从 packs.loader 汇总业务 Agent，无领域硬 import
+│   │   │   ├── canned_scripts.py
+│   │   │   ├── llm_factory.py
 │   │   │   ├── business/
 │   │   │   │   ├── __init__.py
-│   │   │   │   ├── knowledge_agent.py
-│   │   │   │   ├── order_agent.py
-│   │   │   │   └── complaint_agent.py
+│   │   │   │   └── dynamic_agent.py      # 动态 Agent（内核能力）
 │   │   │   └── prompts/
 │   │   │       ├── __init__.py
-│   │   │       ├── router.py
-│   │   │       ├── knowledge.py
-│   │   │       ├── order.py
-│   │   │       └── complaint.py
+│   │   │       └── router.py             # 路由提示词（内核）
+│   │   ├── packs/                        # 场景包：领域 Agent/提示词/工具/mock 数据
+│   │   │   ├── loader.py                 # manifest 扫描 + 子类/重名校验 + 断包降级
+│   │   │   └── customer_service/
+│   │   │       ├── manifest.yaml
+│   │   │       ├── agents/
+│   │   │       ├── prompts/
+│   │   │       ├── tools/                # order/logistics/ticket/refund + mock_data.py
+│   │   │       └── seeds/
 │   │   ├── tools/
 │   │   │   ├── __init__.py
 │   │   │   ├── memory_factory.py
 │   │   │   ├── rag_factory.py
 │   │   │   ├── mcp_loader.py
+│   │   │   ├── custom_catalog.py
+│   │   │   ├── custom_loader.py
 │   │   │   └── custom/
 │   │   │       ├── __init__.py
-│   │   │       ├── base.py                # BaseTool 适配层（async run(**kwargs)）
-│   │   │       ├── mock_data.py           # 固定数据集（进程内工具与 MCP 服务共用）
-│   │   │       ├── order_tool.py
-│   │   │       ├── logistics_tool.py
-│   │   │       ├── ticket_tool.py
-│   │   │       └── refund_tool.py
+│   │   │       └── base.py               # BaseTool 适配层（async run(**kwargs)）
 │   │   ├── models/
 │   │   ├── schemas/
 │   │   ├── services/
@@ -381,7 +383,7 @@ smart-cs/
 │   ├── pyproject.toml
 │   ├── requirements.txt
 │   └── .env.example
-├── frontend/                     # Vue3 客户对话端（端口 5173）
+├── frontend/                     # Vue3 客户对话端（npm workspace，端口 5173）
 │   ├── src/
 │   │   ├── main.ts
 │   │   ├── App.vue
@@ -392,17 +394,21 @@ smart-cs/
 │   │   │   ├── customer/
 │   │   │   └── LoginView.vue
 │   │   ├── components/
-│   │   └── types/
+│   │   └── types/               # 基础类型转出 @cs/shared，业务类型本地维护
 │   ├── package.json
-│   ├── vite.config.ts
+│   ├── vite.config.ts            # alias @shared -> packages/shared/src
 │   └── tsconfig.json
-├── admin-frontend/               # Vue3 管理后台（独立工程，端口 5174）
+├── admin-frontend/               # Vue3 管理后台（npm workspace，端口 5174）
 │   ├── src/
 │   │   ├── api/  components/  layouts/  router/  stores/  types/
 │   │   └── views/               # AgentList/KnowledgeBaseView/TicketsView/
 │   │                             # TracesView/MemoryView/InquiriesView/McpServersView/Dashboard
 │   ├── package.json
 │   └── vite.config.ts
+├── packages/
+│   └── shared/                   # @cs/shared：http（401 单飞刷新）/auth store/SSE/基础类型
+│       └── src/
+├── package.json                  # npm workspaces 根：dev:chat / dev:admin / build
 ├── docs/
 │   ├── spec.md
 │   ├── api.md
@@ -1268,12 +1274,12 @@ ROUTER_SYSTEM_PROMPT = """你是智能客服系统的路由分发器。
 
 #### 7.4.1 知识问答 Agent
 
-**文件：`backend/app/agents/business/knowledge_agent.py`**
+**文件：`backend/app/packs/customer_service/agents/knowledge_agent.py`**
 
 ```python
 from hello_agents.tools import ToolRegistry
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
+from app.packs.customer_service.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
 from app.tools.memory_factory import get_memory_tool
 from app.tools.rag_factory import get_rag_tool
 
@@ -1290,7 +1296,7 @@ class KnowledgeAgent(BaseBusinessAgent):
         registry.register_tool(get_rag_tool(self.rag_namespace))
 ```
 
-**文件：`backend/app/agents/prompts/knowledge.py`**
+**文件：`backend/app/packs/customer_service/prompts/knowledge.py`**
 
 ```python
 KNOWLEDGE_SYSTEM_PROMPT = """你是公司知识问答专员，负责回答产品、政策、使用指南类问题。
@@ -1309,15 +1315,15 @@ KNOWLEDGE_SYSTEM_PROMPT = """你是公司知识问答专员，负责回答产品
 
 #### 7.4.2 订单服务 Agent
 
-**文件：`backend/app/agents/business/order_agent.py`**
+**文件：`backend/app/packs/customer_service/agents/order_agent.py`**
 
 ```python
 from hello_agents.tools import ToolRegistry
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.prompts.order import ORDER_SYSTEM_PROMPT
+from app.packs.customer_service.prompts.order import ORDER_SYSTEM_PROMPT
 from app.tools.memory_factory import get_memory_tool
-from app.tools.custom.order_tool import QueryOrderTool, ModifyOrderTool
-from app.tools.custom.logistics_tool import QueryLogisticsTool
+from app.packs.customer_service.tools.order_tool import QueryOrderTool, ModifyOrderTool
+from app.packs.customer_service.tools.logistics_tool import QueryLogisticsTool
 
 
 class OrderAgent(BaseBusinessAgent):
@@ -1337,7 +1343,7 @@ class OrderAgent(BaseBusinessAgent):
         registry.register_tool(QueryLogisticsTool())
 ```
 
-**文件：`backend/app/agents/prompts/order.py`**
+**文件：`backend/app/packs/customer_service/prompts/order.py`**
 
 ```python
 ORDER_SYSTEM_PROMPT = """你是订单服务专员，负责处理订单查询、物流追踪、订单修改、退换申请。
@@ -1358,14 +1364,14 @@ ORDER_SYSTEM_PROMPT = """你是订单服务专员，负责处理订单查询、�
 
 #### 7.4.3 投诉处理 Agent
 
-**文件：`backend/app/agents/business/complaint_agent.py`**
+**文件：`backend/app/packs/customer_service/agents/complaint_agent.py`**
 
 ```python
 from hello_agents.tools import ToolRegistry
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.prompts.complaint import COMPLAINT_SYSTEM_PROMPT
+from app.packs.customer_service.prompts.complaint import COMPLAINT_SYSTEM_PROMPT
 from app.tools.memory_factory import get_memory_tool
-from app.tools.custom.ticket_tool import CreateTicketTool, EscalateTool
+from app.packs.customer_service.tools.ticket_tool import CreateTicketTool, EscalateTool
 
 
 class ComplaintAgent(BaseBusinessAgent):
@@ -1381,7 +1387,7 @@ class ComplaintAgent(BaseBusinessAgent):
         registry.register_tool(EscalateTool())
 ```
 
-**文件：`backend/app/agents/prompts/complaint.py`**
+**文件：`backend/app/packs/customer_service/prompts/complaint.py`**
 
 ```python
 COMPLAINT_SYSTEM_PROMPT = """你是投诉处理专员，负责受理客户投诉并推动解决。
@@ -1533,24 +1539,26 @@ class Orchestrator:
 
 ### 7.7 新增业务 Agent 的标准流程（SOP）
 
-**目标**：不修改路由逻辑、不修改 Orchestrator，即可新增一个业务。
+**目标**：不修改路由逻辑、不修改 Orchestrator、不改注册表代码，即可新增一个业务。
+M1 起业务 Agent 归属场景包：新增 Agent 只需在包内加类，并在 `manifest.yaml` 登记。
 
-#### Step 1：创建业务 Agent 类
+#### Step 1：在包内创建业务 Agent 类
 
 ```bash
-touch backend/app/agents/business/refund_agent.py
+touch backend/app/packs/customer_service/agents/refund_agent.py
 ```
 
 ```python
 from hello_agents.tools import ToolRegistry
+
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.prompts.refund import REFUND_SYSTEM_PROMPT
+from app.packs.customer_service.prompts.refund import REFUND_SYSTEM_PROMPT
+from app.packs.customer_service.tools.refund_tool import SubmitRefundTool
 from app.tools.memory_factory import get_memory_tool
-from app.tools.custom.refund_tool import SubmitRefundTool
 
 
 class RefundAgent(BaseBusinessAgent):
-    name = "refund_service"
+    name = "refund_service"          # 全局唯一，路由与 DB 均以它为标识
     description = "退款服务：申请退款、查询退款进度、退款政策咨询"
     system_prompt = REFUND_SYSTEM_PROMPT
     llm_model = "gpt-4o"
@@ -1564,30 +1572,35 @@ class RefundAgent(BaseBusinessAgent):
 #### Step 2：创建 Prompt 文件
 
 ```bash
-touch backend/app/agents/prompts/refund.py
+touch backend/app/packs/customer_service/prompts/refund.py
 ```
 
 #### Step 3：开发业务专属工具（可选）
 
+工具继承内核的 `app.tools.custom.base.BaseTool`，实现放在包内：
+
 ```bash
-touch backend/app/tools/custom/refund_tool.py
+touch backend/app/packs/customer_service/tools/refund_tool.py
 ```
 
-#### Step 4：注册到注册表
+#### Step 4：在 manifest.yaml 登记
 
-```python
-# backend/app/agents/registry.py
-from app.agents.business.refund_agent import RefundAgent
-
-AGENT_REGISTRY = {
-    KnowledgeAgent.name: KnowledgeAgent,
-    OrderAgent.name: OrderAgent,
-    ComplaintAgent.name: ComplaintAgent,
-    RefundAgent.name: RefundAgent,          # 新增一行
-}
+```yaml
+# backend/app/packs/customer_service/manifest.yaml
+agents:
+  - app.packs.customer_service.agents.refund_agent:RefundAgent
+tools:
+  - app.packs.customer_service.tools.refund_tool:SubmitRefundTool
 ```
 
-#### Step 5：DB 登记（可选，重启时会自动补登）
+`packs.loader` 按 `模块:类名` 导入并校验：Agent 必须是 `BaseBusinessAgent` 子类、
+工具必须是 `BaseTool` 子类，两者 name 均全局唯一；单条资产失败只记日志跳过，
+不影响其他 Agent 与服务启动。
+
+#### Step 5：重启后端
+
+manifest 与包代码按进程缓存，重启后生效（与原代码 Agent 行为一致）。
+如需在后台展示自定义名称或控制开关，可在 `agents` 表补一行（可选，不补时按默认启用处理）：
 
 ```sql
 INSERT INTO agents (name, display_name, description, enabled)
@@ -1597,23 +1610,24 @@ VALUES ('refund_service', '退款服务', '申请退款、查询进度', true);
 #### Step 6：测试
 
 ```python
-# tests/agents/test_refund_agent.py
-async def test_refund_agent_route():
-    orch = Orchestrator()
-    events = [e async for e in orch.dispatch(
-        user_id="u1", session_id="s1",
-        query="我要申请退款", history=[],
-    )]
-    assert any(e["type"] == "text" for e in events)
+# 装载与注册表均已生效（无需真模型）
+from app.agents.registry import AGENT_REGISTRY
+from app.packs.loader import get_code_agents
+
+
+def test_refund_agent_registered():
+    assert "refund_service" in get_code_agents()
+    assert "refund_service" in AGENT_REGISTRY
 ```
 
 #### Step 7：完成
 
-路由 Agent 会自动在 prompt 中看到 `refund_service`（因为 `RouterAgent._build_prompt()` 从注册表动态生成），无需改路由代码。
+路由 Agent 会自动在 prompt 中看到 `refund_service`（`RouterAgent._build_prompt()` 从
+`AGENT_REGISTRY` + DB 动态 Agent 生成），无需改路由代码。
 
 ### 7.8 自定义工具（继承 BaseTool）
 
-**文件：`backend/app/tools/custom/order_tool.py`**
+**文件：`backend/app/packs/customer_service/tools/order_tool.py`**
 
 ```python
 """
@@ -2498,9 +2512,10 @@ GET    /metrics
 | `RouterAgent` | `agents/router_agent.py` | 路由 Agent（独立） |
 | `AGENT_REGISTRY` | `agents/registry.py` | 类注册表 |
 | `Orchestrator` | `agents/orchestrator.py` | 调度器 |
-| `KnowledgeAgent` | `agents/business/knowledge_agent.py` | 业务1 |
-| `OrderAgent` | `agents/business/order_agent.py` | 业务2 |
-| `ComplaintAgent` | `agents/business/complaint_agent.py` | 业务3 |
+| `KnowledgeAgent` | `packs/customer_service/agents/knowledge_agent.py` | 业务1 |
+| `OrderAgent` | `packs/customer_service/agents/order_agent.py` | 业务2 |
+| `ComplaintAgent` | `packs/customer_service/agents/complaint_agent.py` | 业务3 |
+| `packs.loader` | `packs/loader.py` | 场景包清单装载（Agent/工具） |
 | `ContextEngineer` | `core/context_engineer.py` | 上下文融合 |
 | `MemoryFactory` | `tools/memory_factory.py` | MemoryTool 工厂 |
 | `RagFactory` | `tools/rag_factory.py` | RAGTool 工厂 |

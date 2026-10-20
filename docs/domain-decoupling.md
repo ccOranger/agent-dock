@@ -146,45 +146,55 @@ backend/app/
 | `TicketsView.vue`、`CannedScriptsView.vue` | 客服包 | 导航按 manifest 显隐；话术页改名"应答模板" |
 | `frontend/src/views/customer/*` | 内核 | 收敛为可嵌入聊天挂件，文案走包配置 |
 
-## 7. 场景包契约（manifest 草案）
+## 7. 场景包契约（manifest）
+
+M1 已落地最小可用子集，实际文件见 `backend/app/packs/customer_service/manifest.yaml`：
 
 ```yaml
 name: customer_service
 display_name: 客服/售后场景包
 version: 0.1.0
 enabled: true
+
+# 包内代码 Agent：模块路径:类名，类需继承 BaseBusinessAgent，name 全局唯一
 agents:
-  code: [knowledge_agent, order_agent, complaint_agent]
-  prompts: prompts/
+  - app.packs.customer_service.agents.knowledge_agent:KnowledgeAgent
+  - app.packs.customer_service.agents.order_agent:OrderAgent
+  - app.packs.customer_service.agents.complaint_agent:ComplaintAgent
+
+# 包内自定义工具：模块路径:类名，类需继承 BaseTool，name 全局唯一
 tools:
-  custom: [order_query, refund_apply, logistics_query, create_ticket]
+  - app.packs.customer_service.tools.order_tool:QueryOrderTool
+  # …其余工具同类登记
+
+# 领域知识库命名空间声明（P1 起用于检索范围收敛与后台分组）
 knowledge:
-  namespaces: [cs_default]
-  seeds: [faq.md, return_policy.md]
-response_templates:
-  seeds: templates.yaml
-routing:
-  keyword_hints: true
-  signal_rules: signals.yaml
-ui:
-  customer_title: 智能客服
-  handover_text: 正在为您转接人工客服
-  nav:
-    tickets: true
-    canned_scripts: true
+  namespaces: [cs_default, cs_order, cs_after_sales]
 ```
 
-内核只读取 manifest，不认识包内业务字段。
+字段说明：
+
+| 字段 | 状态 | 内核如何使用 |
+|---|---|---|
+| `name` / `display_name` / `version` / `enabled` | 已实现 | `enabled: false` 时整包跳过，服务降级为“仅内核模式” |
+| `agents` | 已实现 | `packs.loader.get_code_agents()` 导入并校验子类、name 唯一 |
+| `tools` | 已实现 | `packs.loader.get_custom_tools()` → `tools/custom_catalog` |
+| `knowledge.namespaces` | 已实现（声明） | `get_knowledge_namespaces()` 去重保序；检索收敛待 P1 |
+| `response_templates` / `routing` / `ui` | 待 P2 | 话术、信号规则、前端导航目前仍在内核 |
+
+内核只读这些通用字段，不解释业务含义；新增场景包时复制目录与 manifest 即可，内核零改动。
+
+> 早期草案中的 `agents.code` / `tools.custom` 改成了 `module:Class` 引用：加载器需要真正 import 到类，而名字列表还得额外维护一张映射表，反而增加耦合。
 
 ## 8. 迁移顺序与工作量
 
-| 阶段 | 内容 | 预计 | 风险 |
-|---|---|---|---|
-| P0 代码归位 | 新建 `packs/`，移动提示词与领域工具，更新 import，测试保持全绿 | 0.5–1 天 | 低 |
-| P1 注册与种子 | manifest + 包加载器；registry 去硬 import；种子拆包；路由提示词模板化 | 3–5 天 | 中 |
-| P2 能力泛化 | 话术→应答模板；信号规则下沉；后台 IA 调整；API 别名 | 1–2 周 | 中 |
-| P3 数据模型 | `app_users`、Ticket 迁包、Session 外键调整 | 2–4 周 | 高，按需再做 |
-| P4 多租户 | `tenant_id` 与隔离（仅 SaaS 时） | 3–6 周 | 高，暂不做 |
+| 阶段 | 内容 | 预计 | 风险 | 状态 |
+|---|---|---|---|---|
+| P0 代码归位 | 新建 `packs/`，移动提示词、领域工具与业务 Agent，更新 import | 0.5–1 天 | 低 | M1 已完成 |
+| P1 注册与种子 | manifest + 包加载器；registry 去硬 import；种子拆包；路由提示词模板化 | 3–5 天 | 中 | 装载器与 registry 已完成；种子/路由模板待做 |
+| P2 能力泛化 | 话术→应答模板；信号规则下沉；后台 IA 调整；API 别名 | 1–2 周 | 中 | 待做 |
+| P3 数据模型 | `app_users`、Ticket 迁包、Session 外键调整 | 2–4 周 | 高，按需再做 | 未开始 |
+| P4 多租户 | `tenant_id` 与隔离（仅 SaaS 时） | 3–6 周 | 高，暂不做 | 未开始 |
 
 建议只做 P0–P2 就发布 v0.1；P3 放到 v0.2，P4 等 SaaS 验证后再启动。
 

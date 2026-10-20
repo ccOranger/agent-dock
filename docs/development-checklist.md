@@ -20,7 +20,7 @@
 | 里程碑 | 目标 | 预估 | 退出标准 |
 |---|---|---|---|
 | M0 工程基线 | 仓库具备开源项目的基本形态 | 2–3 天 | CI 绿、LICENSE/SECURITY 齐备、演示口令受控 |
-| M1 解耦 P0 | 客服资产归位 `packs/` | 1–2 天 | 文件迁移完成，278 测试全绿，行为不变 |
+| M1 解耦 P0 | 客服资产归位 `packs/` | 1–2 天 | 文件迁移完成，287 测试全绿，行为不变 |
 | M1.5 前端单仓化 | 两个前端共享代码 | 2–3 天 | workspaces 生效，http/auth/SSE/types 只有一份，两端构建通过 |
 | M2 一键部署 | 陌生人 30 分钟跑通 | 5–8 天 | `docker compose up` 后完成首次对话 |
 | M3 文档物料 | 能对外讲清楚并演示 | 3–5 天 | README/Quickstart 可用，截图与 GIF 就绪 |
@@ -58,57 +58,64 @@
   - 首次登录强制改密，或初始化时生成随机密码并只打印一次
   - 验收：默认启动无固定口令账号
 - [x] **M0-7 版本与锁文件**（0.5d）
-  - 确认 `package-lock.json` 入库；`requirements.txt` 版本策略写清楚
+  - 确认仓库根 `package-lock.json` 入库（npm workspaces 统一锁文件）；`requirements.txt` 版本策略写清楚
   - 验收：干净环境可复现安装
 
 > M0 验收（2026-10-20）：本地 ruff、pytest（277 passed / 2 skipped）、两端构建均通过；GitHub Actions 首次运行已全绿（backend lint + pytest、frontend 两端 build）。CI 环境 pytest 275 passed / 4 skipped（Linux 跳过 2 个 Windows 专用用例）。
 
 ### M1 领域解耦 P0（低风险归位）
 
-- [ ] **M1-1 建立场景包目录**（0.5d）
+- [x] **M1-1 建立场景包目录**（0.5d）
   - `backend/app/packs/customer_service/{agents,prompts,tools,seeds,ui}/`
-  - 写 `manifest.yaml` 最小版本（name/version/agents/tools）
-- [ ] **M1-2 迁移提示词**（0.5d）
-  - `agents/prompts/{knowledge,order,complaint}.py` → 包内；`router.py` 暂留内核
+  - 写 `manifest.yaml`：name/display_name/version/enabled/agents/tools/knowledge.namespaces
+- [x] **M1-2 迁移提示词**（0.5d）
+  - `agents/prompts/{knowledge,order,complaint}.py` → 包内；`router.py` 留内核
   - 验收：所有 import 更新，测试通过
-- [ ] **M1-3 迁移领域工具**（0.5d）
+- [x] **M1-3 迁移领域工具**（0.5d）
   - `tools/custom/{order_tool,refund_tool,logistics_tool,ticket_tool,mock_data}.py` → 包内
-  - 保留 `base.py`、`custom_catalog.py`、`custom_loader.py` 在内核
-  - 验收：`custom_catalog` 仍能发现包内工具
-- [ ] **M1-4 迁移业务 Agent**（0.5d）
-  - `order_agent.py`、`complaint_agent.py` → 包内
-  - `knowledge_agent.py` 先留内核（作为通用模板），M6 再参数化
+  - 保留 `base.py`、`custom_catalog.py`、`custom_loader.py` 在内核；`custom_catalog` 改为消费 `packs.loader`
+  - 同步修正 `mcp_servers/{logistics,refund}_server.py` 对 mock_data 的引用
+  - 验收：`custom_catalog` 仍能发现包内 9 个工具
+- [x] **M1-4 迁移业务 Agent**（0.5d）
+  - `order_agent.py`、`complaint_agent.py`、`knowledge_agent.py` → 包内
+  - 调整原计划：`knowledge_agent.py` 一并归位（它是客服领域人格，不是通用模板；内核保留 `BaseBusinessAgent` 与 `RouterAgent`）
   - 验收：路由结果与迁移前一致
-- [ ] **M1-5 最小包加载器**（1d）
-  - 新增 `packs/loader.py`：导入包模块并返回 Agent 列表
-  - `registry.py` 改为从 loader 获取，删除对客服模块的硬 import
+- [x] **M1-5 最小包加载器**（1d）
+  - 新增 `packs/loader.py`：扫描 manifest、导入包模块、校验子类与 name 唯一、断包降级只记日志
+  - `registry.py` / `custom_catalog.py` 改为从 loader 获取，删除对客服模块的硬 import
   - 验收：内核不再直接 import 客服 Agent；测试全绿
-- [ ] **M1-6 回归验证**（0.5d）
-  - `pytest -q`、两端 build；手工跑一轮多意图 + 工具 + 转人工
-  - 验收：278 passed / 1 skipped，无行为变化
+- [x] **M1-6 回归验证**（0.5d）
+  - `pytest -q`（隐藏 `.env` 模拟 CI）、两端 build、`compileall`
+  - 验收：287 passed / 2 skipped，无行为变化
+
+> M1 验收（2026-10-20）：`packs/` 目录与 manifest 就绪，内核仅通过 `packs.loader` 获取包资产；新增 `tests/test_packs_loader.py`（10 例）覆盖 manifest 解析、禁用包跳过、非法/重复引用降级。本地 ruff、`pytest`（287 passed / 2 skipped）、两端 build、`compileall` 均通过。
 
 ### M1.5 前端单仓化（v0.1）
 
 目标：保留管理端 SPA + 聊天端两个产物，但共享代码只维护一份；为 v0.2 挂件化铺路。
 
-- [ ] **M1.5-1 建立 workspaces**（0.5d）
+- [x] **M1.5-1 建立 workspaces**（0.5d）
   - 根目录 `package.json`：`workspaces: ["frontend", "admin-frontend", "packages/*"]`
-  - 依赖提升，`npm install` 后两端可独立启动
-- [ ] **M1.5-2 抽取共享 HTTP 客户端**（0.5–1d）
+  - 依赖提升，`npm install` 后两端可独立启动（已验证：仅根一份 `vite`/`vue-tsc`，两端 `node_modules` 为空）
+- [x] **M1.5-2 抽取共享 HTTP 客户端**（0.5–1d）
   - `packages/shared/src/http.ts`：`createHttpClient({ tokenKey, refreshKey, loginPath })`
   - 401 单飞刷新只保留一份；两套 token key 继续隔离
-  - 验收：两个 `http.ts` 退化为薄封装或删除
-- [ ] **M1.5-3 抽取共享 auth store**（0.5d）
-  - `createAuthStore(tokenKey, refreshKey)`；两个应用各自实例化
+  - 验收：两个 `http.ts` 退化为薄封装（18 / 20 行，admin 多一个 `downloadBlob` 导出）
+- [x] **M1.5-3 抽取共享 auth store**（0.5d）
+  - `createAuthStore({ tokens, api, validateUser?, extra? })`；两个应用各自实例化
+  - 调整原计划：不用 `(tokenKey, refreshKey)` 签名，两端差异（注册、员工角色校验、isAdmin）改为注入，避免共享包感知业务角色
   - 验收：登录、登出、刷新行为不变
-- [ ] **M1.5-4 抽取 SSE 与类型**（0.5d）
-  - `packages/shared/src/sse.ts`、`types.ts`；聊天端改为引用
-- [ ] **M1.5-5 统一脚本与 CI**（0.5d）
-  - 根脚本：`dev:admin`、`dev:chat`、`build`；CI 仍分别构建两个产物
-  - Vite alias `@shared`，两端配置一致
-- [ ] **M1.5-6 回归验证**（0.5d）
-  - 两端 `npm run build`、登录 + 刷新 token、聊天流式渲染
+- [x] **M1.5-4 抽取 SSE 与类型**（0.5d）
+  - `packages/shared/src/sse.ts`、`types.ts`；聊天端改为引用；两端 `types/index.ts` 只保留业务类型并转出基础类型
+- [x] **M1.5-5 统一脚本与 CI**（0.5d）
+  - 根脚本：`dev:admin`、`dev:chat`、`build`；CI 仍分别构建两个产物（根 `npm ci` + `npm run build -w <app>`）
+  - Vite alias `@shared`，两端配置一致；`start_all.ps1` 与 README/CONTRIBUTING/runbook 同步为仓库根安装
+- [x] **M1.5-6 回归验证**（0.5d）
+  - 已执行：`npm ci`、根 `npm run build`、两端 `npm run build`（含 vue-tsc）
+  - 运行时联调（2026-10-20，后端 + 云 Postgres/Redis/Qdrant + DeepSeek）：客户/后台登录成功；客户 401 → `POST /auth/refresh` 200 → 原请求重放 200（单飞刷新生效，token 轮换）；聊天 SSE 事件齐全（session→status→route→agent_start→text×41→agent_end→done），气泡文本按 0→15→79→119→125 渐进增长（非一次性）；两端 token key 独立
   - 验收：无功能变化，重复文件清零
+
+> M1.5 验收（2026-10-20）：workspaces 与 `@cs/shared` 就绪；依赖提升后仅根一份 vite，两端构建与根 `npm ci` 通过；登录、刷新 token、聊天流式渲染均已真实联调通过。两端 `http.ts` 收敛为 18/21 行薄封装，401 刷新、SSE 解析、auth 生命周期全仓各一份。
 
 ### M2 一键部署与初始化（发布关键路径）
 

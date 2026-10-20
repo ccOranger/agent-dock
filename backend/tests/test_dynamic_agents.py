@@ -6,9 +6,9 @@ from fastapi.testclient import TestClient
 
 from app.agents import registry
 from app.agents.business.dynamic_agent import DynamicBusinessAgent
-from app.agents.business.knowledge_agent import KnowledgeAgent
 from app.api.v1 import admin as adm
 from app.models.repositories import AgentRepo
+from app.packs.customer_service.agents.knowledge_agent import KnowledgeAgent
 
 
 def _dyn_meta(name="dyn1", **kw):

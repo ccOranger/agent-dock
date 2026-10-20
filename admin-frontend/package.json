@@ -13,6 +13,7 @@
     "lint": "eslint . --fix && prettier --write src"
   },
   "dependencies": {
+    "@cs/shared": "*",
     "axios": "^1.7.7",
     "dayjs": "^1.11.13",
     "element-plus": "^2.8.4",

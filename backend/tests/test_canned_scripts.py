@@ -15,7 +15,6 @@ import pytest
 
 from app.agents import canned_scripts as cs
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.business.knowledge_agent import KnowledgeAgent
 from app.agents.canned_scripts import (
     CAPABILITY_TEXT,
     IDENTITY_TEXT,
@@ -28,9 +27,10 @@ from app.agents.canned_scripts import (
     rule_from_row,
 )
 from app.agents.orchestrator import Orchestrator
-from app.agents.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
 from app.core.tracing import OUTCOME_ANSWERED, SPAN_CANNED, TraceCollector
 from app.models.repositories import CannedScriptRepo
+from app.packs.customer_service.agents.knowledge_agent import KnowledgeAgent
+from app.packs.customer_service.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
 
 # 业务提示词开头片段（用于断言格式约束是后置追加、没顶掉原有提示词）
 KNOWLEDGE_HEAD = KNOWLEDGE_SYSTEM_PROMPT.strip()[:12]

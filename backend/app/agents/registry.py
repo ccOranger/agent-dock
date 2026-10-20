@@ -1,6 +1,8 @@
 """
 AgentRegistry：业务 Agent 类注册表
-每个业务 Agent 是一个类，独立开发，注册到这里即可被路由分发
+业务 Agent 由场景包 manifest（packs/<name>/manifest.yaml）声明，这里只消费
+packs.loader 的装载结果，内核不直接 import 任何包内 Agent 类。
+新增业务 Agent：在所属场景包的 manifest.yaml 的 agents 段登记即可。
 """
 import ast
 import inspect
@@ -8,20 +10,13 @@ import sys
 import textwrap
 
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.business.complaint_agent import ComplaintAgent
-from app.agents.business.knowledge_agent import KnowledgeAgent
-from app.agents.business.order_agent import OrderAgent
 from app.core.config import settings
+from app.packs.loader import get_code_agents
 from app.tools import custom_catalog
 from app.tools.custom.base import BaseTool
 
-# 新增业务 Agent：只需 import 并加入此表
-AGENT_REGISTRY: dict[str, type[BaseBusinessAgent]] = {
-    KnowledgeAgent.name: KnowledgeAgent,
-    OrderAgent.name: OrderAgent,
-    ComplaintAgent.name: ComplaintAgent,
-    # RefundAgent.name: RefundAgent,
-}
+# name -> Agent 类：场景包装载结果（拷贝），保持调用方的只读使用习惯
+AGENT_REGISTRY: dict[str, type[BaseBusinessAgent]] = dict(get_code_agents())
 
 
 def get_agent_class(name: str) -> type[BaseBusinessAgent] | None:
