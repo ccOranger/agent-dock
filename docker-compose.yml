@@ -65,6 +65,8 @@ services:
       APP_ENV: ${APP_ENV:-development}
       # 演示数据：false 时只建管理员，密码仅首次在日志打印
       SEED_DEMO: ${SEED_DEMO:-false}
+      # 启动时是否执行 init_db/seed（生产建议 false，部署时用一次性任务，见 docs/runbook.md）
+      INIT_ON_START: ${INIT_ON_START:-true}
       # 只采信 Nginx 容器（web 的静态 IP）转发的 X-Forwarded-For，避免直连伪造
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.28.0.10/32}
     volumes:
@@ -95,6 +97,12 @@ services:
         ipv4_address: 172.28.0.10
     ports:
       - "${WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/admin/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
 networks:

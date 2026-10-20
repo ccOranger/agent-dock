@@ -50,12 +50,12 @@ docs/            spec.md（规范 v2.0）/ api.md（接口速查）/ runbook.md�
 
 ### 方式 A：Docker Compose（一条命令起全套）
 
-前置：Docker Desktop / Docker Engine + Compose v2.24+，本机无需 Python/Node。
+前置：Docker Desktop / Docker Engine + Compose v2.24.4+（生产叠加用到 `!reset`），本机无需 Python/Node。
 
 ```powershell
 copy backend\.env.example .env       # 必须填 LLM_* / EMBED_* / JWT_SECRET（强随机，如 openssl rand -base64 48）
 docker compose up -d --build         # 首次构建 5~8 分钟（pip 依赖较多）；未设 JWT_SECRET 会拒绝启动
-docker compose ps                    # postgres/qdrant/redis/backend 应为 healthy（web 为 Up）
+docker compose ps                    # postgres/qdrant/redis/backend/web 均应为 healthy
 ```
 
 - 客户对话端：http://localhost:8080
@@ -65,6 +65,7 @@ docker compose ps                    # postgres/qdrant/redis/backend 应为 heal
 - `SEED_DEMO=false` 时随机管理员密码只在 `docker compose logs backend` 打印一次
 - 停止：`docker compose down`；连数据一起清空：`docker compose down -v`
 - 端口冲突：在 `.env` 改 `BACKEND_PORT`（仅本机绑定）/ `WEB_PORT`
+- 生产上线：叠加 `docker-compose.prod.yml`（Caddy HTTPS、固定数据目录、一次性初始化、备份）见 [runbook §2.2](docs/runbook.md)
 
 > 启动日志会先输出 `[自检] 数据库 / Redis / Qdrant / 模型`，失败时给出对应排查提示。
 

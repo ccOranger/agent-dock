@@ -43,7 +43,65 @@ docker compose ps               # postgres/qdrant/redis/backend 应为 healthy
 > 裸机/自定义环境可用 `cd backend && python -m app.setup`：建表 + 创建管理员 + 生成随机 JWT + 测试模型连通性（M2-5）。
 > `JWT_SECRET` 以 `--env-file` 为唯一真源，且写回后权限为 `0600`；Compose 部署请传 `--env-file ../.env`（仓库根）。
 
-### 2.2 Windows 开发环境（热更新）
+### 2.2 生产叠加（HTTPS + 固定数据目录 + 一次性初始化）
+
+单机生产在基础编排上叠加 `docker-compose.prod.yml`（需要 Compose ≥ v2.24.4）：Caddy 自动签发 HTTPS、数据改 bind mount、限制资源/日志、关闭启动时初始化。
+
+**前置**
+- 域名已解析到本机，80/443 可达（80 用于 ACME 挑战）；宿主机不要占用这两个端口。
+- 根 `.env` 至少设置：
+  ```ini
+  APP_ENV=production
+  JWT_SECRET=<openssl rand -base64 48>
+  POSTGRES_PASSWORD=<强密码>
+  REDIS_PASSWORD=<字母数字随机串>
+  QDRANT_API_KEY=<强随机>
+  DOMAIN=cs.example.com
+  DATA_ROOT=/srv/smart-cs
+  INIT_ON_START=false
+  ```
+- `POSTGRES_PASSWORD` 对已有 `pgdata` 卷不生效：旧库需在库内 `ALTER USER cs_user WITH PASSWORD ...`，或全新部署。
+
+**首次部署（初始化只跑一次）**
+```bash
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+$COMPOSE up -d --build postgres qdrant redis   # 先起依赖
+$COMPOSE run --rm backend python ../scripts/init_db.py
+$COMPOSE run --rm backend python ../scripts/seed_data.py   # 管理员随机密码只打印一次
+$COMPOSE up -d --build
+$COMPOSE ps                                  # postgres/qdrant/redis/backend/web/caddy 运行正常
+```
+> entrypoint 对传入命令直接 `exec`，所以 `run` 不会重复执行初始化；之后正常启动因 `INIT_ON_START=false` 不再建表/灌种子。
+
+- 访问：`https://<DOMAIN>/`（客户）、`https://<DOMAIN>/admin/`（后台）；8080 不再对外发布，backend 仍只绑 `127.0.0.1:8000`
+- 证书：首次签发看 `$COMPOSE logs -f caddy`，证书持久化在 `caddydata` 卷
+- 更新：`$COMPOSE up -d --build`；schema 变更再跑一次 `init_db.py`，不要打开 `INIT_ON_START`
+
+**备份**
+```bash
+COMPOSE_FILE="docker-compose.yml:docker-compose.prod.yml" \
+BACKUP_ROOT=/srv/smart-cs/backups BACKUP_RETAIN_DAYS=14 \
+bash scripts/backup.sh
+```
+产物：`postgres.dump`（pg_restore）、`qdrant-*.snapshot`、`backenddata/`、`memorydata/`、`redis.rdb`、`manifest.txt`；默认保留 7 天，`BACKUP_RETAIN_DAYS=0` 不清理。
+
+**恢复要点**（先停 backend/web/caddy，避免写入）
+```bash
+# PostgreSQL
+$COMPOSE exec -T postgres pg_restore -U cs_user -d cs_db --clean --if-exists --no-owner < backups/<ts>/postgres.dump
+# Qdrant：通过 snapshots/upload API 上传快照（或官方恢复流程）
+# backenddata/memorydata：解包到 $DATA_ROOT 后 chown -R 1000:1000
+# Redis：停 redis，替换 /data/dump.rdb；AOF 优先，必要时先移走 appendonlydir
+```
+
+**注意**
+- Caddy 占用 80/443；宿主已有 Nginx/Apache 需先停
+- `init-perms` 一次性容器会把 `backenddata`/`memorydata` 属主调整为 1000；`DATA_ROOT` 需可写
+- `REDIS_PASSWORD` 含 `@ : /` 等字符需 URL 编码，建议用字母数字
+- `docker compose down` 不要加 `-v`；Caddy 证书在命名卷 `caddydata`
+- Windows 本地验证生产编排可设 `DATA_ROOT=D:/smart-cs-data`，并只启动 `postgres qdrant redis backend web`
+
+### 2.3 Windows 开发环境（热更新）
 
 ```powershell
 # 拉起后端 + 客户前端(5173) + 管理后台(5174)，各占独立 PowerShell 窗口
@@ -117,6 +175,7 @@ docker compose ps               # postgres/qdrant/redis/backend 应为 healthy
   | `seed_data.py` | 种子定义：建表 + 初始人员/客户/Agent/工具/示例文档/MCP 配置（幂等，可对旧数据 upsert） |
   | `rebuild_and_seed.py` | 开发阶段全量重建 + 灌种子（云库友好） |
   | `seed_memory_via_chat.py` | 模拟对话造记忆测试数据 |
+  | `backup.sh` | 生产备份：pg_dump + Qdrant 快照 + 业务数据 + Redis RDB（带保留期） |
   | `cleanup_traces.py` | 清理过期链路（见下） |
   | `start_all.ps1` / `start_all.bat` / `stop_all.ps1` | 一键起停三服务 |
 - `request_traces`（请求链路）按轮次增长、带 spans 时间线，需设保留期：`python scripts/cleanup_traces.py`（默认取 `TRACE_RETENTION_DAYS`，可 `--days N` / `--dry-run`）；建议挂 cron 每日执行。
@@ -171,9 +230,9 @@ cd d:\project\smart-cs\backend; $env:PYTHONIOENCODING="utf-8"
 
 ## 9. 安全
 
-- 生产必须更换 `JWT_SECRET`、seed 账号密码（admin / service01 / alice，见 README）。
+- 生产必须更换 `JWT_SECRET`、seed 账号密码（admin / service01 / alice，见 README），并设置 `POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`QDRANT_API_KEY`；生产叠加文件会对三者做非空校验。
 - 反向代理需关闭 SSE 缓冲（Nginx：`proxy_buffering off;`）并设 `proxy_read_timeout ≥ 300s`；仓库自带 `docker/nginx.conf` 已配置，样本可直接参考。
-- 代理链采信：仅当直连对端命中 `TRUSTED_PROXIES`（逗号分隔 IP/CIDR）时才采信 `X-Forwarded-For`；compose 默认只采信 Nginx 容器静态 IP `172.28.0.10/32`（固定子网 `172.28.0.0/24`），backend 端口只绑 `127.0.0.1`，无法从外部直连伪造。从旧版本升级时，若 `.env` 仍写着 `TRUSTED_PROXIES=172.16.0.0/12`，请删掉该行或改为 `172.28.0.10/32`（env 优先于 compose 默认值）。
+- 代理链采信：仅当直连对端命中 `TRUSTED_PROXIES`（逗号分隔 IP/CIDR）时才采信 `X-Forwarded-For`；compose 默认只采信 Nginx 容器静态 IP `172.28.0.10/32`（固定子网 `172.28.0.0/24`），backend 端口只绑 `127.0.0.1`，无法从外部直连伪造。从旧版本升级时，若 `.env` 仍写着 `TRUSTED_PROXIES=172.16.0.0/12`，请删掉该行或改为 `172.28.0.10/32`（env 优先于 compose 默认值）。生产叠加的 Caddy 位于边缘，默认会丢弃客户端传入的 `X-Forwarded-For`、按真实对端 IP 覆写（已实测），伪造值不会传到 backend；若在 Caddy 前再加云 LB，需按实际链路重新配置采信。
 - 上传限制：`UPLOAD_MAX_SIZE_MB=20`（后端）与 Nginx `client_max_body_size 25m` 配套；调大时两处同步。
 - CORS：`ALLOWED_ORIGINS` 默认放行 5173/5174（含 127.0.0.1 变体），生产改为实际域名白名单；单镜像部署下前后端同源，无需额外放行 8080。
 - 限流：单用户对话 20/min、上传 10/h、登录 10/min/IP。
