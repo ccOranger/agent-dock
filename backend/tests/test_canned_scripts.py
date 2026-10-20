@@ -17,10 +17,10 @@ from app.agents import canned_scripts as cs
 from app.agents.base_business_agent import BaseBusinessAgent
 from app.agents.business.knowledge_agent import KnowledgeAgent
 from app.agents.canned_scripts import (
-    SEED_RULES,
     CAPABILITY_TEXT,
     IDENTITY_TEXT,
     PROBING_TEXT,
+    SEED_RULES,
     match_canned_script,
     match_rules,
     normalize_query,
@@ -260,7 +260,8 @@ async def test_dispatch_hits_canned_without_routing(monkeypatch):
 
 async def test_dispatch_canned_records_trace(monkeypatch):
     await _patch_enabled(
-        monkeypatch, [_row(key="capability", category="capability", patterns=["你能做什么"], text="能力清单。", priority=30)]
+        monkeypatch,
+        [_row(key="capability", category="capability", patterns=["你能做什么"], text="能力清单。", priority=30)],
     )
     orch = _make_orch(monkeypatch)
     collector = TraceCollector(trace_id="t1", user_id="u1", session_id="s1")

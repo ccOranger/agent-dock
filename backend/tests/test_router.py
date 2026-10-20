@@ -7,9 +7,9 @@ VALID = {"knowledge_qa", "order_service", "complaint_handler"}
 
 
 def test_registry_completeness():
+    from app.agents.business.complaint_agent import ComplaintAgent
     from app.agents.business.knowledge_agent import KnowledgeAgent
     from app.agents.business.order_agent import OrderAgent
-    from app.agents.business.complaint_agent import ComplaintAgent
 
     assert KnowledgeAgent.name in AGENT_REGISTRY
     assert OrderAgent.name in AGENT_REGISTRY

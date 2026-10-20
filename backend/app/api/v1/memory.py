@@ -1,5 +1,5 @@
 """记忆接口（包装 MemoryTool + DB 归档查询）"""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from app.api.deps import current_customer, require_staff
 from app.core.exceptions import NotFound

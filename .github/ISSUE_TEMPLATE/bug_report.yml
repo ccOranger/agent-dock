@@ -1,0 +1,64 @@
+name: Bug 报告
+description: 报告可复现的功能异常
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先搜索是否已有相同 issue，并移除日志中的密钥、客户数据等敏感信息。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么？期望是什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 启动方式（Docker / 本地）
+        2. 操作路径
+        3. 观察到的结果
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 提交
+      description: 例如 v0.1.0 或 commit hash
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 部署方式
+      options:
+        - 本地开发（uvicorn + Vite）
+        - Docker Compose
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 后端日志、浏览器控制台、链路 ID 等（请脱敏）
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已搜索现有 issue
+          required: true
+        - label: 已移除密钥与客户敏感数据
+          required: true

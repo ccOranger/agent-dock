@@ -13,7 +13,7 @@ import argparse
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
@@ -25,7 +25,7 @@ from app.models.entities import RequestTrace  # noqa: E402
 
 
 async def main(days: int, dry_run: bool) -> None:
-    cutoff = RequestTrace.created_at < datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    cutoff = RequestTrace.created_at < datetime.now(UTC) - timedelta(days=max(1, days))
     async with engine.begin() as conn:
         doomed = (await conn.execute(select(func.count()).select_from(RequestTrace).where(cutoff))).scalar_one()
         print(f">> 保留 {days} 天，待清理 {doomed} 条")

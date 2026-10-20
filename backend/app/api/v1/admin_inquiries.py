@@ -22,7 +22,7 @@ def _parse_dt(value: str | None) -> datetime | None:
     except ValueError:
         from app.core.exceptions import ParamError
 
-        raise ParamError(f"时间格式非法: {value}")
+        raise ParamError(f"时间格式非法: {value}") from None
 
 
 async def _build_filters(

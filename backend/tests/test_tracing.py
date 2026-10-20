@@ -1,9 +1,6 @@
 """链路采集器单测：span 结构、载荷裁剪、采样与拍平维度（纯内存，不碰 DB）"""
 import json
 
-import pytest
-
-from app.core import tracing as tr
 from app.core.config import settings
 from app.core.tracing import (
     OUTCOME_ANSWERED,
@@ -272,7 +269,11 @@ def test_ddl_and_orm_columns_stay_in_sync():
         re.S,
     )
     assert block, "init_db.sql 里找不到 request_traces 建表语句"
-    ddl_cols = {line.strip().split()[0] for line in block.group(1).splitlines() if line.strip() and not line.strip().startswith("--")}
+    ddl_cols = {
+        line.strip().split()[0]
+        for line in block.group(1).splitlines()
+        if line.strip() and not line.strip().startswith("--")
+    }
     orm_cols = {c.name for c in RequestTrace.__table__.columns}
     assert orm_cols == ddl_cols
 

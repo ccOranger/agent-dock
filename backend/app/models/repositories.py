@@ -2,7 +2,7 @@
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -474,7 +474,7 @@ class MemoryRepo:
 
         已晋升行 type 已翻转为 episodic/semantic，不在删除条件内。
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)
+        cutoff = datetime.now(UTC) - timedelta(seconds=ttl_seconds)
         async with SessionLocal() as db:
             result = await db.execute(
                 delete(Memory).where(Memory.type == "working", Memory.created_at < cutoff)
@@ -557,7 +557,11 @@ class DocumentRepo:
                 count_stmt = count_stmt.where(Document.kind == kind)
             total = (await db.execute(count_stmt)).scalar_one()
             rows = (
-                await db.execute(stmt.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+                await db.execute(
+                    stmt.order_by(Document.created_at.desc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                )
             ).scalars().all()
             return list(rows), total
 
@@ -946,7 +950,7 @@ def _ticket_uuid(value) -> uuid.UUID | None:
 
 
 def _ticket_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class TicketRepo:
@@ -1031,7 +1035,7 @@ class TicketRepo:
             row.content = content[:4000]
             if row.status == "open":
                 row.status = "in_progress"
-            row.updated_at = datetime.now(timezone.utc)
+            row.updated_at = datetime.now(UTC)
             await db.commit()
             await db.refresh(row)
             return row
@@ -1051,7 +1055,7 @@ class TicketRepo:
                 row.updates = list(row.updates or []) + [
                     {"content": note[:2000], "at": _ticket_now(), "action": f"status->{status}"}
                 ]
-            row.updated_at = datetime.now(timezone.utc)
+            row.updated_at = datetime.now(UTC)
             await db.commit()
             await db.refresh(row)
             return row
@@ -1361,7 +1365,7 @@ class TraceRepo:
         column = getattr(RequestTrace, field, None)
         if column is None:
             return []
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
         async with SessionLocal() as db:
             values = (
                 (
@@ -1381,7 +1385,7 @@ class TraceRepo:
     @staticmethod
     async def delete_older_than(days: int) -> int:
         """保留期清理（由 scripts/ 定期调用）。"""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
         async with SessionLocal() as db:
             result = await db.execute(
                 RequestTrace.__table__.delete().where(RequestTrace.created_at < cutoff)

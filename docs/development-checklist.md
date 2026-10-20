@@ -36,30 +36,32 @@
 
 ### M0 工程基线（发布阻塞）
 
-- [ ] **M0-1 确认许可证并添加 LICENSE**（0.5d）
+- [x] **M0-1 确认许可证并添加 LICENSE**（0.5d）
   - 默认 Apache-2.0；企业版功能后续独立目录/仓库
   - 验收：根目录有 `LICENSE`，README 有许可证段落
-- [ ] **M0-2 仓库清理**（0.5h）
+- [x] **M0-2 仓库清理**（0.5h）
   - 删除 `.review_diff.txt`；补 `.gitattributes`（`* text=auto`）
   - 验收：`git status` 无临时文件
-- [ ] **M0-3 接入 ruff**（0.5–1d）
+- [x] **M0-3 接入 ruff**（0.5–1d）
   - 加入开发依赖与 `pyproject.toml` 配置（line-length、isort）
   - 先修 `--fix` 能自动修的，剩余逐条处理或加 `noqa`
   - 验收：`ruff check app tests` 通过，并入 CI
-- [ ] **M0-4 CI 工作流**（0.5–1d）
+- [x] **M0-4 CI 工作流**（0.5–1d）
   - 后端 job：Python 3.12 + 依赖缓存 + pytest
   - 前端 job：Node 20+，两端 `npm ci && npm run build`
   - 验收：push 后 Actions 绿；徽章可放 README
-- [ ] **M0-5 社区文件**（0.5d）
+- [x] **M0-5 社区文件**（0.5d）
   - `SECURITY.md`、`CONTRIBUTING.md`、issue 模板（bug/feature/deploy help）
   - 验收：模板可在 GitHub 选择
-- [ ] **M0-6 演示口令受控**（0.5d）
+- [x] **M0-6 演示口令受控**（0.5d）
   - `seed_data.py` 增加 `SEED_DEMO=true` 开关；未开启不建演示账号
   - 首次登录强制改密，或初始化时生成随机密码并只打印一次
   - 验收：默认启动无固定口令账号
-- [ ] **M0-7 版本与锁文件**（0.5d）
+- [x] **M0-7 版本与锁文件**（0.5d）
   - 确认 `package-lock.json` 入库；`requirements.txt` 版本策略写清楚
   - 验收：干净环境可复现安装
+
+> M0 本地验收（2026-10-20）：ruff 全通过；pytest 278 passed / 1 skipped；两端构建通过；YAML 校验通过。CI 工作流已添加，待推送后在 GitHub Actions 确认首次运行。
 
 ### M1 领域解耦 P0（低风险归位）
 

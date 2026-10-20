@@ -98,14 +98,25 @@ async def test_stream_persists_trace_and_returns_trace_id(monkeypatch):
     service, sess = _install_fakes(
         monkeypatch,
         events=[
-            {"type": "route", "data": {"agent_name": "order_service", "confidence": 0.9, "reason": "r", "intents": [], "intent_total": 1}},
+            {
+                "type": "route",
+                "data": {
+                    "agent_name": "order_service",
+                    "confidence": 0.9,
+                    "reason": "r",
+                    "intents": [],
+                    "intent_total": 1,
+                },
+            },
             {"type": "text", "data": {"content": "您的订单"}},
             {"type": "text", "data": {"content": "已发货"}},
         ],
         inserted=inserted,
     )
 
-    chunks = await _drain(service.stream(user_id=sess.user_id, session_id=None, message="到哪了", trace_id="abcd1234abcd1234"))
+    chunks = await _drain(
+        service.stream(user_id=sess.user_id, session_id=None, message="到哪了", trace_id="abcd1234abcd1234")
+    )
     done = _payload(chunks[-1], "done")
 
     assert len(inserted) == 1
@@ -150,7 +161,11 @@ async def test_trace_write_failure_does_not_break_stream(monkeypatch):
 @pytest.mark.asyncio
 async def test_dispatch_exception_persists_error_trace(monkeypatch):
     inserted: list[dict] = []
-    service, sess = _install_fakes(monkeypatch, events=[{"type": "text", "data": {"content": "半句"}}], inserted=inserted)
+    service, sess = _install_fakes(
+        monkeypatch,
+        events=[{"type": "text", "data": {"content": "半句"}}],
+        inserted=inserted,
+    )
 
     boom = RuntimeError("LLM 连接超时")
 
@@ -216,7 +231,16 @@ async def test_reply_aggregates_and_persists_trace(monkeypatch):
     service, sess = _install_fakes(
         monkeypatch,
         events=[
-            {"type": "route", "data": {"agent_name": "order_service", "confidence": 0.9, "reason": "r", "intents": [], "intent_total": 1}},
+            {
+                "type": "route",
+                "data": {
+                    "agent_name": "order_service",
+                    "confidence": 0.9,
+                    "reason": "r",
+                    "intents": [],
+                    "intent_total": 1,
+                },
+            },
             {"type": "text", "data": {"content": "已发货"}},
         ],
         inserted=inserted,

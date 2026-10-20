@@ -15,8 +15,8 @@ from app.core.tracing import (
     SPAN_BUILD,
     SPAN_MEMORY,
     SPAN_PERSIST,
-    SPAN_RESOLVE,
     SPAN_RAG,
+    SPAN_RESOLVE,
     SPAN_ROUTER,
     SPAN_RUN,
     SPAN_TOOL,
@@ -252,7 +252,15 @@ async def test_tool_error_counted_and_persisted_under_zero_sample(monkeypatch):
         {"order_service": FakeAgent("order_service")},
         stream_events=[
             {"type": "tool_call", "data": {"id": "c1", "name": "refund_apply", "args": {}}},
-            {"type": "tool_result", "data": {"id": "c1", "name": "refund_apply", "result": None, "error": "工具执行失败"}},
+            {
+                "type": "tool_result",
+                "data": {
+                    "id": "c1",
+                    "name": "refund_apply",
+                    "result": None,
+                    "error": "工具执行失败",
+                },
+            },
             {"type": "text", "data": {"content": "稍后再试"}},
         ],
     )

@@ -16,18 +16,23 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 import asyncpg  # noqa: E402
+
 from app.core.config import settings  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 
 # 复用 seed_data.py 的种子定义，避免重复维护
 sys.path.insert(0, os.path.dirname(__file__))
 from seed_data import (  # noqa: E402
+    ACTIVE_CUSTOMERS,
+    ACTIVE_DOCUMENTS,
+    ACTIVE_DYNAMIC_AGENTS,
+    ACTIVE_STAFF,
+    ACTIVE_TOOLS,
+    ADMIN_PASSWORD,
+    ADMIN_PASSWORD_GENERATED,
+    ADMIN_USERNAME,
+    DEMO_MODE,
     SEED_AGENTS,
-    SEED_CUSTOMERS,
-    SEED_DOCUMENTS,
-    SEED_DYNAMIC_AGENTS,
-    SEED_STAFF,
-    SEED_TOOLS,
 )
 
 # 需要删除的表（含遗留单表 users）；先删子表再删父表由 CASCADE 兜底
@@ -76,18 +81,18 @@ def build_sql() -> str:
         parts.append(f.read())
 
     # 3) 种子数据
-    for u in SEED_STAFF:
+    for u in ACTIVE_STAFF:
         parts.append(
             "INSERT INTO staff_users (username, password_hash, role, display_name) VALUES "
             f"({lit(u['username'])}, {lit(hash_password(u['password']))}, {lit(u['role'])}, "
             f"{lit(u['display_name'])});"
         )
-    for u in SEED_CUSTOMERS:
+    for u in ACTIVE_CUSTOMERS:
         parts.append(
             "INSERT INTO customer_users (username, password_hash, display_name) VALUES "
             f"({lit(u['username'])}, {lit(hash_password(u['password']))}, {lit(u['display_name'])});"
         )
-    for t in SEED_TOOLS:
+    for t in ACTIVE_TOOLS:
         parts.append(
             "INSERT INTO tools (name, type, schema, config) VALUES "
             f"({lit(t['name'])}, {lit(t['type'])}, {lit(t['schema_'])}, {lit(t['config'])});"
@@ -98,7 +103,7 @@ def build_sql() -> str:
             f"({lit(a['name'])}, {lit(a['display_name'])}, {lit(a['description'])}, "
             f"{lit(a['enabled'])}, {lit(a['sort_order'])}, 'code');"
         )
-    for a in SEED_DYNAMIC_AGENTS:
+    for a in ACTIVE_DYNAMIC_AGENTS:
         parts.append(
             "INSERT INTO agents (name, display_name, description, enabled, sort_order, source, "
             "system_prompt, mcp_tool_names) VALUES "
@@ -106,7 +111,7 @@ def build_sql() -> str:
             f"{lit(a['enabled'])}, {lit(a['sort_order'])}, 'dynamic', {lit(a['system_prompt'])}, "
             f"{lit(a['mcp_tool_names'])});"
         )
-    for d in SEED_DOCUMENTS:
+    for d in ACTIVE_DOCUMENTS:
         parts.append(
             "INSERT INTO documents (title, source, content_type, status, rag_namespace, chunk_count, kind) VALUES "
             f"({lit(d['title'])}, {lit(d['source'])}, {lit(d['content_type'])}, {lit(d['status'])}, "
@@ -124,6 +129,13 @@ async def main() -> None:
         # 单次 simple query 往返执行全部语句（DDL + 种子 INSERT）
         await conn.execute(sql)
         print("[OK] 重建 + seed 语句已提交")
+        if DEMO_MODE:
+            print("   演示账号：admin/Admin@123、service01/Agent@123、alice/Alice@123")
+        else:
+            print(f"   管理员账号：{ADMIN_USERNAME}")
+            if ADMIN_PASSWORD_GENERATED:
+                print(f"   初始密码（仅显示一次）：{ADMIN_PASSWORD}")
+            print("   请登录后立即修改密码。")
     finally:
         try:
             await conn.close()
@@ -144,8 +156,9 @@ async def main() -> None:
                 "(select count(*) from request_traces) traces"
             )
             print(
-                "   行数 -> staff=%s customer=%s agents=%s tools=%s documents=%s traces=%s"
-                % tuple(row)
+                f"   行数 -> staff={row['staff']} customer={row['cust']} "
+                f"agents={row['agents']} tools={row['tools']} "
+                f"documents={row['docs']} traces={row['traces']}"
             )
         finally:
             await vconn.close()

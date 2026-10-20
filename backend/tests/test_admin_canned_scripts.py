@@ -209,7 +209,11 @@ def test_update_keeps_untouched_side_of_rule(admin_client, monkeypatch):
 
     async def fake_update(key, **fields):
         captured.update(fields)
-        return _row_obj(key="business_hours", category="business", **{**{"patterns": ["营业时间"], "priority": 15}, **fields})
+        return _row_obj(
+            key="business_hours",
+            category="business",
+            **{**{"patterns": ["营业时间"], "priority": 15}, **fields},
+        )
 
     monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
     monkeypatch.setattr(CannedScriptRepo, "update", fake_update)

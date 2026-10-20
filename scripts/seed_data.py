@@ -5,10 +5,13 @@
 """
 import asyncio
 import os
+import secrets
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 os.environ.setdefault("PYTHONPATH", "backend")
+
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from app.core.database import engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
@@ -21,7 +24,22 @@ from app.models.entities import (  # noqa: E402
     StaffUser,
     ToolMeta,
 )
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+
+# ===== 种子模式 =====
+# 默认关闭演示数据：开源/生产部署不应带固定口令账号。
+DEMO_MODE = os.getenv("SEED_DEMO", "").strip().lower() in {"1", "true", "yes", "on"}
+
+ADMIN_USERNAME = os.getenv("SEED_ADMIN_USERNAME", "admin").strip() or "admin"
+_ADMIN_PASSWORD_ENV = os.getenv("SEED_ADMIN_PASSWORD", "").strip()
+if DEMO_MODE:
+    ADMIN_PASSWORD = ""
+    ADMIN_PASSWORD_GENERATED = False
+elif _ADMIN_PASSWORD_ENV:
+    ADMIN_PASSWORD = _ADMIN_PASSWORD_ENV
+    ADMIN_PASSWORD_GENERATED = False
+else:
+    ADMIN_PASSWORD = secrets.token_urlsafe(12)
+    ADMIN_PASSWORD_GENERATED = True
 
 # 固定话术的后台显示名（规则内容以 app.agents.canned_scripts.SEED_RULES 为准，只在建库时写入表）
 CANNED_TITLES = {
@@ -31,14 +49,14 @@ CANNED_TITLES = {
 }
 
 
-# 后台人员（管理后台 admin-frontend 登录）
-SEED_STAFF = [
+# 演示后台人员（仅 SEED_DEMO=true 时写入）
+DEMO_STAFF = [
     {"username": "admin", "password": "Admin@123", "role": "admin", "display_name": "管理员"},
     {"username": "service01", "password": "Agent@123", "role": "agent", "display_name": "客服一号"},
 ]
 
-# 客户（客户端 frontend 登录 / 注册）
-SEED_CUSTOMERS = [
+# 演示客户（仅 SEED_DEMO=true 时写入）
+DEMO_CUSTOMERS = [
     {"username": "alice", "password": "Alice@123", "display_name": "Alice"},
 ]
 
@@ -74,6 +92,10 @@ SEED_TOOLS = [
         "schema_": {},
         "config": _mcp_stdio_config("refund_server.py"),
     },
+]
+
+# 演示工具：依赖 npx，离线环境不可用，仅 SEED_DEMO=true 时写入
+DEMO_TOOLS = [
     {
         # 公开免费的第三方 stdio MCP 官方演示服务（需主机已安装 Node/npx，免 API Key）：
         # DB 存跨平台裸命令名 npx，Windows 上由 mcp_loader 自动补 .cmd。
@@ -114,8 +136,8 @@ SEED_AGENTS = [
     },
 ]
 
-# 示例动态 Agent（source=dynamic）：演示后台创建 + MCP 绑定，可在后台继续编辑
-SEED_DYNAMIC_AGENTS = [
+# 示例动态 Agent（source=dynamic，仅演示模式写入）：演示后台创建 + MCP 绑定
+DEMO_DYNAMIC_AGENTS = [
     {
         "name": "refund_service",
         "display_name": "退款咨询",
@@ -127,8 +149,8 @@ SEED_DYNAMIC_AGENTS = [
     },
 ]
 
-# 示例知识库文档（仅元数据归档，实际向量存于 Qdrant；命名空间与 data/knowledge_bases 目录对应）
-SEED_DOCUMENTS = [
+# 示例知识库文档（仅演示模式写入；实际向量存于 Qdrant）
+DEMO_DOCUMENTS = [
     {
         "title": "产品常见问题 FAQ",
         "source": "docs/product_faq.md",
@@ -155,10 +177,25 @@ SEED_DOCUMENTS = [
     },
 ]
 
+ACTIVE_STAFF = (
+    DEMO_STAFF
+    if DEMO_MODE
+    else [
+        {
+            "username": ADMIN_USERNAME,
+            "password": ADMIN_PASSWORD,
+            "role": "admin",
+            "display_name": "管理员",
+        }
+    ]
+)
+ACTIVE_CUSTOMERS = DEMO_CUSTOMERS if DEMO_MODE else []
+ACTIVE_TOOLS = SEED_TOOLS + DEMO_TOOLS if DEMO_MODE else SEED_TOOLS
+ACTIVE_DYNAMIC_AGENTS = DEMO_DYNAMIC_AGENTS if DEMO_MODE else []
+ACTIVE_DOCUMENTS = DEMO_DOCUMENTS if DEMO_MODE else []
+
 
 async def main() -> None:
-    import sys
-
     from sqlalchemy import select
 
     # 可选：--rebuild 先删除全部表（用于人员/客户分表后的全量重建，会清空数据）
@@ -173,7 +210,8 @@ async def main() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with AsyncSession(engine) as db:
-        for u in SEED_STAFF:
+        created_staff: list[str] = []
+        for u in ACTIVE_STAFF:
             row = (
                 await db.execute(select(StaffUser).where(StaffUser.username == u["username"]))
             ).scalar_one_or_none()
@@ -186,7 +224,8 @@ async def main() -> None:
                         display_name=u["display_name"],
                     )
                 )
-        for u in SEED_CUSTOMERS:
+                created_staff.append(u["username"])
+        for u in ACTIVE_CUSTOMERS:
             row = (
                 await db.execute(
                     select(CustomerUser).where(CustomerUser.username == u["username"])
@@ -200,7 +239,7 @@ async def main() -> None:
                         display_name=u["display_name"],
                     )
                 )
-        for t in SEED_TOOLS:
+        for t in ACTIVE_TOOLS:
             row = (
                 await db.execute(select(ToolMeta).where(ToolMeta.name == t["name"]))
             ).scalar_one_or_none()
@@ -217,13 +256,13 @@ async def main() -> None:
             ).scalar_one_or_none()
             if row is None:
                 db.add(AgentMeta(source="code", **a))
-        for a in SEED_DYNAMIC_AGENTS:
+        for a in ACTIVE_DYNAMIC_AGENTS:
             row = (
                 await db.execute(select(AgentMeta).where(AgentMeta.name == a["name"]))
             ).scalar_one_or_none()
             if row is None:
                 db.add(AgentMeta(source="dynamic", **a))
-        for d in SEED_DOCUMENTS:
+        for d in ACTIVE_DOCUMENTS:
             row = (
                 await db.execute(
                     select(Document).where(
@@ -257,9 +296,24 @@ async def main() -> None:
             elif not row.is_builtin:
                 row.is_builtin = True
         await db.commit()
+    demo_tag = "（演示模式）" if DEMO_MODE else ""
     print(
-        "✅ seed 完成：2 后台人员(admin/service01) + 1 客户(alice) + 3 MCP 工具(2 本地stdio + 1 npx everything) + 3 代码 Agent + 1 动态 Agent + 3 示例文档 + 3 条固定话术"
+        f"✅ seed 完成{demo_tag}：{len(ACTIVE_STAFF)} 后台人员 + "
+        f"{len(ACTIVE_CUSTOMERS)} 客户 + {len(ACTIVE_TOOLS)} 工具 + "
+        f"{len(SEED_AGENTS)} 代码 Agent + {len(ACTIVE_DYNAMIC_AGENTS)} 动态 Agent + "
+        f"{len(ACTIVE_DOCUMENTS)} 示例文档 + {len(SEED_RULES)} 条固定话术"
     )
+    if DEMO_MODE:
+        print("   演示账号：admin/Admin@123、service01/Agent@123、alice/Alice@123")
+    elif ADMIN_USERNAME in created_staff:
+        print("=" * 64)
+        print(f"已创建管理员：{ADMIN_USERNAME}")
+        if ADMIN_PASSWORD_GENERATED:
+            print(f"初始密码（仅显示一次）：{ADMIN_PASSWORD}")
+        print("请登录后立即修改密码；也可用 SEED_ADMIN_PASSWORD 指定初始密码。")
+        print("=" * 64)
+    else:
+        print(f"   管理员 {ADMIN_USERNAME} 已存在，未重置密码")
 
 
 if __name__ == "__main__":

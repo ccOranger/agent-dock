@@ -37,7 +37,14 @@ class CreateTicketTool(BaseTool):
     }
     timeout = 10
 
-    async def run(self, user_id: str, content: str, session_id: str = "", category: str = "general", urgency: str = "medium"):
+    async def run(
+        self,
+        user_id: str,
+        content: str,
+        session_id: str = "",
+        category: str = "general",
+        urgency: str = "medium",
+    ):
         from app.models.repositories import TicketRepo
 
         # 工单落到独立 tickets 表（不再是 audit_logs）：结构化存储、可按状态流转与回查

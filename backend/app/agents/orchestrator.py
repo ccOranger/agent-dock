@@ -11,7 +11,8 @@ import asyncio
 import inspect
 import logging
 import threading
-from typing import Any, AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator
+from typing import Any
 
 from hello_agents import Message
 from hello_agents.agents import SimpleAgent
@@ -412,7 +413,13 @@ class Orchestrator:
             text_chars = 0
             open_tools: dict[str, str] = {}
             async for event in self._run_business_agent(
-                business_agent, user_id, query, session_id=session_id, history=history, collector=collector, intent_index=index
+                business_agent,
+                user_id,
+                query,
+                session_id=session_id,
+                history=history,
+                collector=collector,
+                intent_index=index,
             ):
                 etype = event.get("type")
                 data = event.get("data") or {}

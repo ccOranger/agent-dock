@@ -178,7 +178,12 @@ def test_get_inquiry_not_found(client, monkeypatch):
 def test_customer_forbidden_on_all_inquiry_endpoints(make_test_app):
     app = make_test_app([ai.router], prefix="")
     customer_client = TestClient(make_test_app.as_role(app, "customer"))
-    for path in [f"{ai.router.prefix}/sessions", f"{ai.router.prefix}/sessions/export", f"{ai.router.prefix}/sessions/s-1"]:
+    paths = [
+        f"{ai.router.prefix}/sessions",
+        f"{ai.router.prefix}/sessions/export",
+        f"{ai.router.prefix}/sessions/s-1",
+    ]
+    for path in paths:
         resp = customer_client.get(path)
         assert resp.status_code == 403
         assert resp.json()["detail"]["code"] == 2003

@@ -22,7 +22,7 @@ def _parse_dt(value: str | None) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
     except ValueError:
-        raise ParamError(f"时间格式非法: {value}")
+        raise ParamError(f"时间格式非法: {value}") from None
 
 
 @router.get("", response_model=ApiResponse[PaginatedData[dict]])

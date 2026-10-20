@@ -240,7 +240,14 @@ class TraceCollector:
             error=error,
         )
 
-    def record_outcome(self, outcome: str, *, reason: str | None = None, code: int | None = None, message: str | None = None) -> None:
+    def record_outcome(
+        self,
+        outcome: str,
+        *,
+        reason: str | None = None,
+        code: int | None = None,
+        message: str | None = None,
+    ) -> None:
         if not self.enabled:
             return
         self.outcome = outcome

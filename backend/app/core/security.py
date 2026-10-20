@@ -1,7 +1,7 @@
 """安全模块：JWT 签发/校验、密码哈希、输入输出安全"""
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -36,7 +36,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_token(sub: str, role: str, ttl: int, token_type: str = "access") -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": sub,
         "role": role,

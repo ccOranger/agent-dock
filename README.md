@@ -1,5 +1,7 @@
 # smart-cs — 智能客服系统
 
+[![CI](https://github.com/ccOranger/smart-cs/actions/workflows/ci.yml/badge.svg)](https://github.com/ccOranger/smart-cs/actions/workflows/ci.yml)
+
 > 基于 **HelloAgents + FastAPI + Vue 3** 的多 Agent 智能客服系统。
 > 完整开发规范见 [docs/spec.md](docs/spec.md)（Spec v2.0，与代码实现同步）；各已完成功能的详解见 [docs/updates/](docs/updates/README.md)。
 
@@ -68,9 +70,11 @@ uv venv --python 3.12
 uv pip install -r requirements.txt --python .venv\Scripts\python.exe
 
 copy .env.example .env           # 填入 DATABASE_URL / REDIS_URL / QDRANT_* / LLM_* / EMBED_* 等
-python ..\scripts\seed_data.py   # 建表 + 初始用户/Agent/工具/示例文档（幂等，可重复执行）
+python ..\scripts\seed_data.py   # 建表 + 系统默认 Agent/工具/话术 + 管理员（幂等，可重复执行）
 .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+> 默认**不会**创建演示账号：种子脚本只创建一个管理员，随机密码仅在首次执行时打印一次；也可用 `SEED_ADMIN_PASSWORD` 指定。需要演示数据时先执行 `$env:SEED_DEMO="true"` 再运行种子脚本。
 
 > `seed_data.py` 需在 `backend` 目录下运行（`.env` 按当前工作目录加载）；它会 `create_all` 建表，故即使跳过 `init_db.sql` 也能起来。
 
@@ -87,7 +91,7 @@ npm run dev                      # http://localhost:5173（/api 已代理到后�
 
 > 请用 **`http://localhost:5173`** 访问，不要用 `127.0.0.1`——Vite dev 可能只监听 IPv6 `::1`，用 `127.0.0.1` 会连不上。
 
-默认账号（seed 注入，生产务必改密）：
+### 演示账号（仅 `SEED_DEMO=true` 时注入，生产务必改密）
 
 | 用户名 | 密码 | 角色 |
 |--------|------|------|
@@ -110,6 +114,7 @@ npm run dev                      # http://localhost:5174（/api 已代理到后�
 
 ```bash
 cd backend
+ruff check app tests    # 代码检查（需先激活 .venv）
 pytest                # 纯逻辑单测（无 hello-agents 时自动桩化）
 pytest --cov=app      # 覆盖率
 cd ../frontend
@@ -142,3 +147,12 @@ npm test              # vitest
 - [功能更新详解（U01~U11）](docs/updates/README.md)
 - [API 速查](docs/api.md)
 - [运维手册](docs/runbook.md)
+
+## 贡献与安全
+
+- [贡献指南](CONTRIBUTING.md)
+- [安全策略](SECURITY.md)
+
+## 许可证
+
+Apache License 2.0，详见 [LICENSE](LICENSE)。

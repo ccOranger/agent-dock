@@ -1,6 +1,6 @@
 """ChatService：编排对话流程并输出 SSE 事件流"""
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from app.agents.orchestrator import Orchestrator
 from app.core.database import SessionLocal

@@ -104,7 +104,11 @@ def test_update_base_not_found_and_success(admin_client, monkeypatch):
         if namespace == "missing":
             return None
         # None 字段不应出现在赋值中（KnowledgeBaseRepo.update 跳过 None 语义由 API 层原样透传）
-        return SimpleNamespace(namespace=namespace, display_name=fields.get("display_name"), is_active=fields.get("is_active"))
+        return SimpleNamespace(
+            namespace=namespace,
+            display_name=fields.get("display_name"),
+            is_active=fields.get("is_active"),
+        )
 
     monkeypatch.setattr(kn.KnowledgeBaseRepo, "update", fake_update)
 
@@ -303,7 +307,7 @@ def test_chunk_filter_and_manual_source_path():
     keys2 = {c.key for c in f2.must}
     assert "source_path" in keys2
 
-    assert qh.manual_source_path("abc").endswith(f"abc.md")
+    assert qh.manual_source_path("abc").endswith("abc.md")
 
     # source_path 为空时拒绝删除，避免误伤整个命名空间
     assert qh.delete_document_chunks("cs_order", None) is False

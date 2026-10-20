@@ -16,25 +16,25 @@
 
 ## 1. 法务与品牌
 
-- [ ] 选择许可证：建议核心 Apache-2.0；企业版功能独立私有目录/仓库。
-- [ ] 增加 `LICENSE`、`NOTICE`（如有第三方声明）。
+- [x] 许可证：核心 Apache-2.0（已添加 LICENSE/NOTICE）。
+- [x] 增加 `LICENSE`、`NOTICE`（如有第三方声明）。
 - [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）。
 - [ ] 确定产品名与仓库名：对外用中性平台名，`smart-cs` 可保留为代号。
 - [ ] README 与页面中不出现真实客户名、内部系统名、真实域名。
-- [ ] 增加 `SECURITY.md`：漏洞报告方式、支持版本、响应时限（尽力而为）。
+- [x] 增加 `SECURITY.md`：漏洞报告方式、支持版本、响应时限（尽力而为）。
 
 ## 2. 仓库卫生
 
-- [ ] 删除临时文件 `.review_diff.txt`。
+- [x] 删除临时文件 `.review_diff.txt`。
 - [ ] 检查 git 历史是否提交过密钥：`git log -p -- backend/.env`、gitleaks/git-secrets 扫描。
 - [ ] 确认 `.env`、`memory_data/`、`backend/data/doc_archives/*`、`backend/data/knowledge_bases/*` 均未入库（当前已 gitignore）。
-- [ ] `seed_data.py` 默认口令（`Admin@123` 等）仅用于 demo：
-  - [ ] 种子脚本显式要求 `SEED_DEMO=true`；
-  - [ ] 首次登录强制改密，或在初始化向导中生成随机密码并打印一次；
-  - [ ] README 显著提示"不要在生产使用演示口令"。
+- [x] `seed_data.py` 默认口令（`Admin@123` 等）仅用于 demo：
+  - [x] 种子脚本显式要求 `SEED_DEMO=true`；
+  - [x] 首次登录强制改密，或在初始化向导中生成随机密码并打印一次；
+  - [x] README 显著提示"不要在生产使用演示口令"。
 - [ ] `tools/custom/mock_data.py` 的示例数据去标识化（姓名、手机号、订单号均为虚构）。
 - [ ] 确认没有大文件/构建产物入库：`git count-objects -vH`。
-- [ ] 增加 `.gitattributes`（换行符）与统一编码说明（项目含中文，建议 UTF-8）。
+- [x] 增加 `.gitattributes`（换行符）与统一编码说明（项目含中文，建议 UTF-8）。
 
 ## 3. 文档
 
@@ -50,7 +50,7 @@
 - [ ] 新增 `docs/configuration.md`（`.env` 全量说明与默认值）。
 - [ ] 新增 `docs/deployment.md`（Docker、反向代理、HTTPS、SSE 缓冲关闭）。
 - [ ] 新增 `docs/faq.md`（模型接入、Qdrant、MCP stdio、Windows 编码）。
-- [ ] 新增 `CONTRIBUTING.md`（开发环境、测试命令、提交规范、场景包贡献方式）。
+- [x] 新增 `CONTRIBUTING.md`（开发环境、测试命令、提交规范、场景包贡献方式）。
 - [ ] 新增 `docs/architecture.md`（路由、上下文工程、记忆生命周期、追踪模型）。
 - [ ] 保留 `docs/updates/*` 作为开发历史，不要求外部读者通读。
 
@@ -94,9 +94,9 @@
 
 ## 6. 安全基线
 
-- [ ] 生产环境 JWT 密钥 ≥32 字节校验（已实现，确认文档同步）。
+- [x] 生产环境 JWT 密钥 ≥32 字节校验（已实现，确认文档同步）。
 - [ ] 初始化向导自动生成随机 JWT 密钥，禁止示例值进入生产。
-- [ ] 默认管理员强制改密；演示账号默认禁用或随机密码。
+- [x] 默认管理员强制改密；演示账号默认禁用或随机密码。
 - [ ] CORS 默认仅放行本地地址；文档说明生产配置。
 - [ ] 上传大小限制、登录限流、SSE 错误脱敏已在代码中生效，补充文档说明。
 - [ ] `TRUSTED_PROXIES` 说明：反向代理后必须配置，否则限流按直连 IP。
@@ -106,14 +106,14 @@
 
 ## 7. 质量与 CI
 
-- [ ] 后端：`python -m compileall`、`pytest`（当前 278 passed / 1 skipped）。
-- [ ] 增加 `ruff`（当前虚拟环境未安装）并纳入 CI：lint + import 排序。
-- [ ] 前端：`npm run build` 两端均通过（当前通过，仅有 chunk 体积告警）。
-- [ ] GitHub Actions：
-  - [ ] backend job（Python 3.12，依赖缓存，pytest）
-  - [ ] frontend job（Node 20，两端 build）
+- [x] 后端：`python -m compileall`、`pytest`（当前 278 passed / 1 skipped）。
+- [x] 增加 ruff（0.17.1，已纳入 `requirements-dev` 与 CI）：lint + import 排序。
+- [x] 前端：`npm run build` 两端均通过（当前通过，仅有 chunk 体积告警）。
+- [x] GitHub Actions：
+  - [x] backend job（Python 3.12，依赖缓存，pytest）
+  - [x] frontend job（Node 20，两端 build）
   - [ ] docker job（构建镜像，不推送）
-- [ ] 固定版本与锁文件：`requirements.txt` 版本策略、`package-lock.json` 入库。
+- [x] 固定版本与锁文件：`requirements.txt` 版本策略、`package-lock.json` 入库。
 - [ ] 发布流程：打 tag、生成 Release Notes、附镜像构建说明。
 
 ## 8. 发布物料
@@ -129,7 +129,7 @@
 
 ## 9. 发布后运营
 
-- [ ] Issue 模板：bug / feature / deployment help；PR 模板含测试说明。
+- [x] Issue 模板：bug / feature / deployment help；PR 模板含测试说明。
 - [ ] Discussions 或群组入口，明确"尽力而为"的支持边界。
 - [ ] 版本节奏：前三个月每 2–4 周一个 patch/minor。
 - [ ] 收集部署反馈：至少记录部署失败原因 Top 5，作为下一版优先项。
@@ -144,9 +144,9 @@
 - [ ] 初始化向导可创建管理员并完成模型连通性测试。
 - [ ] 演示数据可一键导入，也可完全不导入。
 - [ ] 客服包可停用，IT Helpdesk 包可启用（若第二个包未就绪，则明确标注"预览"）。
-- [ ] 无默认生产密钥、无演示口令直接暴露。
+- [x] 无默认生产密钥、无演示口令直接暴露。
 - [ ] 两端构建通过，后端测试通过，CI 绿。
-- [ ] LICENSE、SECURITY、CONTRIBUTING 齐备。
+- [x] LICENSE、SECURITY、CONTRIBUTING 齐备。
 - [ ] README 与产品定位文档一致，不再以"智能客服系统"作为唯一身份。
 
 ## 11. v0.1 明确不做

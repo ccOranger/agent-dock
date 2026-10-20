@@ -146,8 +146,8 @@ def test_session_traces(client, monkeypatch):
 async def test_detail_accepts_three_reference_kinds(monkeypatch):
     for ref in [SAMPLE_ROW["id"], "abcd1234abcd1234", SAMPLE_ROW["assistant_message_id"]]:
 
-        async def fake_detail(trace_ref):
-            assert trace_ref == ref
+        async def fake_detail(trace_ref, expected=ref):
+            assert trace_ref == expected
             return {**SAMPLE_ROW, "spans": [{"type": "tool.call", "name": "order_query"}]}
 
         monkeypatch.setattr(at.TraceRepo, "detail", fake_detail)

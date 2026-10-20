@@ -53,7 +53,9 @@ def _make_orch(monkeypatch, intents, known=("knowledge_qa", "order_service", "co
     orch.router = FakeRouter(intents, fallback_agent)
     orch.ctx_engineer = FakeCtx()
 
-    async def fake_business_agent(business_agent, user_id, query, session_id="", history=None, collector=None, intent_index=0):
+    async def fake_business_agent(
+        business_agent, user_id, query, session_id="", history=None, collector=None, intent_index=0
+    ):
         yield {"type": "text", "data": {"content": f"<{business_agent.name}>"}}
 
     orch._run_business_agent = fake_business_agent

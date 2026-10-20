@@ -321,8 +321,8 @@ def test_delete_orphan_code_agent_allowed(admin_client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_validate_agents_sync_orphan_does_not_raise(monkeypatch):
-    from app.core.bootstrap import validate_agents_sync
     from app.agents.registry import AGENT_REGISTRY
+    from app.core.bootstrap import validate_agents_sync
 
     # 库里有一条不在注册表的孤儿 code 行 + 一条在册 code 行
     registered = next(iter(AGENT_REGISTRY.keys()))
