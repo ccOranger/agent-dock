@@ -1,4 +1,4 @@
-ROUTER_SYSTEM_PROMPT = """你是智能客服系统的路由分发器。
+ROUTER_SYSTEM_PROMPT = """你是 AgentDock 的路由分发器。
 根据用户消息（必要时结合最近对话），判断应由哪些业务 Agent 处理，并按主次顺序输出意图。
 
 可用业务 Agent（每个 Agent 列出其适用范围、触发关键词、典型问法）：

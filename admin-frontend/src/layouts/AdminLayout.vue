@@ -1,7 +1,7 @@
 <template>
   <el-container class="admin-layout">
     <el-aside width="220px">
-      <div class="brand">客服管理后台</div>
+      <div class="brand">AgentDock 管理后台</div>
       <el-menu :default-active="activePath" router class="menu">
         <el-menu-item index="/inquiries">
           <span>咨询管理</span>
@@ -40,7 +40,7 @@
     </el-aside>
     <el-container>
       <el-header class="header">
-        <div class="title">{{ route.meta.title || '智能客服管理后台' }}</div>
+        <div class="title">{{ route.meta.title || 'AgentDock 管理后台' }}</div>
         <div class="user">
           <el-tag size="small" type="info">{{ auth.user?.role }}</el-tag>
           <span class="name">{{ auth.user?.display_name || auth.user?.username }}</span>

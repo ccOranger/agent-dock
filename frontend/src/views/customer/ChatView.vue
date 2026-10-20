@@ -2,7 +2,7 @@
   <div class="chat-layout">
     <el-container>
       <el-header class="header">
-        <span class="title">智能客服</span>
+        <span class="title">AgentDock</span>
         <AgentBadge v-if="store.currentAgent" :agent="store.currentAgent" />
         <div class="spacer" />
         <el-button size="small" @click="onClose" :disabled="!store.sessionId || store.streaming">结束会话</el-button>

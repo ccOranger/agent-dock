@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <h2>智能客服系统</h2>
+      <h2>AgentDock</h2>
       <el-tabs v-model="mode">
         <el-tab-pane label="登录" name="login">
           <el-form :model="form" @submit.prevent="onLogin">

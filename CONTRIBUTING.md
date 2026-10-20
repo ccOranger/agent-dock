@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢参与 smart-cs。提交前请先阅读本指南与 [安全策略](SECURITY.md)。
+感谢参与 AgentDock（仓库代号 smart-cs）。提交前请先阅读本指南与 [安全策略](SECURITY.md)。
 
 ## 开发环境
 

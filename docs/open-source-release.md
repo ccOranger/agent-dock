@@ -19,7 +19,7 @@
 - [x] 许可证：核心 Apache-2.0（已添加 LICENSE/NOTICE）。
 - [x] 增加 `LICENSE`、`NOTICE`（如有第三方声明）。
 - [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）。
-- [ ] 确定产品名与仓库名：对外用中性平台名，`smart-cs` 可保留为代号。
+- [x] 确定产品名：对外使用 **AgentDock**；仓库名与代码代号保留 `smart-cs`（Compose 项目名、包名不变，避免已有数据卷失联）。
 - [ ] README 与页面中不出现真实客户名、内部系统名、真实域名。
 - [x] 增加 `SECURITY.md`：漏洞报告方式、支持版本、响应时限（尽力而为）。
 
@@ -38,20 +38,20 @@
 
 ## 3. 文档
 
-- [ ] 重写 `README.md`：
-  - [ ] 一句话定位与截图/GIF
-  - [ ] 能力清单（路由、记忆、知识、工具、追踪）
-  - [ ] 架构图（后端、两个前端、Postgres/Qdrant/Redis/MCP）
-  - [ ] 3 分钟快速开始
-  - [ ] 场景包说明（客服包 / IT Helpdesk 包）
-  - [ ] 路线图与"明确不做什么"
-  - [ ] 许可证与商业支持入口
-- [ ] 新增 `docs/quickstart.md`（从零到对话成功，含常见报错）。
-- [ ] 新增 `docs/configuration.md`（`.env` 全量说明与默认值）。
-- [ ] 新增 `docs/deployment.md`（Docker、反向代理、HTTPS、SSE 缓冲关闭）。
-- [ ] 新增 `docs/faq.md`（模型接入、Qdrant、MCP stdio、Windows 编码）。
+- [x] 重写 `README.md`：
+  - [ ] 一句话定位与截图/GIF（定位已完成，截图待 M3-4）
+  - [x] 能力清单（路由、记忆、知识、工具、追踪）
+  - [x] 架构图（后端、两个前端、Postgres/Qdrant/Redis/MCP）
+  - [x] 3 分钟快速开始
+  - [x] 场景包说明（客服包 / IT Helpdesk 包）
+  - [x] 路线图与“明确不做什么”
+  - [x] 许可证与商业支持入口
+- [x] 新增 `docs/quickstart.md`（从零到对话成功，含常见报错）。
+- [x] 新增 `docs/configuration.md`（`.env` 全量说明与默认值）。
+- [x] 新增 `docs/deployment.md`（Docker、反向代理、HTTPS、SSE 缓冲关闭）。
+- [x] 新增 `docs/faq.md`（模型接入、Qdrant、MCP stdio、Windows 编码）。
 - [x] 新增 `CONTRIBUTING.md`（开发环境、测试命令、提交规范、场景包贡献方式）。
-- [ ] 新增 `docs/architecture.md`（路由、上下文工程、记忆生命周期、追踪模型）。
+- [ ] 新增 `docs/architecture.md`（路由、上下文工程、记忆生命周期、追踪模型；待 M4 前后补）。
 - [ ] 保留 `docs/updates/*` 作为开发历史，不要求外部读者通读。
 
 ## 4. 一键部署
@@ -127,6 +127,8 @@
 - [ ] Release Notes：v0.1 能力、已知限制、升级方式。
 - [ ] 路线图 issue（置顶）：第二个场景包、Docker 优化、评测、RBAC。
 
+> 2026-10-20：首篇技术文章初稿已完成（[docs/articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)），待外部发布；截图与 GIF 待 M4 演示包就绪后补。
+
 ## 9. 发布后运营
 
 - [x] Issue 模板：bug / feature / deployment help；PR 模板含测试说明。
@@ -147,7 +149,7 @@
 - [x] 无默认生产密钥、无演示口令直接暴露。
 - [x] 两端构建通过，后端测试通过，CI 绿。
 - [x] LICENSE、SECURITY、CONTRIBUTING 齐备。
-- [ ] README 与产品定位文档一致，不再以"智能客服系统"作为唯一身份。
+- [x] README 与产品定位文档一致，不再以“智能客服系统”作为唯一身份。
 
 ## 11. v0.1 明确不做
 

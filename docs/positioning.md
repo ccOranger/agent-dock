@@ -168,7 +168,7 @@ packs/customer_service/
 
 | 事项 | 选项 | 建议 |
 |---|---|---|
-| 产品名 | 中性平台名 + 场景包名 | 发布前定，仓库代号可保留 `smart-cs` |
+| 产品名 | 中性平台名 + 场景包名 | 已定 **AgentDock**（2026-10-20）；仓库代号保留 `smart-cs` |
 | 许可证 | Apache-2.0 / AGPL / BSL | 先 Apache-2.0 |
 | 双前端 | 已定：管理端 SPA + 聊天挂件 | v0.1 单仓多包共享代码；v0.2 聊天端 iframe 化；一个 Nginx 托管 |
 | 第二个包 | IT Helpdesk / 知识助手 / 售后回访 | IT Helpdesk |

@@ -1,181 +1,220 @@
-# smart-cs — 智能客服系统
+# AgentDock
 
 [![CI](https://github.com/ccOranger/smart-cs/actions/workflows/ci.yml/badge.svg)](https://github.com/ccOranger/smart-cs/actions/workflows/ci.yml)
 
-> 基于 **HelloAgents + FastAPI + Vue 3** 的多 Agent 智能客服系统。
-> 完整开发规范见 [docs/spec.md](docs/spec.md)（Spec v2.0，与代码实现同步）；各已完成功能的详解见 [docs/updates/](docs/updates/README.md)。
+> **可私有化部署的对话式 Agent 运营平台。** 把多意图路由、知识库、工具调用、跨轮记忆和全链路追踪装进一个管理台；客服/售后是首个场景包，不是产品边界。
 
-## 架构一览
+仓库代号仍为 `smart-cs`：Compose 项目名、Python 包名与目录结构保持不变，产品对外名称统一为 **AgentDock**。
+
+> 当前为 v0.1 早期版本，接口、表结构与场景包契约仍可能调整；升级前请先备份。
+
+## 它解决什么问题
+
+多数"智能客服"项目停在"文档问答 + 一个大模型提示词"：一条消息里有两个诉求只能答一个，追问下一句就忘了上文，工具调用看不见执行过程，出了问题也说不清是哪一步。
+
+AgentDock 把这些做成平台能力，而不是某个业务里的临时代码：
+
+| 能力 | 说明 | 关键开关 |
+|---|---|---|
+| **多意图路由** | 一条消息拆成多个意图，按主次串行应答；追问自动续接上一轮 Agent；"不贴合任何 Agent"时可先由兜底 Agent 应答 | `ROUTER_MAX_INTENTS` / `ROUTER_CONFIDENCE_THRESHOLD` / `ROUTER_FALLBACK_ANSWER` |
+| **混合 Agent 注册** | 代码托管 Agent 与后台动态 Agent 同时注册；新增/停用实时进入路由候选，无需改路由代码 | 运营台「Agent 管理」 |
+| **路由线索** | 每个 Agent 声明触发关键词与典型问法，路由提示词去具名化，不偏向任何内置 Agent | `routing_keywords` / `routing_examples` |
+| **知识与 RAG** | 多命名空间、文档上传/分块浏览/重建索引/原文下载、检索测试；向量存 Qdrant | `RAG_*` / `RAG_DEFAULT_NAMESPACE` |
+| **工具调用** | 代码自定义工具 + MCP（stdio / SSE / streamable HTTP），异步执行并记录结果 | 运营台「自定义工具」「MCP 服务」 |
+| **跨轮记忆** | working / episodic / perceptual 三层开箱可用；semantic 需 Neo4j；工单可跨轮补录 | `MEMORY_*` / `MEMORY_TYPES` |
+| **上下文工程** | 按系统提示、历史、记忆、知识分配 token 预算，超限按优先级裁剪 | `CONTEXT_*` |
+| **全链路追踪** | 每轮对话的路由、LLM、工具、RAG、记忆调用都有 spans 与耗时；可采样、可设保留期 | `TRACE_*` |
+| **固定话术** | 高频确定性问题在路由与大模型之前逐字命中，后台可测命中、可停用 | 运营台「固定话术」 |
+| **双端身份** | 后台人员与客户分表、分登录入口、Token 隔离；客户可自助注册 | `/auth/staff/*`、`/auth/customer/*` |
+| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘 | `http://<host>:8080/admin/` |
+
+## 架构
+
+```mermaid
+flowchart LR
+    C[客户对话端] --> N[Nginx / Caddy]
+    A[运营管理台] --> N
+    N -->|/api| API[FastAPI]
+    API --> R[RouterAgent]
+    R --> O[Orchestrator]
+    O --> B[业务 Agent]
+    B --> PG[(PostgreSQL)]
+    B --> Q[(Qdrant)]
+    B --> RD[(Redis)]
+    B --> T[自定义工具 / MCP 服务]
+    API -. 链路 spans .-> PG
+```
+
+一轮消息的处理顺序：
+
+1. 固定话术命中则直接逐字下发（不进入路由，也不调用大模型）；
+2. `RouterAgent` 输出按主次排序的意图数组，低置信主意图整轮转人工；
+3. `Orchestrator` 串行调度各业务 Agent：上下文工程 → 记忆召回 → RAG 检索 → 工具调用 → 流式应答；
+4. 每个环节写入 `request_traces.spans`，SSE 的 `done` 事件带上 `trace_id`，可在运营台直达本轮链路。
+
+## 快速开始（Docker Compose）
+
+前置：Docker Engine / Docker Desktop + Compose **v2.24.4+**，本机无需 Python / Node；建议 4 核 8 GB 以上（首次构建约 5–8 分钟）。
+
+```bash
+cp backend/.env.example .env      # Windows: copy backend\.env.example .env
+```
+
+编辑 `.env`，至少填写：
+
+```ini
+# 对话模型（OpenAI 兼容端点）
+LLM_MODEL_ID=deepseek-chat
+LLM_API_KEY=sk-xxx
+LLM_BASE_URL=https://api.deepseek.com/v1
+
+# 向量模型（记忆与 RAG）
+EMBED_MODEL_TYPE=dashscope
+EMBED_MODEL_NAME=text-embedding-v2
+EMBED_API_KEY=sk-xxx
+EMBED_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+# 鉴权（必填，否则 Compose 拒绝启动）
+JWT_SECRET=<openssl rand -base64 48 的输出>
+```
+
+```bash
+docker compose up -d --build
+docker compose ps                 # postgres / qdrant / redis / backend / web 均应为 healthy
+```
+
+| 入口 | 地址 |
+|---|---|
+| 客户对话端 | http://localhost:8080/ |
+| 管理后台 | http://localhost:8080/admin/ |
+| 后端调试（仅宿主机回环） | http://localhost:8000/docs |
+
+首次启动会自动建表并写入种子数据。`SEED_DEMO=false`（默认）时只创建一个管理员，**随机密码在 backend 首次启动日志中打印一次**：
+
+```bash
+docker compose logs backend | grep -i "密码"     # Windows: docker compose logs backend | Select-String "密码"
+```
+
+也可以先在 `.env` 里用 `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` 指定初始管理员。
+
+验证三件事：后台能登录 → 客户问一句业务问题能看到流式回复 → 运营台「链路追踪」能看到这一轮的 spans。
+
+> 只想本地演示？在首次 `docker compose up` 前把 `SEED_DEMO=true` 写入 `.env`。演示账号为 `admin / Admin@123`、`service01 / Agent@123`、`alice / Alice@123`，**切勿用于生产**。
+
+更细的步骤与常见报错见 [快速开始](docs/quickstart.md)。
+
+## 场景包
+
+平台内核只认 manifest 的通用字段，业务资产放在 `backend/app/packs/<pack>/`：
 
 ```
-用户消息 → RouterAgent（意图路由，轻量模型）
-             ├─ knowledge_qa    KnowledgeAgent（MemoryTool + RAGTool）
-             ├─ order_service   OrderAgent（MemoryTool + 订单/物流工具 + MCP）
-             └─ complaint_handler ComplaintAgent（MemoryTool + 工单/升级工具）
+backend/app/packs/customer_service/
+  manifest.yaml     # name / display_name / version / enabled / agents / tools / knowledge.namespaces
+  agents/           # 代码 Agent（继承 BaseBusinessAgent）
+  prompts/          # 业务提示词
+  tools/            # 领域工具（订单、物流、退款、工单）
+  seeds/            # 演示数据与知识库文档
+  ui/               # 场景文案
 ```
 
-- 每个业务 = 一个独立 Python 类（继承 `BaseBusinessAgent`）+ 独立 Prompt + 独立工具集
-- 新增业务：新建类文件 + 注册表加一行，路由 Prompt 自动感知，零改路由代码
-- **动态 Agent**：除代码托管 Agent 外，可在管理后台基于数据库配置（system_prompt / 模型 / RAG namespace / MCP 工具 / 自定义工具）动态创建，注册与路由实时生效（代码 Agent 与动态 Agent 混合注册）
-- **自定义工具管理**：代码侧已开发的 `BaseTool` 集中在目录中供后台扫描、登记到 `tools` 表（`type=custom`）并启停，动态 Agent 可按名绑定复用（工具实现永远来自代码，后台只做登记入口）
-- 记忆一律走 HelloAgents `MemoryTool`（四层），知识库一律走 `RAGTool`（多 namespace）
-- 对话接口 SSE 流式输出（session / route / text / tool_call / tool_result / handover / done / error）
-- **管理后台**：同一仓库的 `admin-frontend` 工作区，提供 Agent 管理、知识库命名空间管理、跨客户工单（咨询）查看/CSV 导出、MCP Servers、记忆时序等能力
+约束：内核不 import 包内模块，由 `packs/loader.py` 反向注册；包可以依赖平台能力，平台不依赖包。当前内置 `customer_service`，第二个场景包 IT Helpdesk 规划在 M4。
+
+新增场景包的方式见 [领域解耦清单](docs/domain-decoupling.md)。
+
+## 生产部署
+
+单机生产在基础编排上叠加 `docker-compose.prod.yml`：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+它提供 Caddy 自动 HTTPS、固定数据目录（`DATA_ROOT`）、资源与日志限制、Redis/Qdrant 鉴权、一次性初始化（`INIT_ON_START=false`）。
+
+```bash
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+$COMPOSE up -d --build postgres qdrant redis
+$COMPOSE run --rm backend python ../scripts/init_db.py
+$COMPOSE run --rm backend python ../scripts/seed_data.py
+$COMPOSE up -d --build
+```
+
+备份（PostgreSQL + Qdrant 快照 + 业务数据 + Redis RDB，带保留期）：
+
+```bash
+COMPOSE_FILE="docker-compose.yml:docker-compose.prod.yml" bash scripts/backup.sh
+```
+
+完整的 HTTPS、升级、恢复与安全清单见 [部署指南](docs/deployment.md) 与 [运维手册](docs/runbook.md)。
+
+## 本地开发
+
+```bash
+# 后端
+cd backend
+uv venv --python 3.12
+uv pip install -r requirements-dev.txt --python .venv/Scripts/python.exe
+cp .env.example .env             # 本地库/Redis/Qdrant 连接串
+python ../scripts/seed_data.py   # 建表 + 种子（幂等）
+.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 前端（仓库根，npm workspaces）
+npm ci
+npm run dev:chat                 # http://localhost:5173
+npm run dev:admin                # http://localhost:5174
+```
+
+请用 `localhost` 而不是 `127.0.0.1` 访问 Vite 开发服务器（可能只监听 IPv6）。开发环境、测试命令与提交规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 目录结构
 
 ```
-backend/         FastAPI + HelloAgents（app/{api,core,agents,packs,tools,models,schemas,services,utils}）
-frontend/        Vue 3 客户端（客户对话端，src/{api,stores,router,views,components,types}）
-admin-frontend/  Vue 3 管理后台（Agent/知识库/工单/MCP/记忆/登录）
-packages/shared/ npm workspaces 共享包 @cs/shared（http/auth store/SSE/基础类型）
-package.json     仓库根：workspaces 与 dev:chat / dev:admin / build 脚本
-backend/data/    运行时数据：文档归档 doc_archives/、知识库 knowledge_bases/（RAG_KB_ROOT 相对 backend 工作目录；已 .gitignore 排除，勿入库）
-scripts/         init_db.sql（全量 schema）/ init_db.sh（本机一键建库）/ seed_data.py（种子定义，幂等）/ rebuild_and_seed.py（开发阶段全量重建+灌种子）/ seed_memory_via_chat.py（模拟对话造记忆测试数据）
-docs/            spec.md（规范 v2.0）/ api.md（接口速查）/ runbook.md（运维手册）/ updates/（U01~U11 各功能详解文档）
+backend/          FastAPI + HelloAgents（app/{api,core,agents,packs,tools,models,services}）
+frontend/         客户对话端（Vue 3）
+admin-frontend/   运营管理台（Vue 3）
+packages/shared/  npm workspaces 共享包 @cs/shared（http / auth / SSE / 类型）
+docker/           镜像、入口脚本、Nginx 与 Caddy 配置
+scripts/          init_db / seed_data / rebuild_and_seed / backup / cleanup_traces
+docs/             快速开始、配置、部署、FAQ、运维手册、规范与更新记录
 ```
-
-## 快速开始
-
-### 前置要求
-
-- Python >= 3.11, < 3.13（本仓库 `backend/.venv` 由 **uv** 管理）
-- Node >= 18.18（包管理器 npm / pnpm 均可，本文以 **npm** 为例）
-- 外部依赖服务（可本地或云托管，连接串统一在 `backend/.env` 配置）：
-  - **PostgreSQL**（14+ 即可；建表脚本已适配为**无需** `uuid-ossp` / `pgvector` 扩展，默认 UUID 用内置 `gen_random_uuid()`）
-  - **Redis**（工作记忆 / 缓存）
-  - **Qdrant**（向量库：HelloAgents 的记忆与 RAG 底层存储，RAG 向量**不落** PostgreSQL）
-  - **LLM / Embedding 服务**（OpenAI 兼容端点即可，如 DashScope）
-- `hello-agents==0.2.9`（配套约束：`qdrant-client<1.10`、`bcrypt==4.0.1`，已钉在 `requirements.txt`）
-
-### 方式 A：Docker Compose（一条命令起全套）
-
-前置：Docker Desktop / Docker Engine + Compose v2.24.4+（生产叠加用到 `!reset`），本机无需 Python/Node。
-
-```powershell
-copy backend\.env.example .env       # 必须填 LLM_* / EMBED_* / JWT_SECRET（强随机，如 openssl rand -base64 48）
-docker compose up -d --build         # 首次构建 5~8 分钟（pip 依赖较多）；未设 JWT_SECRET 会拒绝启动
-docker compose ps                    # postgres/qdrant/redis/backend/web 均应为 healthy
-```
-
-- 客户对话端：http://localhost:8080
-- 管理后台：http://localhost:8080/admin/（用 admin 角色登录）
-- 后端调试：http://localhost:8000/docs（仅宿主机回环可访问）
-- 首次启动自动执行 `init_db.sql`（幂等建表 + 知识库种子）与 `seed_data.py`
-- `SEED_DEMO=false` 时随机管理员密码只在 `docker compose logs backend` 打印一次
-- 停止：`docker compose down`；连数据一起清空：`docker compose down -v`
-- 端口冲突：在 `.env` 改 `BACKEND_PORT`（仅本机绑定）/ `WEB_PORT`
-- 生产上线：叠加 `docker-compose.prod.yml`（Caddy HTTPS、固定数据目录、一次性初始化、备份）见 [runbook §2.2](docs/runbook.md)
-
-> 启动日志会先输出 `[自检] 数据库 / Redis / Qdrant / 模型`，失败时给出对应排查提示。
-
-> **方式 B：本地开发（热更新）**——以下 1~5 步适用于需要改代码、调试的场景。
-
-### 1. 数据库
-
-```bash
-bash scripts/init_db.sh          # 或手动执行 scripts/init_db.sql
-```
-
-> 若用云托管库（非本机），推荐直接用下文的 `rebuild_and_seed.py`（单往返 simple query，规避连接池代理断连）；本机库可用 `psql`/客户端执行 `scripts/init_db.sql`（已去除 `uuid-ossp`/`vector` 依赖），或交由 `seed_data.py` 的 `create_all` 自动建表。
-
-> **开发阶段的 schema 重置**：本项目尚处开发阶段，schema 频繁变动（如 `users` 已拆分为 `staff_users` / `customer_users`，相关外键重指向）。改动 ORM 模型后，无需手写增量迁移，直接对目标库**全量重建 + 灌种子**（⚠️ 会清空现有业务数据，仅限开发）：
->
-> ```powershell
-> cd backend
-> .\.venv\Scripts\python.exe ..\scripts\rebuild_and_seed.py   # DROP 旧表(含遗留 users) → 建表 → seed；单往返 simple query 适配云库代理
-> ```
-
-### 2. 后端
-
-```powershell
-cd backend
-# 建虚拟环境并安装依赖（本仓库用 uv；也可 python -m venv .venv 后用 pip）
-uv venv --python 3.12
-uv pip install -r requirements.txt --python .venv\Scripts\python.exe
-
-copy .env.example .env           # 填入 DATABASE_URL / REDIS_URL / QDRANT_* / LLM_* / EMBED_* 等
-python ..\scripts\seed_data.py   # 建表 + 系统默认 Agent/工具/话术 + 管理员（幂等，可重复执行）
-.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-> 默认**不会**创建演示账号：种子脚本只创建一个管理员，随机密码仅在首次执行时打印一次；也可用 `SEED_ADMIN_PASSWORD` 指定。需要演示数据时先执行 `$env:SEED_DEMO="true"` 再运行种子脚本。
-
-> `seed_data.py` 需在 `backend` 目录下运行（`.env` 按当前工作目录加载）；它会 `create_all` 建表，故即使跳过 `init_db.sql` 也能起来。
-
-- Swagger 文档：http://localhost:8000/docs
-- 健康检查：http://localhost:8000/health
-
-### 3. 前端（客户对话端）
-
-前端使用 npm workspaces，两个前端与共享包 `packages/shared` 共用仓库根的一份依赖：
-
-```powershell
-npm install                      # 在仓库根执行，一次装好两个前端 + @cs/shared
-npm run dev:chat                 # http://localhost:5173（/api 已代理到后端 8000）
-```
-
-> 请用 **`http://localhost:5173`** 访问，不要用 `127.0.0.1`——Vite dev 可能只监听 IPv6 `::1`，用 `127.0.0.1` 会连不上。
-
-### 演示账号（仅 `SEED_DEMO=true` 时注入，生产务必改密）
-
-| 用户名 | 密码 | 角色 |
-|--------|------|------|
-| admin | Admin@123 | admin |
-| alice | Alice@123 | customer |
-| service01 | Agent@123 | agent |
-
-### 4. 管理后台（admin-frontend）
-
-```powershell
-npm run dev:admin                # http://localhost:5174（/api 已代理到后端 8000）
-```
-
-> 管理后台为同一仓库的工作区 `admin-frontend`，端口 **5174**（与客户前端 5173 分离，共用同一后端）。使用 `admin` 角色账号登录。
-> 功能：Agent 列表与动态 Agent 创建/启停、Agent 详情查看（含代码 Agent 的系统提示词/注册工具/MCP，代码已下线的孤儿行标「已失效」可删除）、知识库命名空间与文档管理、跨客户工单查看与 CSV 导出、MCP Servers 配置（含服务描述）、自定义工具管理（扫描代码目录、登记/启停并绑定给动态 Agent）、记忆时序。
-
-### 5. 测试
-
-```bash
-cd backend
-ruff check app tests    # 代码检查（需先激活 .venv）
-pytest                # 纯逻辑单测（无 hello-agents 时自动桩化）
-pytest --cov=app      # 覆盖率
-cd ../frontend
-npm test              # vitest（也可在仓库根执行 npm test -w frontend）
-```
-
-## 核心约束（摘自 Spec 2.5）
-
-- 所有 Agent / 记忆 / RAG 能力必须通过 HelloAgents 框架 API 调用
-- 所有业务 Agent 必须继承 `BaseBusinessAgent`
-- 工具一律通过 `ToolRegistry.register_tool()` 注册
-- 禁止绕过 RAGTool 直接操作底层向量库
-
-## 常见问题（本环境实测）
-
-| 现象 | 原因 / 处理 |
-|------|-------------|
-| 建表报扩展不存在（uuid-ossp / vector） | 服务器未装且非超管；`init_db.sql` 已改用内置 `gen_random_uuid()` 且不依赖 pgvector |
-| `hash_password` 报 `password cannot be longer than 72 bytes` | passlib 1.7.4 与 bcrypt 5.x 不兼容；须 `bcrypt==4.0.1` |
-| `/chat/stream` 报 `Future attached to a different loop` | 跨事件循环访问 asyncpg 连接池；MCP 配置已在主 loop 预取 |
-| 前端登录弹窗 `Cannot read properties of undefined (reading 'data')` | `unwrap` 未 `await` Promise（已修复）；前端数据层依赖此函数 |
-| 控制台 `favicon.ico 404` | 无害；`index.html` 已改为引用 `/vite.svg` |
-| 启动报缺列/缺表 / 外键不一致（模型改字段后） | schema 与库不一致；开发阶段直接执行 `scripts/rebuild_and_seed.py` 全量重建（会清空数据，重建含 `users` 拆分后的 `staff_users`/`customer_users`） |
-| 启动日志告警「DB 中存在未在代码注册的 code Agent（已失效）」 | 代码已下线但库中残留 `source=code` 行；已**不再阻断启动**，该类行在 Agent 列表标「已失效」，可在后台直接删除 |
-| 后台禁用了某个代码 Agent 但似仍被命中 | 需确认已重启/热重载到含修复的版本；现在路由候选与运行时解析均尊重 `enabled`（见 U11），禁用会真正阻断 |
 
 ## 文档
 
-- [开发规范 Spec v2.0](docs/spec.md)
-- [功能更新详解（U01~U11）](docs/updates/README.md)
-- [API 速查](docs/api.md)
-- [运维手册](docs/runbook.md)
+| 文档 | 内容 |
+|---|---|
+| [快速开始](docs/quickstart.md) | 从零到首次对话，含常见报错 |
+| [配置说明](docs/configuration.md) | `.env` 全量配置、默认值与生效优先级 |
+| [部署指南](docs/deployment.md) | Compose、生产叠加、HTTPS、备份恢复 |
+| [常见问题](docs/faq.md) | 模型接入、Qdrant、MCP、Windows 编码、端口冲突 |
+| [运维手册](docs/runbook.md) | 服务清单、排障、数据维护、安全 |
+| [API 速查](docs/api.md) | 接口、SSE 事件与错误码 |
+| [技术文章](docs/articles/01-multi-intent-routing.md) | 多意图路由与提示词去具名化 |
+| [开发规范](docs/spec.md) | Spec v2.0，与实现同步 |
+| [功能更新记录](docs/updates/README.md) | U01–U16 每项能力的落地细节 |
+
+## 路线图
+
+| 阶段 | 状态 | 内容 |
+|---|---|---|
+| M0–M2 | 已完成 | 工程基线、场景包解耦、前端单仓化、一键部署与初始化向导 |
+| M3 | 进行中 | 命名、README、运维文档、演示物料、技术文章 |
+| M4 | 计划中 | IT Helpdesk 场景包，验证"同一内核、不同场景" |
+| M5 | 计划中 | v0.1 正式发布（Release Notes、镜像、社区） |
+| 发布后 | 按反馈 | 聊天挂件化、RBAC/SSO、版本化迁移、评测与回归 |
+
+## 明确不做（12 个月内）
+
+- 通用 DAG 可视化编排与插件市场；
+- 计费系统与自助订阅；
+- 多租户 SaaS 隔离（当前单实例单租户，仅预留 `tenant_id`）；
+- 移动端 App、自研模型/向量库/工单全流程；
+- 为单个客户 fork 代码（只接受配置与场景包定制）。
 
 ## 贡献与安全
 
 - [贡献指南](CONTRIBUTING.md)
 - [安全策略](SECURITY.md)
+- 场景包与领域边界见 [领域解耦清单](docs/domain-decoupling.md)，产品定位见 [定位文档](docs/positioning.md)
 
 ## 许可证
 

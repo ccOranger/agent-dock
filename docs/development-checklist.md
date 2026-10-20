@@ -153,16 +153,19 @@
 
 ### M3 文档与演示物料
 
-- [ ] **M3-1 产品命名**（决策，0.5d）
-  - 中性平台名；README、页面标题、Docker 项目名统一
-- [ ] **M3-2 README 重写**（1d）
-  - 定位、能力、架构图、快速开始、场景包、路线图、许可证
-- [ ] **M3-3 运维文档**（1–2d）
-  - `quickstart.md`、`configuration.md`、`deployment.md`、`faq.md`
+- [x] **M3-1 产品命名**（决策，0.5d）
+  - 定为 **AgentDock**：定位“可私有化部署的对话式 Agent 运营平台”
+  - 落地范围：README/文档与两个前端的页面标题、登录页、运营台品牌文字；Compose 项目名、包名、仓库名保留 `smart-cs`（避免已有数据卷失联）
+- [x] **M3-2 README 重写**（1d）
+  - 已重写：定位、能力表、Mermaid 架构、Compose 快速开始、场景包、生产部署、路线图、明确不做、许可证
+- [x] **M3-3 运维文档**（1–2d）
+  - 新增 `docs/quickstart.md`、`configuration.md`、`deployment.md`、`faq.md`；`runbook.md` 保持为排障手册并互相引用
 - [ ] **M3-4 截图与 GIF**（1d）
-  - 管理台、链路详情、记忆页、Agent 配置、场景包切换
-- [ ] **M3-5 技术文章**（2–3d，可延后）
-  - 多意图路由、记忆生命周期、全链路追踪；至少发布 1 篇配合 v0.1
+  - 本轮按计划跳过；待 M4 演示包就绪后补管理台/链路/记忆/Agent 配置/场景包切换截图
+- [x] **M3-5 技术文章**（2–3d，可延后）
+  - 首篇初稿完成：`docs/articles/01-multi-intent-routing.md`（多意图路由与提示词去具名化）；外部发布随 M5
+
+> M3 验收（2026-10-20）：对外名称统一为 AgentDock（代码代号 smart-cs）；README 与四份运维文档完成；技术文章初稿 1 篇；截图/GIF 留待 M4。
 
 ### M4 IT Helpdesk 场景包
 
