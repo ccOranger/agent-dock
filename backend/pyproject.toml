@@ -22,3 +22,5 @@ known-first-party = ["app"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# 让 pytest 入口（而非 python -m pytest）也能从 backend 根导入 app 包
+pythonpath = ["."]
