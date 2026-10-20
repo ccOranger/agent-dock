@@ -1,10 +1,18 @@
-"""HelloAgents 全栈集成测试（需真实依赖与 LLM Key；conftest 桩环境下自动跳过）"""
+"""HelloAgents 全栈集成测试（需真实依赖、LLM Key 与嵌入模型；conftest 桩环境下自动跳过）
+
+默认跳过：需要真实模型调用（产生费用且依赖网络）。单独验证时：
+    RUN_HELLO_AGENTS_INTEGRATION=1 pytest tests/test_hello_agents_integration.py
+"""
+import os
 import sys
 
 import pytest
 
 if "hello_agents" not in sys.modules or not hasattr(sys.modules["hello_agents"], "__file__"):
     pytest.skip("hello-agents 未安装，跳过集成测试", allow_module_level=True)
+
+if os.getenv("RUN_HELLO_AGENTS_INTEGRATION", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    pytest.skip("未设置 RUN_HELLO_AGENTS_INTEGRATION=1，跳过需要真实模型的全栈集成测试", allow_module_level=True)
 
 
 @pytest.mark.asyncio

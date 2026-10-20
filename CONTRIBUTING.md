@@ -43,6 +43,9 @@ cd ..\admin-frontend; npm ci
 
 CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest 与两端构建。
 
+需要真实模型与嵌入模型的全栈集成测试（`tests/test_hello_agents_integration.py`）默认跳过，
+单独验证时先配好 `.env`，再设 `RUN_HELLO_AGENTS_INTEGRATION=1` 运行该文件。
+
 ## 依赖与版本
 
 - 运行时依赖在 `backend/requirements.txt`：普通依赖使用下限，存在兼容风险的依赖加上界并注释原因

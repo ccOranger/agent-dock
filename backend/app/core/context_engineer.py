@@ -22,7 +22,8 @@ _BG_TASKS: set = set()
 
 # working 镜像行过期清理节流：进程内至多 5 分钟扫一次，避免每轮对话都发 DELETE
 _WORKING_PURGE_INTERVAL_SECONDS = 300
-_last_working_purge: float = 0.0
+# None 表示本进程从未清理过；不能初始化为 0.0，否则开机不足 5 分钟（monotonic 很小）时首轮会被误判为刚扫过
+_last_working_purge: float | None = None
 
 # MemoryTool 检索结果行格式："N. [类型标签] 内容预览 (重要性: 0.55)"，预览超 80 字符带 ...
 _HIT_LINE_RE = re.compile(r"^\s*\d+\.\s*\[[^\]]+\]\s*(.*?)\s*(?:\(重要性: [0-9.]+\)|\(importance: [0-9.]+\))\s*$")
@@ -38,7 +39,7 @@ def _maybe_purge_expired_working() -> None:
     """按 spec 8.1 的 30 分钟寿命清理未晋升的 working 镜像行，fire-and-forget 不阻塞主链路"""
     global _last_working_purge
     now = time.monotonic()
-    if now - _last_working_purge < _WORKING_PURGE_INTERVAL_SECONDS:
+    if _last_working_purge is not None and now - _last_working_purge < _WORKING_PURGE_INTERVAL_SECONDS:
         return
     _last_working_purge = now
 
