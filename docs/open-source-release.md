@@ -106,7 +106,7 @@
 
 ## 7. 质量与 CI
 
-- [x] 后端：`python -m compileall`、`pytest`（当前 278 passed / 1 skipped）。
+- [x] 后端：`python -m compileall`、`pytest`（本地 277 passed / 2 skipped；CI 275 passed / 4 skipped）。
 - [x] 增加 ruff（0.17.1，已纳入 `requirements-dev` 与 CI）：lint + import 排序。
 - [x] 前端：`npm run build` 两端均通过（当前通过，仅有 chunk 体积告警）。
 - [x] GitHub Actions：
@@ -145,7 +145,7 @@
 - [ ] 演示数据可一键导入，也可完全不导入。
 - [ ] 客服包可停用，IT Helpdesk 包可启用（若第二个包未就绪，则明确标注"预览"）。
 - [x] 无默认生产密钥、无演示口令直接暴露。
-- [ ] 两端构建通过，后端测试通过，CI 绿。
+- [x] 两端构建通过，后端测试通过，CI 绿。
 - [x] LICENSE、SECURITY、CONTRIBUTING 齐备。
 - [ ] README 与产品定位文档一致，不再以"智能客服系统"作为唯一身份。
 

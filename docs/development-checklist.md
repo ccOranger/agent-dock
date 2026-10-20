@@ -61,7 +61,7 @@
   - 确认 `package-lock.json` 入库；`requirements.txt` 版本策略写清楚
   - 验收：干净环境可复现安装
 
-> M0 本地验收（2026-10-20）：ruff 全通过；pytest 278 passed / 1 skipped；两端构建通过；YAML 校验通过。CI 工作流已添加，待推送后在 GitHub Actions 确认首次运行。
+> M0 验收（2026-10-20）：本地 ruff、pytest（277 passed / 2 skipped）、两端构建均通过；GitHub Actions 首次运行已全绿（backend lint + pytest、frontend 两端 build）。CI 环境 pytest 275 passed / 4 skipped（Linux 跳过 2 个 Windows 专用用例）。
 
 ### M1 领域解耦 P0（低风险归位）
 
