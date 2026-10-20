@@ -108,6 +108,12 @@ class AgentToggleRequest(BaseModel):
     enabled: bool
 
 
+class PackToggleRequest(BaseModel):
+    """场景包启停（批量开关包内全部代码 Agent，不新增独立设置表）。"""
+
+    enabled: bool
+
+
 class DynamicAgentCreate(BaseModel):
     """后台创建动态 Agent"""
 

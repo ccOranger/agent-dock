@@ -345,6 +345,34 @@ export const TICKET_URGENCY_LABELS: Record<TicketUrgency, string> = {
   high: '高',
 }
 
+// ===== 场景包（运营台展示与整体启停）=====
+export interface PackAgentInfo {
+  name: string
+  display_name: string
+  description: string
+  enabled: boolean
+}
+
+export interface PackToolInfo {
+  name: string
+  description: string
+}
+
+export interface ScenePack {
+  name: string
+  display_name: string
+  version: string
+  /** 包内至少一个 Agent 启用，且 manifest 未停用 */
+  enabled: boolean
+  /** manifest 的 enabled 声明；false 时不允许运行时开启 */
+  manifest_enabled: boolean
+  /** 包声明的运营台通用能力（如 tickets） */
+  features: string[]
+  agents: PackAgentInfo[]
+  tools: PackToolInfo[]
+  knowledge_namespaces: string[]
+}
+
 // ===== 高频固定话术（硬模板）=====
 export type CannedScriptCategory = 'identity' | 'capability' | 'probing' | 'business'
 

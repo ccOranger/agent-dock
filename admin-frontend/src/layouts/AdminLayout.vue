@@ -6,7 +6,7 @@
         <el-menu-item index="/inquiries">
           <span>咨询管理</span>
         </el-menu-item>
-        <el-menu-item index="/tickets">
+        <el-menu-item index="/tickets" v-if="packs.hasFeature('tickets')">
           <span>工单管理</span>
         </el-menu-item>
         <el-menu-item index="/traces">
@@ -14,6 +14,9 @@
         </el-menu-item>
         <el-menu-item index="/knowledge">
           <span>知识库维护</span>
+        </el-menu-item>
+        <el-menu-item index="/packs" v-if="isAdmin">
+          <span>场景包</span>
         </el-menu-item>
         <el-menu-item index="/agents" v-if="isAdmin">
           <span>Agent 管理</span>
@@ -55,14 +58,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { usePacksStore } from '@/stores/packs'
 
 const auth = useAuthStore()
+const packs = usePacksStore()
 const route = useRoute()
 const router = useRouter()
+
+// 导航按启用场景包声明的 features 显隐（如工单管理）；拉取失败时回退为全部可见
+onMounted(() => packs.fetchPacks())
 
 const activePath = computed(() => route.path)
 const isAdmin = computed(() => auth.user?.role === 'admin')

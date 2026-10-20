@@ -95,6 +95,17 @@ DELETE /api/v1/admin/agents/{name}          # 删除（在册代码 Agent 不可
 PATCH  /api/v1/admin/agents/{name}/toggle   # 启用/禁用（body: enabled；禁用后路由与解析真正不命中）
 ```
 
+## Admin · Packs（场景包列表与整体启停）
+
+（[U17](updates/17-it-helpdesk-pack.md)、[场景包开发指南](packs.md)）
+
+```
+GET    /api/v1/admin/packs            # 全部场景包（含 manifest 停用项）：features/agents/tools/knowledge_namespaces（require_staff）
+PATCH  /api/v1/admin/packs/{name}     # 整体启停（body: enabled；批量写包内代码 Agent，require_admin）
+```
+
+语义：包启用 = `manifest.enabled` 且包内至少一个代码 Agent 启用；`manifest_enabled=false` 的包开启返回 409/3002；未知包返回 404/3001；停用不会卸载工具或删除知识库向量。
+
 ## Admin · Router（路由分发器，只读，require_admin）
 
 （[U13](updates/13-router-agent-readonly.md)）路由 Agent 的定义在代码 + `.env` 中，**不入库也不可在线修改**，因此本组只有两个 GET（写方法返回 405）。
@@ -144,13 +155,13 @@ POST   /api/v1/admin/mcp-servers/test                  # 连通性探测（不�
 GET    /api/v1/admin/mcp-servers/{server_id}/tools     # 按已存配置连接并列出全部工具（带 timeout）
 ```
 
-## Admin · Tickets（客诉工单，require_staff）
+## Admin · Tickets（通用工单，客服/IT 共用表，require_staff）
 
-（[U06](updates/06-tickets-cross-round-memory.md)，以 `ticket_no`（`TK-XXXXXXXX`）定位）
+（[U06](updates/06-tickets-cross-round-memory.md)、[U17](updates/17-it-helpdesk-pack.md)，以 `ticket_no`（`TK-XXXXXXXX`）定位；IT 包写入 `category=it_*` 与 `metadata.pack=it_helpdesk`）
 
 ```
 GET    /api/v1/admin/tickets                 # 列表（?user_id/status/category/urgency/keyword/date_from/date_to + 分页）
-GET    /api/v1/admin/tickets/{ticket_no}     # 详情（含 updates 补录历史）
+GET    /api/v1/admin/tickets/{ticket_no}     # 详情（含 updates 补录历史与 metadata；IT 工单带 pack=it_helpdesk）
 PATCH  /api/v1/admin/tickets/{ticket_no}/status  # 流转状态（body: status, note?；note 追加进 updates）
 POST   /api/v1/admin/tickets/{ticket_no}/notes   # 补录一条信息（与业务 update_ticket 同结构）
 ```

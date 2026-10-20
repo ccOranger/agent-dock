@@ -124,7 +124,10 @@ CREATE INDEX idx_documents_kind ON documents(kind);
 INSERT INTO knowledge_bases (namespace, display_name, description) VALUES
     ('cs_default', '通用知识库', '默认通用客服知识'),
     ('cs_order', '订单知识库', '订单相关业务'),
-    ('cs_after_sales', '售后知识库', '售后/投诉相关业务')
+    ('cs_after_sales', '售后知识库', '售后/投诉相关业务'),
+    ('it_default', 'IT 通用知识库', 'IT 服务台自助指南与流程'),
+    ('it_network', '网络运维知识库', '办公网络、VPN 与故障排查'),
+    ('it_assets', 'IT 资产知识库', '资产领用、保修与使用说明')
 ON CONFLICT (namespace) DO NOTHING;
 
 -- ========== Agent 元数据注册（代码托管 + 动态后台创建） ==========

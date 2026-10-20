@@ -161,7 +161,7 @@
 - [x] **M3-3 运维文档**（1–2d）
   - 新增 `docs/quickstart.md`、`configuration.md`、`deployment.md`、`faq.md`；`runbook.md` 保持为排障手册并互相引用
 - [ ] **M3-4 截图与 GIF**（1d）
-  - 本轮按计划跳过；待 M4 演示包就绪后补管理台/链路/记忆/Agent 配置/场景包切换截图
+  - 本轮按计划跳过；截图清单已写入 [场景包开发指南](./packs.md) 第 9 节（含场景包页与停用客服包验收），待 M4 Docker 演示就绪后统一补录
 - [x] **M3-5 技术文章**（2–3d，可延后）
   - 首篇初稿完成：`docs/articles/01-multi-intent-routing.md`（多意图路由与提示词去具名化）；外部发布随 M5
 
@@ -169,17 +169,23 @@
 
 ### M4 IT Helpdesk 场景包
 
-- [ ] **M4-1 包骨架与提示词**（2d）
+- [x] **M4-1 包骨架与提示词**（2d）
   - `packs/it_helpdesk/`：manifest、3 个 Agent（知识/故障/资产）、提示词
-- [ ] **M4-2 工具复用**（1–2d）
-  - 复用工单工具；新增"资产查询"示例工具；数据全部假数据
-- [ ] **M4-3 种子与演示**（1d）
-  - IT 知识库文档、常见问题、示例工单
-- [ ] **M4-4 包切换开关**（1–2d）
-  - 后台可见 `packs` 列表与启用/停用；导航按包显隐
-  - 验收：停用客服包后系统仍可用
-- [ ] **M4-5 场景包文档**（1d）
-  - 如何新增一个包（manifest 字段、目录约定、注册方式）
+- [x] **M4-2 工具复用**（1–2d）
+  - 复用工单表与 `TicketRepo`；新增资产查询示例工具；数据全部假数据
+- [x] **M4-3 种子与演示**（1d）
+  - IT 知识库命名空间、文档归档行、4 张示例工单；可选 `seed_it_kb.py` 写入真实 FAQ 向量
+- [x] **M4-4 包切换开关**（1–2d）
+  - 后台「场景包」页与 `GET/PATCH /admin/packs` 已完成；导航按 `features` 显隐
+  - 验收：停用客服包后系统仍可用（Docker 实测：`PATCH /admin/packs/customer_service {enabled:false}` 后，「笔记本开不了机」路由到 it_incident + it_asset，
+    工具 `create_it_ticket`/`query_it_asset` 执行成功，回复 306 字并返回工单号 TK-2E2A151A）
+- [x] **M4-5 场景包文档**（1d）
+  - 新增 [场景包开发指南](./packs.md)：manifest 字段、目录约定、注册链路、包启停与新增包清单
+
+> M4 验收（2026-10-20）：M4-1–M4-5 全部完成。IT Helpdesk 包 3 Agent + 4 工具 + 3 命名空间已接入；
+> 后端 `ruff` 不报错、pytest 324 passed / 3 skipped，两端镜像构建通过；
+> Docker 演示环境实测：两包并存、客服包停用后仍可对话与建单、工单 `metadata.pack=it_helpdesk` 可回溯。
+> 遗留：M3-4 运营台/对话演示截图仍未补录（清单见 [packs.md 第 9 节](./packs.md)）。
 
 ### M5 v0.1 发布
 

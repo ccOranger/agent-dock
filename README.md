@@ -26,7 +26,8 @@ AgentDock 把这些做成平台能力，而不是某个业务里的临时代码�
 | **全链路追踪** | 每轮对话的路由、LLM、工具、RAG、记忆调用都有 spans 与耗时；可采样、可设保留期 | `TRACE_*` |
 | **固定话术** | 高频确定性问题在路由与大模型之前逐字命中，后台可测命中、可停用 | 运营台「固定话术」 |
 | **双端身份** | 后台人员与客户分表、分登录入口、Token 隔离；客户可自助注册 | `/auth/staff/*`、`/auth/customer/*` |
-| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘 | `http://<host>:8080/admin/` |
+| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、场景包、记忆、仪表盘 | `http://<host>:8080/admin/` |
+| **场景包** | 客服/售后与 IT Helpdesk 两个内置包；manifest 声明 Agent/工具/知识库，运营台可整体启停 | 运营台「场景包」 |
 
 ## 架构
 
@@ -108,18 +109,22 @@ docker compose logs backend | grep -i "密码"     # Windows: docker compose log
 平台内核只认 manifest 的通用字段，业务资产放在 `backend/app/packs/<pack>/`：
 
 ```
-backend/app/packs/customer_service/
-  manifest.yaml     # name / display_name / version / enabled / agents / tools / knowledge.namespaces
-  agents/           # 代码 Agent（继承 BaseBusinessAgent）
-  prompts/          # 业务提示词
-  tools/            # 领域工具（订单、物流、退款、工单）
-  seeds/            # 演示数据与知识库文档
-  ui/               # 场景文案
+backend/app/packs/
+  customer_service/   # 客服/售后：3 Agent、9 工具、3 知识库
+  it_helpdesk/        # IT 服务台：3 Agent、4 工具、3 知识库
+    manifest.yaml     # name / display_name / version / enabled / features / agents / tools / knowledge.namespaces
+    agents/           # 代码 Agent（继承 BaseBusinessAgent）
+    prompts/          # 业务提示词
+    tools/            # 领域工具（订单、物流、退款、工单 / 资产查询、IT 工单）
+    seeds/            # 演示数据与知识库文档（占位）
+    ui/               # 场景文案
 ```
 
-约束：内核不 import 包内模块，由 `packs/loader.py` 反向注册；包可以依赖平台能力，平台不依赖包。当前内置 `customer_service`，第二个场景包 IT Helpdesk 规划在 M4。
+约束：内核不 import 包内模块，由 `packs/loader.py` 反向注册；包可以依赖平台能力，平台不依赖包。
+运营台「场景包」页可查看包内 Agent/工具/知识库并整体启停（复用 `agents.enabled`）；
+`features: [tickets]` 控制工单导航显隐。IT 包默认启用，可与客服包同时存在或单独启用。
 
-新增场景包的方式见 [领域解耦清单](docs/domain-decoupling.md)。
+新增场景包与包启停细节见 [场景包开发指南](docs/packs.md)，领域边界见 [领域解耦清单](docs/domain-decoupling.md)。
 
 ## 生产部署
 
@@ -187,10 +192,11 @@ docs/             快速开始、配置、部署、FAQ、运维手册、规范�
 | [部署指南](docs/deployment.md) | Compose、生产叠加、HTTPS、备份恢复 |
 | [常见问题](docs/faq.md) | 模型接入、Qdrant、MCP、Windows 编码、端口冲突 |
 | [运维手册](docs/runbook.md) | 服务清单、排障、数据维护、安全 |
+| [场景包开发](docs/packs.md) | manifest 契约、新增包步骤、包启停、IT Helpdesk 演示与截图清单 |
 | [API 速查](docs/api.md) | 接口、SSE 事件与错误码 |
 | [技术文章](docs/articles/01-multi-intent-routing.md) | 多意图路由与提示词去具名化 |
 | [开发规范](docs/spec.md) | Spec v2.0，与实现同步 |
-| [功能更新记录](docs/updates/README.md) | U01–U16 每项能力的落地细节 |
+| [功能更新记录](docs/updates/README.md) | U01–U17 每项能力的落地细节 |
 
 ## 路线图
 
@@ -198,7 +204,7 @@ docs/             快速开始、配置、部署、FAQ、运维手册、规范�
 |---|---|---|
 | M0–M2 | 已完成 | 工程基线、场景包解耦、前端单仓化、一键部署与初始化向导 |
 | M3 | 进行中 | 命名、README、运维文档、演示物料、技术文章 |
-| M4 | 计划中 | IT Helpdesk 场景包，验证"同一内核、不同场景" |
+| M4 | 进行中 | IT Helpdesk 场景包：验证“同一内核、不同场景”，含包启停与运营台导航显隐 |
 | M5 | 计划中 | v0.1 正式发布（Release Notes、镜像、社区） |
 | 发布后 | 按反馈 | 聊天挂件化、RBAC/SSO、版本化迁移、评测与回归 |
 

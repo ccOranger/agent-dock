@@ -198,6 +198,19 @@ services:
 - 误吞只可能来自 `keywords`（包含即命中）：删掉过宽的词，用「命中测试」先验证；
 - `patterns` 是整句归一化后全等，不会吞掉带后半句的复合提问。
 
+### 场景包页看不到 IT Helpdesk / 工单入口消失
+
+- 确认 `backend/app/packs/it_helpdesk/manifest.yaml` 存在且 `enabled: true`，改 manifest 后需重启后端；
+- 工单入口由任一启用包的 `features: [tickets]` 控制；`/admin/packs` 请求失败时前端会回退为全部显示，先看后端日志；
+- `manifest.enabled=false` 的包不会装载，也不能在运营台开启（PATCH 返回 409），需改 manifest 后重启；
+- 停用客服包后，客服 Agent 不再进入路由，但已注册工具与知识库向量不会卸载；IT 包保持启用即可继续对话与建单。
+
+### IT 资产查询查不到数据
+
+- 演示资产是进程内只读快照，重启即恢复初始数据；支持资产编号、SN、领用人、型号、IP、MAC 与“电脑/笔记本/台式机”等品类别名；
+- 生产接入请在 `packs/it_helpdesk/tools/` 内替换 `mock_assets` 为真实 CMDB/资产系统查询；
+- 查不到时工具返回 `ok=false`，可在链路追踪的 tool span 里看到调用参数与结果。
+
 ### 链路追踪看不到某一轮
 
 - 确认 `TRACE_ENABLED=true` 且 `request_traces` 表存在；

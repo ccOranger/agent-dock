@@ -21,6 +21,7 @@ import type {
   RequestTraceSummary,
   RouterAgentInfo,
   RouterPromptPreview,
+  ScenePack,
   SearchResult,
   TicketDetail,
   TicketSummary,
@@ -213,6 +214,13 @@ export const apiUpdateAgent = (name: string, body: Partial<DynamicAgentPayload>)
   unwrap(http.put<never, { data: { data: { name: string } } }>(`/admin/agents/${name}`, body))
 
 export const apiDeleteAgent = (name: string) => http.delete(`/admin/agents/${name}`)
+
+// ===== Admin：场景包 =====
+export const apiListPacks = () =>
+  unwrap(http.get<never, { data: { data: ScenePack[] } }>('/admin/packs'))
+
+export const apiTogglePack = (name: string, enabled: boolean) =>
+  unwrap(http.patch<never, { data: { data: ScenePack } }>(`/admin/packs/${name}`, { enabled }))
 
 // ===== Admin：路由分发器（只读，无任何写接口）=====
 export const apiGetRouterInfo = () =>

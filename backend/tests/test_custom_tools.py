@@ -20,6 +20,10 @@ _EXPECTED_NAMES = {
     "create_ticket",
     "update_ticket",
     "escalate",
+    "create_it_ticket",
+    "update_it_ticket",
+    "escalate_it",
+    "query_it_asset",
 }
 
 

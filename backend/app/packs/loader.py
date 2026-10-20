@@ -31,6 +31,8 @@ class PackManifest:
     agents: tuple[str, ...] = ()
     tools: tuple[str, ...] = ()
     knowledge_namespaces: tuple[str, ...] = ()
+    # 运营台通用能力声明（如 tickets），由前端据此决定导航与页面是否可见
+    features: tuple[str, ...] = ()
     root: Path = PACKS_DIR
 
 
@@ -53,18 +55,32 @@ def _parse_manifest(path: Path) -> PackManifest | None:
         agents=tuple(str(x) for x in raw.get("agents") or []),
         tools=tuple(str(x) for x in raw.get("tools") or []),
         knowledge_namespaces=tuple(str(x) for x in knowledge.get("namespaces") or []),
+        features=tuple(str(x) for x in raw.get("features") or []),
         root=path.parent,
     )
+
+
+def _scan_manifests() -> tuple[PackManifest, ...]:
+    """扫描 `packs/*/manifest.yaml`，返回全部清单（含 manifest 停用的包，按名称排序）。"""
+    manifests: list[PackManifest] = []
+    for path in sorted(PACKS_DIR.glob("*/manifest.yaml")):
+        manifest = _parse_manifest(path)
+        if manifest is not None:
+            manifests.append(manifest)
+    return tuple(manifests)
+
+
+@functools.lru_cache(maxsize=1)
+def scan_manifests() -> tuple[PackManifest, ...]:
+    """返回全部场景包清单（含停用包，供运营台展示；结果按进程缓存）。"""
+    return _scan_manifests()
 
 
 @functools.lru_cache(maxsize=1)
 def load_manifests() -> tuple[PackManifest, ...]:
     """扫描 `packs/*/manifest.yaml`，返回已启用包的清单（按名称排序）。"""
     manifests: list[PackManifest] = []
-    for path in sorted(PACKS_DIR.glob("*/manifest.yaml")):
-        manifest = _parse_manifest(path)
-        if manifest is None:
-            continue
+    for manifest in _scan_manifests():
         if not manifest.enabled:
             logger.info(f"场景包已停用，跳过装载: {manifest.name}")
             continue
@@ -127,4 +143,46 @@ def get_knowledge_namespaces() -> tuple[str, ...]:
         for ns in manifest.knowledge_namespaces:
             if ns not in seen:
                 seen.append(ns)
+    return tuple(seen)
+
+
+def _asset_pack_map(attr: str) -> dict[str, str]:
+    """按 manifest 顺序建立「资产 name -> 包 name」映射（重名以先登记者为准）。
+
+    覆盖全部清单（含 manifest 停用的包），供运营台展示包内容；
+    运行时装载仍以 load_manifests 为准。
+    """
+    mapping: dict[str, str] = {}
+    for manifest in scan_manifests():
+        for ref in getattr(manifest, attr):
+            try:
+                obj = _import_symbol(ref)
+            except (ImportError, AttributeError, ValueError):
+                continue
+            name = getattr(obj, "name", "")
+            if name and name not in mapping:
+                mapping[name] = manifest.name
+    return mapping
+
+
+@functools.lru_cache(maxsize=1)
+def get_code_agent_packs() -> dict[str, str]:
+    """返回清单声明的代码 Agent 归属：agent name -> pack name（含停用包）。"""
+    return _asset_pack_map("agents")
+
+
+@functools.lru_cache(maxsize=1)
+def get_custom_tool_packs() -> dict[str, str]:
+    """返回清单声明的自定义工具归属：tool name -> pack name（含停用包）。"""
+    return _asset_pack_map("tools")
+
+
+@functools.lru_cache(maxsize=1)
+def get_enabled_features() -> tuple[str, ...]:
+    """返回全部启用包声明的运营台功能（去重保序，如 tickets）。"""
+    seen: list[str] = []
+    for manifest in load_manifests():
+        for feature in manifest.features:
+            if feature not in seen:
+                seen.append(feature)
     return tuple(seen)

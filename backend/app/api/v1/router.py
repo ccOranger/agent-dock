@@ -5,6 +5,7 @@ from app.api.v1 import (
     admin,
     admin_canned_scripts,
     admin_inquiries,
+    admin_packs,
     admin_router,
     admin_tickets,
     admin_traces,
@@ -22,6 +23,7 @@ api_router.include_router(sessions.router)
 api_router.include_router(memory.router)
 api_router.include_router(knowledge.router)
 api_router.include_router(admin.router)
+api_router.include_router(admin_packs.router)
 api_router.include_router(admin_router.router)
 api_router.include_router(admin_inquiries.router)
 api_router.include_router(admin_tickets.router)

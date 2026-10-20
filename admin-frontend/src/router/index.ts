@@ -13,6 +13,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'tickets', component: () => import('@/views/TicketsView.vue'), meta: { title: '工单管理' } },
       { path: 'traces', component: () => import('@/views/TracesView.vue'), meta: { title: '链路追踪' } },
       { path: 'knowledge', component: () => import('@/views/KnowledgeBaseView.vue'), meta: { title: '知识库维护' } },
+      { path: 'packs', component: () => import('@/views/PacksView.vue'), meta: { title: '场景包', roles: ['admin'] } },
       { path: 'agents', component: () => import('@/views/AgentList.vue'), meta: { title: 'Agent 管理', roles: ['admin'] } },
       { path: 'router', component: () => import('@/views/RouterInfoView.vue'), meta: { title: '路由分发器', roles: ['admin'] } },
       { path: 'mcp-servers', component: () => import('@/views/McpServersView.vue'), meta: { title: 'MCP 服务管理', roles: ['admin'] } },

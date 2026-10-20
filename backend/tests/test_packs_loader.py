@@ -40,11 +40,31 @@ def test_load_manifests_discovers_customer_service():
     assert manifest.display_name
     assert len(manifest.agents) == 3
     assert len(manifest.tools) == 9
+    assert manifest.features == ("tickets",)
+
+
+# ===== IT Helpdesk 包 =====
+def test_load_manifests_discovers_it_helpdesk():
+    manifest = next((m for m in loader.load_manifests() if m.name == "it_helpdesk"), None)
+    assert manifest is not None
+    assert manifest.enabled is True
+    assert manifest.display_name == "IT Helpdesk 场景包"
+    assert len(manifest.agents) == 3
+    assert len(manifest.tools) == 4
+    assert manifest.features == ("tickets",)
+    assert manifest.knowledge_namespaces == ("it_default", "it_network", "it_assets")
 
 
 def test_code_agents_loaded_from_manifest():
     agents = loader.get_code_agents()
-    assert set(agents) == {"knowledge_qa", "order_service", "complaint_handler"}
+    assert set(agents) == {
+        "knowledge_qa",
+        "order_service",
+        "complaint_handler",
+        "it_knowledge",
+        "it_incident",
+        "it_asset",
+    }
     assert all(isinstance(cls, type) and issubclass(cls, BaseBusinessAgent) for cls in agents.values())
 
 
@@ -60,8 +80,25 @@ def test_custom_tools_loaded_from_manifest():
         "create_ticket",
         "update_ticket",
         "escalate",
+        "create_it_ticket",
+        "update_it_ticket",
+        "escalate_it",
+        "query_it_asset",
     }
     assert all(isinstance(cls, type) and issubclass(cls, BaseTool) for cls in tools.values())
+
+
+def test_pack_asset_maps_keep_pack_ownership():
+    agent_packs = loader.get_code_agent_packs()
+    tool_packs = loader.get_custom_tool_packs()
+    assert agent_packs["it_incident"] == "it_helpdesk"
+    assert agent_packs["order_service"] == "customer_service"
+    assert tool_packs["query_it_asset"] == "it_helpdesk"
+    assert tool_packs["query_order"] == "customer_service"
+
+
+def test_enabled_features_deduplicated():
+    assert loader.get_enabled_features() == ("tickets",)
 
 
 def test_kernel_registries_follow_manifest():
@@ -72,7 +109,14 @@ def test_kernel_registries_follow_manifest():
 
 def test_knowledge_namespaces_deduplicated_in_order():
     namespaces = loader.get_knowledge_namespaces()
-    assert namespaces == ("cs_default", "cs_order", "cs_after_sales")
+    assert namespaces == (
+        "cs_default",
+        "cs_order",
+        "cs_after_sales",
+        "it_default",
+        "it_network",
+        "it_assets",
+    )
     assert len(namespaces) == len(set(namespaces))
 
 
@@ -91,6 +135,7 @@ def test_parse_manifest_defaults_missing_fields(pack_root):
     assert manifest.version == "0.0.0"
     assert manifest.agents == ()
     assert manifest.knowledge_namespaces == ()
+    assert manifest.features == ()
 
 
 def test_load_manifests_skips_disabled_pack(pack_root, monkeypatch):
@@ -98,10 +143,14 @@ def test_load_manifests_skips_disabled_pack(pack_root, monkeypatch):
     _write_manifest(pack_root, "off_pack", "name: off_pack\nenabled: false\n")
     monkeypatch.setattr(loader, "PACKS_DIR", pack_root)
     loader.load_manifests.cache_clear()
+    loader.scan_manifests.cache_clear()
     try:
         assert [m.name for m in loader.load_manifests()] == ["on_pack"]
+        # scan 保留停用包，供运营台展示与“manifest 已停用不可开启”判定
+        assert [m.name for m in loader.scan_manifests()] == ["off_pack", "on_pack"]
     finally:
         loader.load_manifests.cache_clear()
+        loader.scan_manifests.cache_clear()
 
 
 # ===== 资产装载降级 =====

@@ -1,0 +1,31 @@
+# IT Helpdesk 场景包清单。
+# 与客服包同构：内核只读取这些通用字段装载资产，不解释业务含义。
+name: it_helpdesk
+display_name: IT Helpdesk 场景包
+version: 0.1.0
+enabled: true
+
+# 运营台能力开关：声明包需要的通用功能，由前端决定导航与页面是否可见。
+# tickets=工单管理（复用内核 tickets 表与 /admin/tickets 接口）。
+features:
+  - tickets
+
+# 包内代码 Agent：模块路径:类名（类需继承 BaseBusinessAgent，name 全局唯一）
+agents:
+  - app.packs.it_helpdesk.agents.knowledge_agent:ITKnowledgeAgent
+  - app.packs.it_helpdesk.agents.incident_agent:ITIncidentAgent
+  - app.packs.it_helpdesk.agents.asset_agent:ITAssetAgent
+
+# 包内自定义工具：模块路径:类名（类需继承 BaseTool，name 全局唯一，与 MCP 工具名共用唯一约束）
+tools:
+  - app.packs.it_helpdesk.tools.ticket_tool:CreateItTicketTool
+  - app.packs.it_helpdesk.tools.ticket_tool:UpdateItTicketTool
+  - app.packs.it_helpdesk.tools.ticket_tool:EscalateItTool
+  - app.packs.it_helpdesk.tools.asset_tool:QueryItAssetTool
+
+# 领域知识库命名空间：IT 通用 / 网络运维 / 资产使用
+knowledge:
+  namespaces:
+    - it_default
+    - it_network
+    - it_assets

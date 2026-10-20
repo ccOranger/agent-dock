@@ -172,7 +172,8 @@ $COMPOSE exec -T postgres pg_restore -U cs_user -d cs_db --clean --if-exists --n
   |------|------|
   | `init_db.sql` | 全量 schema（已去除 `uuid-ossp`/`pgvector` 依赖，UUID 用内置 `gen_random_uuid()`） |
   | `init_db.sh` | 本机一键建库 |
-  | `seed_data.py` | 种子定义：建表 + 初始人员/客户/Agent/工具/示例文档/MCP 配置（幂等，可对旧数据 upsert） |
+  | `seed_data.py` | 种子定义：建表 + 初始人员/客户/Agent/工具/示例文档/MCP 配置（含 IT 演示数据，幂等，可对旧数据 upsert） |
+  | `seed_it_kb.py` | 可选：把 IT 示例 FAQ 写入 Qdrant（需 embedding 可用；已存在同名跳过，单条失败继续） |
   | `rebuild_and_seed.py` | 开发阶段全量重建 + 灌种子（云库友好） |
   | `seed_memory_via_chat.py` | 模拟对话造记忆测试数据 |
   | `backup.sh` | 生产备份：pg_dump + Qdrant 快照 + 业务数据 + Redis RDB（带保留期） |

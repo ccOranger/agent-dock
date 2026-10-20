@@ -776,6 +776,20 @@ class AgentRepo:
                 await db.commit()
 
     @staticmethod
+    async def set_enabled_many(names: list[str], enabled: bool) -> int:
+        """批量设置已存在的 Agent 行（供场景包整体启停），返回受影响行数。"""
+        if not names:
+            return 0
+        async with SessionLocal() as db:
+            rows = (
+                (await db.execute(select(AgentMeta).where(AgentMeta.name.in_(names)))).scalars().all()
+            )
+            for row in rows:
+                row.enabled = enabled
+            await db.commit()
+            return len(rows)
+
+    @staticmethod
     async def create_dynamic(**fields) -> AgentMeta:
         async with SessionLocal() as db:
             row = AgentMeta(source="dynamic", **fields)
@@ -974,6 +988,7 @@ class TicketRepo:
             "status": t.status,
             "title": t.title,
             "content": t.content,
+            "metadata": dict(t.metadata_ or {}),
             "update_count": len(t.updates or []),
             "created_at": t.created_at.isoformat() if t.created_at else None,
             "updated_at": t.updated_at.isoformat() if t.updated_at else None,
@@ -992,6 +1007,7 @@ class TicketRepo:
         category: str = "general",
         urgency: str = "medium",
         title: str | None = None,
+        metadata_: dict | None = None,
     ) -> Ticket:
         async with SessionLocal() as db:
             row = Ticket(
@@ -1004,6 +1020,7 @@ class TicketRepo:
                 title=(title or content)[:256],
                 content=content[:4000],
                 updates=[],
+                metadata_=metadata_ or {},
             )
             db.add(row)
             await db.commit()

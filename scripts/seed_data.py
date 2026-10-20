@@ -22,6 +22,7 @@ from app.models.entities import (  # noqa: E402
     CustomerUser,
     Document,
     StaffUser,
+    Ticket,
     ToolMeta,
 )
 
@@ -134,6 +135,28 @@ SEED_AGENTS = [
         "enabled": True,
         "sort_order": 3,
     },
+    # IT Helpdesk 场景包（packs/it_helpdesk/manifest.yaml 声明，默认启用）
+    {
+        "name": "it_knowledge",
+        "display_name": "IT 知识问答",
+        "description": "IT 知识问答：账号、VPN、邮箱、打印机、办公软件与安全规范",
+        "enabled": True,
+        "sort_order": 4,
+    },
+    {
+        "name": "it_incident",
+        "display_name": "IT 故障受理",
+        "description": "IT 故障受理：设备/网络/账号/系统故障报修、建单、补充信息与升级人工",
+        "enabled": True,
+        "sort_order": 5,
+    },
+    {
+        "name": "it_asset",
+        "display_name": "IT 资产查询",
+        "description": "IT 资产查询：设备型号、序列号、领用人、保修期与网络配置",
+        "enabled": True,
+        "sort_order": 6,
+    },
 ]
 
 # 示例动态 Agent（source=dynamic，仅演示模式写入）：演示后台创建 + MCP 绑定
@@ -175,7 +198,83 @@ DEMO_DOCUMENTS = [
         "rag_namespace": "cs_after_sales",
         "chunk_count": 6,
     },
+    # IT Helpdesk 场景包知识（与 manifest 的 it_default/it_network/it_assets 对齐）
+    {
+        "title": "IT 服务台自助指南",
+        "source": "docs/it_helpdesk_guide.md",
+        "content_type": "text/markdown",
+        "status": "ready",
+        "rag_namespace": "it_default",
+        "chunk_count": 10,
+    },
+    {
+        "title": "办公网络与 VPN 故障排查手册",
+        "source": "docs/it_network_guide.md",
+        "content_type": "text/markdown",
+        "status": "ready",
+        "rag_namespace": "it_network",
+        "chunk_count": 9,
+    },
+    {
+        "title": "IT 资产领用与保修说明",
+        "source": "docs/it_asset_guide.md",
+        "content_type": "text/markdown",
+        "status": "ready",
+        "rag_namespace": "it_assets",
+        "chunk_count": 7,
+    },
 ]
+
+# 示例 IT 工单（仅演示模式写入）：覆盖 open/in_progress/escalated/resolved 四种状态
+DEMO_TICKETS = [
+    {
+        "ticket_no": "TK-IT0001",
+        "category": "it_network",
+        "urgency": "high",
+        "status": "open",
+        "title": "财务部 5F 无法连接 Wi-Fi",
+        "content": "财务部 5F 整层笔记本无法连接 Wi-Fi，有线网络正常，开始时间 09:20，影响约 12 人。",
+        "updates": [],
+        "metadata_": {"pack": "it_helpdesk"},
+    },
+    {
+        "ticket_no": "TK-IT0002",
+        "category": "it_hardware",
+        "urgency": "medium",
+        "status": "in_progress",
+        "title": "笔记本开机黑屏并伴随风扇异响",
+        "content": "资产编号 IT-LT-1002 的 ThinkPad 开机黑屏，风扇持续高速运转，已尝试长按电源键重启无效。",
+        "updates": [
+            {"content": "已远程确认电源与内存状态，建议送修检测主板。", "at": "2026-10-19T10:30:00+08:00"}
+        ],
+        "metadata_": {"pack": "it_helpdesk"},
+    },
+    {
+        "ticket_no": "TK-IT0003",
+        "category": "it_account",
+        "urgency": "high",
+        "status": "escalated",
+        "title": "邮箱账号异地登录疑似被盗",
+        "content": "收到异地登录提醒，发件箱出现未知邮件，疑似账号被盗，已升级安全事件处理。",
+        "updates": [
+            {"content": "升级 IT 人工：账号被盗需立即冻结并重置密码。", "at": "2026-10-19T14:05:00+08:00"}
+        ],
+        "metadata_": {"pack": "it_helpdesk"},
+    },
+    {
+        "ticket_no": "TK-IT0004",
+        "category": "it_software",
+        "urgency": "low",
+        "status": "resolved",
+        "title": "Office 激活失败提示密钥无效",
+        "content": "Office 365 激活失败，提示产品密钥无效；已通过重新登录企业账号完成激活。",
+        "updates": [
+            {"content": "已指导用户重新登录企业账号并完成激活。", "at": "2026-10-18T16:40:00+08:00"}
+        ],
+        "metadata_": {"pack": "it_helpdesk"},
+    },
+]
+
 
 ACTIVE_STAFF = (
     DEMO_STAFF
@@ -193,6 +292,7 @@ ACTIVE_CUSTOMERS = DEMO_CUSTOMERS if DEMO_MODE else []
 ACTIVE_TOOLS = SEED_TOOLS + DEMO_TOOLS if DEMO_MODE else SEED_TOOLS
 ACTIVE_DYNAMIC_AGENTS = DEMO_DYNAMIC_AGENTS if DEMO_MODE else []
 ACTIVE_DOCUMENTS = DEMO_DOCUMENTS if DEMO_MODE else []
+ACTIVE_TICKETS = DEMO_TICKETS if DEMO_MODE else []
 
 
 async def main() -> None:
@@ -272,6 +372,12 @@ async def main() -> None:
             ).scalar_one_or_none()
             if row is None:
                 db.add(Document(**d))
+        for t in ACTIVE_TICKETS:
+            row = (
+                await db.execute(select(Ticket).where(Ticket.ticket_no == t["ticket_no"]))
+            ).scalar_one_or_none()
+            if row is None:
+                db.add(Ticket(**t))
         # 固定话术：从种子定义落库（运行时只读表，代码里无兜底）；存过就不覆盖（后台可能改过文案），只补种子标记
         from app.agents.canned_scripts import SEED_RULES
 
@@ -301,7 +407,7 @@ async def main() -> None:
         f"✅ seed 完成{demo_tag}：{len(ACTIVE_STAFF)} 后台人员 + "
         f"{len(ACTIVE_CUSTOMERS)} 客户 + {len(ACTIVE_TOOLS)} 工具 + "
         f"{len(SEED_AGENTS)} 代码 Agent + {len(ACTIVE_DYNAMIC_AGENTS)} 动态 Agent + "
-        f"{len(ACTIVE_DOCUMENTS)} 示例文档 + {len(SEED_RULES)} 条固定话术"
+        f"{len(ACTIVE_DOCUMENTS)} 示例文档 + {len(ACTIVE_TICKETS)} 示例工单 + {len(SEED_RULES)} 条固定话术"
     )
     if DEMO_MODE:
         print("   演示账号：admin/Admin@123、service01/Agent@123、alice/Alice@123")

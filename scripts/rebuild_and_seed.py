@@ -27,6 +27,7 @@ from seed_data import (  # noqa: E402
     ACTIVE_DOCUMENTS,
     ACTIVE_DYNAMIC_AGENTS,
     ACTIVE_STAFF,
+    ACTIVE_TICKETS,
     ACTIVE_TOOLS,
     ADMIN_PASSWORD,
     ADMIN_PASSWORD_GENERATED,
@@ -117,6 +118,12 @@ def build_sql() -> str:
             f"({lit(d['title'])}, {lit(d['source'])}, {lit(d['content_type'])}, {lit(d['status'])}, "
             f"{lit(d['rag_namespace'])}, {lit(d['chunk_count'])}, 'upload');"
         )
+    for t in ACTIVE_TICKETS:
+        parts.append(
+            "INSERT INTO tickets (ticket_no, category, urgency, status, title, content, updates, metadata) VALUES "
+            f"({lit(t['ticket_no'])}, {lit(t['category'])}, {lit(t['urgency'])}, {lit(t['status'])}, "
+            f"{lit(t['title'])}, {lit(t['content'])}, {lit(t['updates'])}, {lit(t['metadata_'])});"
+        )
 
     return "\n".join(parts)
 
@@ -153,12 +160,13 @@ async def main() -> None:
                 "(select count(*) from agents) agents, "
                 "(select count(*) from tools) tools, "
                 "(select count(*) from documents) docs, "
+                "(select count(*) from tickets) tickets, "
                 "(select count(*) from request_traces) traces"
             )
             print(
                 f"   行数 -> staff={row['staff']} customer={row['cust']} "
                 f"agents={row['agents']} tools={row['tools']} "
-                f"documents={row['docs']} traces={row['traces']}"
+                f"documents={row['docs']} tickets={row['tickets']} traces={row['traces']}"
             )
         finally:
             await vconn.close()

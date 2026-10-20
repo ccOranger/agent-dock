@@ -156,6 +156,9 @@ display_name: 客服/售后场景包
 version: 0.1.0
 enabled: true
 
+# 运营台通用能力声明：任一启用包声明 tickets 即显示工单入口（M4）
+features: [tickets]
+
 # 包内代码 Agent：模块路径:类名，类需继承 BaseBusinessAgent，name 全局唯一
 agents:
   - app.packs.customer_service.agents.knowledge_agent:KnowledgeAgent
@@ -180,6 +183,7 @@ knowledge:
 | `agents` | 已实现 | `packs.loader.get_code_agents()` 导入并校验子类、name 唯一 |
 | `tools` | 已实现 | `packs.loader.get_custom_tools()` → `tools/custom_catalog` |
 | `knowledge.namespaces` | 已实现（声明） | `get_knowledge_namespaces()` 去重保序；检索收敛待 P1 |
+| `features` | 已实现（M4） | 声明 `tickets` 等运营台能力；前端据此显隐导航，包启停聚合接口见 [场景包指南](./packs.md) |
 | `response_templates` / `routing` / `ui` | 待 P2 | 话术、信号规则、前端导航目前仍在内核 |
 
 内核只读这些通用字段，不解释业务含义；新增场景包时复制目录与 manifest 即可，内核零改动。
