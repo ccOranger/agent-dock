@@ -25,7 +25,8 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  // 开发为 /，生产镜像挂在 /admin/（由 Vite base 注入）
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
 

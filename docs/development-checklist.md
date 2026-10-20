@@ -119,34 +119,37 @@
 
 ### M2 一键部署与初始化（发布关键路径）
 
-- [ ] **M2-1 后端镜像**（1d）
+- [x] **M2-1 后端镜像**（1d）
   - Python 3.12-slim；非 root；依赖层缓存；`/health` HEALTHCHECK
   - 镜像内含 MCP stdio 所需的 Python 运行时
-  - 验收：镜像可启动并通过健康检查
-- [ ] **M2-2 前端镜像**（1d）
-  - 一个 web 镜像：多阶段构建管理端与聊天端两个产物，Nginx 托管
+  - 验收：镜像可启动并通过健康检查（实测 19s healthy；镜像 1.53GB，含 spacy/onnxruntime 等文档解析依赖）
+- [x] **M2-2 前端镜像**（1d）
+  - 一个 web 镜像：多阶段构建管理端与聊天端 两个产物，Nginx 托管
   - 路由：`/` 聊天端、`/admin/` 管理端（管理端 `base: '/admin/'`）
   - `/api` 反代后端；SSE 关闭缓冲
-  - 验收：单容器可访问两个入口并登录
-- [ ] **M2-3 Compose 编排**（1–2d）
+  - 验收：单容器可访问两个入口并登录（`/admin/assets/*` 200；经 8080 的 SSE 实测 31 个 text 块增量到达）
+- [x] **M2-3 Compose 编排**（1–2d）
   - `postgres`（pgvector）、`qdrant`、`redis`、`backend`、`web`（一个 Nginx 托管两个前端产物）
   - 命名卷、healthcheck、`depends_on`；`.env.example` 全量配置
-  - 验收：一条命令全部 healthy
-- [ ] **M2-4 初始化数据**（0.5d）
+  - 验收：一条命令全部 healthy（`docker compose up -d` 后 5 个服务均 healthy）
+- [x] **M2-4 初始化数据**（0.5d）
   - 首次启动执行 `init_db.sql`；`SEED_DEMO=true` 时导入演示数据
-  - 验收：空库启动后可直接登录
-- [ ] **M2-5 初始化向导**（2–3d）
+  - 验收：空库启动后可直接登录（首启 `init_db` 执行 43 条；重启执行 22 条、跳过 21 条已存在对象；seed 幂等）
+- [x] **M2-5 初始化向导**（2–3d）
   - 二选一：CLI `python -m app.setup` 或 Web `POST /api/v1/setup`
   - 创建管理员、生成随机 JWT、写入配置、测试模型连通性
-  - 验收：全新环境按向导完成配置，无需手工 SQL
-- [ ] **M2-6 自检与错误提示**（1d）
+  - 验收：全新环境按向导完成配置，无需手工 SQL（容器内实测创建 qa_admin 并成功登录；纯函数单测覆盖 env 写回/凭据校验/弱密钥判定）
+- [x] **M2-6 自检与错误提示**（1d）
   - 启动日志明确输出数据库/Qdrant/Redis/模型状态；失败给可操作提示
-  - 验收：断掉 Qdrant 时错误可读
-- [ ] **M2-7 反向代理样例**（0.5d）
+  - 验收：断掉 Qdrant 时错误可读（自检单行 `RuntimeError: 启动中止：Qdrant 不可用（qdrant:6333）：ConnectError`，不再抛 qdrant-client 长堆栈）
+- [x] **M2-7 反向代理样例**（0.5d）
   - Nginx 配置：SSE、`X-Forwarded-For`、`TRUSTED_PROXIES` 说明
-- [ ] **M2-8 全新机器验收**（0.5d）
+  - 样例见 `docker/nginx.conf`（SSE 关闭缓冲、`/health`、SPA 回退、25m 上传上限，Docker DNS 动态解析 backend）；`/metrics` 不对外暴露（走鉴权的 `/api/v1/admin/metrics`）；runbook §9 已写采信规则
+- [x] **M2-8 全新机器验收**（0.5d）
   - 清空本地环境，从 README 走一遍，记录耗时与卡点
-  - 验收：30 分钟内完成首次对话
+  - 验收：30 分钟内完成首次对话（冷构建后端 ~4min、前端 ~1.5min，`up` 到全 healthy ~75s，首条回复 ~11s，合计 <10min）
+
+> M2 验收（2026-10-20）：`docker compose up -d --build` 一条命令拉起 5 个服务；空库首启自动建表/种子，重启幂等；客户/后台双入口经 8080 登录与 SSE 全部通过；401 → refresh → 重放链路正常；两套 token key 同源不同键、互不覆盖。
 
 ### M3 文档与演示物料
 

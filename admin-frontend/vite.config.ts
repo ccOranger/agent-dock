@@ -2,8 +2,10 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-// 管理后台：独立端口 5174，与客户前端(5173)分离，共用同一后端
+// 管理后台：独立端口 5174，与客户前端(5173)分离，共用同一后端。
+// 生产镜像由 Nginx 挂在 /admin/ 下（构建时 VITE_BASE=/admin/），开发模式保持根路径。
 export default defineConfig({
+  base: process.env.VITE_BASE || '/',
   plugins: [vue()],
   resolve: {
     alias: {

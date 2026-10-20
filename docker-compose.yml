@@ -1,0 +1,112 @@
+name: smart-cs
+
+# 一键部署：docker compose up -d
+# 环境变量从仓库根 .env 读取（可先 cp backend/.env.example .env 再改）
+# 需要 Docker Compose v2.24+（支持 env_file.required）
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cs_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cs_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-cs_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrantdata:/qdrant/storage
+    healthcheck:
+      # 镜像内无 curl/wget，用 bash 的 /dev/tcp 探测 6333
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # 容器内固定指向服务名，覆盖 .env 里的 localhost / 云库地址
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cs_user}:${POSTGRES_PASSWORD:-cs_pass}@postgres:5432/${POSTGRES_DB:-cs_db}
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ""
+      RAG_KB_ROOT: /app/backend/data/knowledge_bases
+      RAG_DOC_ARCHIVE_ROOT: /app/backend/data/doc_archives
+      # JWT_SECRET 必须显式提供：Compose 从仓库根 .env 或 shell 读取，未设置会拒绝启动
+      JWT_SECRET: ${JWT_SECRET:?未设置 JWT_SECRET：请在仓库根 .env 填入强随机值（如 openssl rand -base64 48）}
+      # 生产部署请改为 production
+      APP_ENV: ${APP_ENV:-development}
+      # 演示数据：false 时只建管理员，密码仅首次在日志打印
+      SEED_DEMO: ${SEED_DEMO:-false}
+      # 只采信 Nginx 容器（web 的静态 IP）转发的 X-Forwarded-For，避免直连伪造
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.28.0.10/32}
+    volumes:
+      - backenddata:/app/backend/data
+      - memorydata:/app/backend/memory_data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      # 仅绑定宿主机回环：对外只暴露 web(8080)，防止绕过 Nginx 伪造 X-Forwarded-For
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      default:
+        # 固定 IP 供 backend 的 TRUSTED_PROXIES 精确采信（见 backend.environment）
+        ipv4_address: 172.28.0.10
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+
+networks:
+  # 固定子网，保证 Nginx 静态 IP 稳定；若与宿主既有网络冲突，改此处与 web 的 ipv4_address
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  pgdata:
+  qdrantdata:
+  redisdata:
+  backenddata:
+  memorydata:

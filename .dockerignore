@@ -1,0 +1,15 @@
+# 构建上下文用仓库根：排除依赖、构建产物与本地运行数据
+.git
+.github
+docs
+*.png
+
+**/node_modules
+**/dist
+**/__pycache__
+backend/.venv
+backend/.env
+.env
+backend/.pytest_cache
+backend/data
+backend/memory_data

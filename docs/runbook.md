@@ -15,7 +15,35 @@
 > **向量不落 PostgreSQL**：HelloAgents 的记忆（episodic/perceptual/semantic）与 RAG 分块向量都存在 **Qdrant**（`QDRANT_COLLECTION`，默认 `hello_agents_vectors`）。`documents`/`memories` 表只是**归档镜像**，运行时以 Qdrant 为准（见 §5）。
 > **semantic 记忆硬依赖 Neo4j**：`MEMORY_TYPES` 默认 `working,episodic,perceptual`（不含 `semantic`）。未部署 Neo4j 时若加入 `semantic`，启动会因连接失败中断。部署 Neo4j 后置 `MEMORY_TYPES=working,episodic,semantic,perceptual` 并填 `NEO4J_*` 即可启用。
 
-## 2. 一键启动 / 停止（Windows 开发环境）
+## 2. 一键部署与启动
+
+### 2.1 Docker Compose（生产 / 演示环境）
+
+```bash
+cp backend/.env.example .env    # 至少填 LLM_* 与 EMBED_*；SEED_DEMO=true 注入演示账号
+docker compose up -d --build
+docker compose ps               # postgres/qdrant/redis/backend 应为 healthy
+```
+
+| 入口 | 地址 | 说明 |
+|------|------|------|
+| 客户对话端 | `http://<host>:8080/` | 聊天端静态产物 + `/api` 反向代理 |
+| 管理后台 | `http://<host>:8080/admin/` | Vite `base=/admin/`，SPA 回退到 `admin/index.html` |
+| 后端直连 | `http://127.0.0.1:8000/docs` | 仅宿主机回环可访问（端口绑定 `127.0.0.1`）；生产只对外暴露 8080 |
+| 指标 | `http://<host>:8080/api/v1/admin/metrics` | 需管理员 Bearer token；Nginx 不再对外暴露 `/metrics` |
+
+- 命名卷：`pgdata` / `qdrantdata` / `redisdata` / `backenddata`（知识库与归档）/ `memorydata`（记忆持久化）
+- 首次启动：`backend` 入口脚本先执行 `init_db.py`（跑 `init_db.sql`，幂等建表 + 知识库种子 + 增量列），再执行 `seed_data.py`
+- 初始管理员：`SEED_DEMO=false` 时随机密码仅在 `docker compose logs backend` 打印一次；`SEED_DEMO=true` 时为 admin/Admin@123
+- 密钥：compose 强制要求 `JWT_SECRET`（未设置直接拒绝启动）；首次部署请生成强随机值写入仓库根 `.env`
+- 更新：`docker compose up -d --build`；清空重来：`docker compose down -v`
+- 自检：启动日志含 `[自检] 数据库 / Redis / Qdrant / 模型` 四行；数据库/Qdrant 不可用会中断启动（DB 探测 10s 超时），Redis/模型给出可操作告警（M2-6）
+- Nginx 通过 Docker 内置 DNS 动态解析 `backend`（`resolver 127.0.0.11` + upstream `resolve`），backend 重建换 IP 后无需重启 web
+
+> 裸机/自定义环境可用 `cd backend && python -m app.setup`：建表 + 创建管理员 + 生成随机 JWT + 测试模型连通性（M2-5）。
+> `JWT_SECRET` 以 `--env-file` 为唯一真源，且写回后权限为 `0600`；Compose 部署请传 `--env-file ../.env`（仓库根）。
+
+### 2.2 Windows 开发环境（热更新）
 
 ```powershell
 # 拉起后端 + 客户前端(5173) + 管理后台(5174)，各占独立 PowerShell 窗口
@@ -52,6 +80,8 @@
 | 新建的动态 Agent 总路由不到 | 后台「路由分发器」→「候选 Agent 清单」定位原因：不在表里 = 被禁用/未启用；在表里但「线索完整度 = 仅描述」= 没填 `routing_keywords`，提示词里只有一行适用范围；填了多条却不命中 = 超出前 12 个未注入，或关键词/典型问法与客户真实说法不贴合（[U12](updates/12-agent-routing-clues.md)） |
 | 启动日志告警「DB 中存在未在代码注册的 code Agent（已失效）」 | 代码已下线但 agents 表残留 `source=code` 行；**不再阻断启动**，该类行在后台 Agent 列表标「已失效」，可直接在后台删除（见 [U11](updates/11-code-agent-transparency-state.md)） |
 | 启动因连接失败中断，日志涉及 Neo4j | `MEMORY_TYPES` 含 `semantic` 但未部署 Neo4j；去掉 `semantic` 或起 Neo4j |
+| Windows 上 Docker Desktop 报 `unable to start` / `docker info` 失败 | 先 `wsl --update` 安装内核，重启 Docker Desktop；仍失败时确认 BIOS 虚拟化与 WSL2 已启用 |
+| 启动日志 `[自检] Qdrant: 不可用…` 后退出 | Qdrant 是记忆/RAG 硬依赖：`docker compose ps` 看 qdrant 是否 healthy；修好后 `docker compose up -d backend` 重建即可（Nginx 已做动态 DNS，无需重启 web） |
 | SSE 无 `route` 事件 | 检查 LLM_API_KEY / 路由模型可达性；看日志 `路由结果解析失败`；**例外**：命中固定话术的轮次本来就没有 `route` 事件，链路里只有一个 `canned.script` span（[U16](updates/16-canned-scripts-db.md)） |
 | 寒暄/「你是谁」这类提问直接转人工、无任何应答 | 先看链路：这三类正常应由固定话术在路由之前逐字应答（[U16](updates/16-canned-scripts-db.md)），出现 `handover` 说明对应话术被停用、被删掉，或表里压根没数据（代码里无兜底，新库必须跑 `scripts/seed_data.py`）：后台「固定话术」页用命中测试确认。走路由的轮次才是该轮被判「不贴合任何 Agent」→ 兜底意图（置信度固定 0.3）低于阈值即整轮 `handover(low_confidence)`：确认 `ROUTER_FALLBACK_ANSWER=true`（默认）且兜底 Agent 的 `routing_keywords` 已认领元问题（[U14](updates/14-fallback-answer-path.md)）；链路页 `route.intent` span 的 `is_fallback` 可辨识兜底轮 |
 | 后台改了固定话术却不生效 | 运行时只读 `canned_scripts` 表（代码里无兜底）：先查该行的 `enabled` 与 `reply_text`（正文为空视为未配，会被丢弃）；日志 `固定话术读取失败，本轮跳过话术判定` 说明表缺失/读挂，此时话术完全不生效（对话不受影响），跑 `scripts/seed_data.py` 补建表与种子 |
@@ -137,12 +167,14 @@ cd d:\project\smart-cs\backend; $env:PYTHONIOENCODING="utf-8"
 | `ROUTER_MODEL` / `ROUTER_CONFIDENCE_THRESHOLD` / `ROUTER_MAX_INTENTS` / `ROUTER_FALLBACK_ANSWER` | deepseek-flash / 0.5 / 2 / true | 路由模型需与 LLM provider 匹配；`ROUTER_MAX_INTENTS=1` 关闭多意图；`ROUTER_FALLBACK_ANSWER=false` 时「不贴合任何 Agent」的兜底轮恢复为直接转人工（[U14](updates/14-fallback-answer-path.md)）。路由分发器不入库、不可后台修改，只读查看见「路由分发器」页（[U13](updates/13-router-agent-readonly.md)） |
 | `RAG_KB_ROOT` / `RAG_DOC_ARCHIVE_ROOT` | ./data/knowledge_bases / ./data/doc_archives | RAG 库根 / 原文归档（后台下载） |
 | `TRACE_ENABLED` / `TRACE_STORE_PAYLOAD` / `TRACE_SAMPLE_RATE` / `TRACE_RETENTION_DAYS` | true / true / 1.0 / 30 | 链路采集开关/存原文/采样/保留 |
-| `JWT_SECRET` / `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | change_me_in_prod / 7200 / 604800 | 生产务必换密钥 |
+| `JWT_SECRET` / `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | change_me_in_prod / 7200 / 604800 | Compose 必须显式设置，否则拒绝启动；生产务必换强随机密钥 |
 
 ## 9. 安全
 
 - 生产必须更换 `JWT_SECRET`、seed 账号密码（admin / service01 / alice，见 README）。
-- 反向代理需关闭 SSE 缓冲（Nginx：`proxy_buffering off;`）并设 `proxy_read_timeout ≥ 300s`。
-- CORS：`ALLOWED_ORIGINS` 默认放行 5173/5174（含 127.0.0.1 变体），生产改为实际域名白名单。
+- 反向代理需关闭 SSE 缓冲（Nginx：`proxy_buffering off;`）并设 `proxy_read_timeout ≥ 300s`；仓库自带 `docker/nginx.conf` 已配置，样本可直接参考。
+- 代理链采信：仅当直连对端命中 `TRUSTED_PROXIES`（逗号分隔 IP/CIDR）时才采信 `X-Forwarded-For`；compose 默认只采信 Nginx 容器静态 IP `172.28.0.10/32`（固定子网 `172.28.0.0/24`），backend 端口只绑 `127.0.0.1`，无法从外部直连伪造。从旧版本升级时，若 `.env` 仍写着 `TRUSTED_PROXIES=172.16.0.0/12`，请删掉该行或改为 `172.28.0.10/32`（env 优先于 compose 默认值）。
+- 上传限制：`UPLOAD_MAX_SIZE_MB=20`（后端）与 Nginx `client_max_body_size 25m` 配套；调大时两处同步。
+- CORS：`ALLOWED_ORIGINS` 默认放行 5173/5174（含 127.0.0.1 变体），生产改为实际域名白名单；单镜像部署下前后端同源，无需额外放行 8080。
 - 限流：单用户对话 20/min、上传 10/h、登录 10/min/IP。
 - 人员/客户分表：后台接口一律 `require_staff`（agent/admin），写操作多为 `require_admin`；客户接口仅能访问本人会话/记忆。

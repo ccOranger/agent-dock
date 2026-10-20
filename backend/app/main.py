@@ -14,6 +14,7 @@ from app.core.config import settings, validate_runtime_config
 from app.core.constants import API_PREFIX
 from app.core.context_engineer import drain_background_tasks
 from app.core.logging import new_trace_id, setup_logging
+from app.core.selfcheck import run_startup_selfcheck
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ for _stream in (sys.stdout, sys.stderr):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_runtime_config()
+    await run_startup_selfcheck()
     init_hello_agents()
     await validate_agents_sync()
     yield

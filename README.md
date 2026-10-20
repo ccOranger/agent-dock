@@ -48,6 +48,28 @@ docs/            spec.md（规范 v2.0）/ api.md（接口速查）/ runbook.md�
   - **LLM / Embedding 服务**（OpenAI 兼容端点即可，如 DashScope）
 - `hello-agents==0.2.9`（配套约束：`qdrant-client<1.10`、`bcrypt==4.0.1`，已钉在 `requirements.txt`）
 
+### 方式 A：Docker Compose（一条命令起全套）
+
+前置：Docker Desktop / Docker Engine + Compose v2.24+，本机无需 Python/Node。
+
+```powershell
+copy backend\.env.example .env       # 必须填 LLM_* / EMBED_* / JWT_SECRET（强随机，如 openssl rand -base64 48）
+docker compose up -d --build         # 首次构建 5~8 分钟（pip 依赖较多）；未设 JWT_SECRET 会拒绝启动
+docker compose ps                    # postgres/qdrant/redis/backend 应为 healthy（web 为 Up）
+```
+
+- 客户对话端：http://localhost:8080
+- 管理后台：http://localhost:8080/admin/（用 admin 角色登录）
+- 后端调试：http://localhost:8000/docs（仅宿主机回环可访问）
+- 首次启动自动执行 `init_db.sql`（幂等建表 + 知识库种子）与 `seed_data.py`
+- `SEED_DEMO=false` 时随机管理员密码只在 `docker compose logs backend` 打印一次
+- 停止：`docker compose down`；连数据一起清空：`docker compose down -v`
+- 端口冲突：在 `.env` 改 `BACKEND_PORT`（仅本机绑定）/ `WEB_PORT`
+
+> 启动日志会先输出 `[自检] 数据库 / Redis / Qdrant / 模型`，失败时给出对应排查提示。
+
+> **方式 B：本地开发（热更新）**——以下 1~5 步适用于需要改代码、调试的场景。
+
 ### 1. 数据库
 
 ```bash

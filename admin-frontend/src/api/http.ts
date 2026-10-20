@@ -7,7 +7,8 @@ import { createHttpClient } from '@shared'
 const client = createHttpClient({
   tokenKey: 'cs_admin_access_token',
   refreshKey: 'cs_admin_refresh_token',
-  loginPath: '/login',
+  // 生产镜像部署在 /admin/ 下，登录页需带 base 前缀（开发时 BASE_URL 为 /）
+  loginPath: `${import.meta.env.BASE_URL}login`,
 })
 
 export const http = client.http

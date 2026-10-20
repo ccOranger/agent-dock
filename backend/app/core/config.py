@@ -125,13 +125,17 @@ def get_settings() -> Settings:
 settings = get_settings()
 
 
+def is_weak_jwt_secret(secret: str) -> bool:
+    """HS256 建议 ≥32 字节随机串；仅黑名单匹配挡不住 changeme / 123456 这类弱密钥。"""
+    value = (secret or "").strip()
+    return len(value) < 32 or value in {"change_me_in_prod", "dev", "secret"}
+
+
 def validate_runtime_config() -> None:
     """启动自检：生产环境禁止使用默认/过短的 JWT 密钥（否则 token 可被伪造）。"""
     if settings.app_env.strip().lower() not in {"prod", "production"}:
         return
-    secret = settings.jwt_secret.strip()
-    # HS256 建议 ≥32 字节随机串；仅黑名单匹配挡不住 changeme / 123456 这类弱密钥
-    if len(secret) < 32 or secret in {"change_me_in_prod", "dev", "secret"}:
+    if is_weak_jwt_secret(settings.jwt_secret):
         raise RuntimeError(
             "生产环境必须通过环境变量 JWT_SECRET 配置 ≥32 字节的随机密钥"
         )
