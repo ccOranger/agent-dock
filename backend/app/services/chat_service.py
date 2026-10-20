@@ -97,7 +97,8 @@ class ChatService:
                         session.last_route_to = routed_to
                     if etype == "text":
                         piece = data.get("content", "") if isinstance(data, dict) else str(data)
-                        assistant_content += sanitize_output(piece)
+                        # 先累积原文，整段落库前统一脱敏：逐 chunk 处理会漏掉被边界切开的号码
+                        assistant_content += piece
                     yield sse_event(etype, data)
             except Exception as exc:  # noqa: BLE001
                 # 客户端断开走 GeneratorExit，不落链路；真正的服务端异常必须留痕
@@ -106,6 +107,7 @@ class ChatService:
                 await self._persist_trace(collector)
                 raise
 
+            assistant_content = sanitize_output(assistant_content)
             collector.response_chars = len(assistant_content)
             msg = await MessageRepo.add(
                 session.id,
@@ -119,8 +121,8 @@ class ChatService:
             await db.commit()
 
         collector.mark_finished()
+        # 先落 trace 再下发 done：客户端收到 done 常立即断连，yield 之后的代码可能不再执行
         await self._persist_trace(collector)
-
         yield sse_event("done", {"message_id": str(msg.id), "trace_id": collector.trace_id})
 
     async def reply(

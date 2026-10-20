@@ -214,6 +214,8 @@ class Orchestrator:
     def __init__(self):
         self.router = RouterAgent()
         self.ctx_engineer = ContextEngineer()
+        # 单轮内的上下文缓存：多意图共享同一 query，避免重复做记忆/知识库检索
+        self._ctx_cache: dict[tuple[str, str, tuple[str, ...]], str] = {}
 
     @staticmethod
     async def _astream(
@@ -273,6 +275,7 @@ class Orchestrator:
         - collector：链路采集器（app.core.tracing.TraceCollector），为空则不采集
         """
         max_intents = max(1, int(max_intents if max_intents is not None else settings.router_max_intents))
+        self._ctx_cache.clear()
 
         # ---- 0. 高频固定话术（身份 / 能力 / 探听配置）：命中则逐字下发硬模板 ----
         # 不进路由、不建 Agent：措辞完全可控，同时省掉路由 LLM + MCP 建连 + RAG/记忆检索的数秒等待。
@@ -464,8 +467,10 @@ class Orchestrator:
         if collector:
             collector.record_outcome(OUTCOME_ANSWERED)
 
-        # ---- 7. 异步归档记忆（一轮只归档一次，记在主意图名下；主意图回落时记实际承接的 Agent） ----
-        await self.ctx_engineer.persist_after_run(
+        # ---- 7. 归档记忆（一轮只归档一次，记在主意图名下；主意图回落时记实际承接的 Agent） ----
+        # 放到后台执行：两次 embedding + 镜像 upsert 不应拦住 done 事件与连接释放。
+        # FakeCtx（测试）只实现 persist_after_run 时保留 await 回退，保证接口兼容。
+        archive_kwargs = dict(
             user_id=user_id,
             session_id=session_id,
             query=query,
@@ -474,6 +479,12 @@ class Orchestrator:
             message_id=user_message_id,
             collector=collector,
         )
+        schedule = getattr(self.ctx_engineer, "schedule_after_run", None)
+        if schedule is not None:
+            # 后台归档不再往共享 collector 写 span：与 trace 落库并发会造成 span 时有时无
+            schedule(**{**archive_kwargs, "collector": None})
+        else:
+            await self.ctx_engineer.persist_after_run(**archive_kwargs)
 
     async def _run_business_agent(
         self,
@@ -499,13 +510,18 @@ class Orchestrator:
                     collector.add_unique("mcp_server_names", name)
 
         # ---- 上下文工程 ----
+        # 多意图共享同一 query：按 (用户, query, 命名空间) 缓存，第二个意图不再重复检索
         rag_namespaces = await self._resolve_rag_namespaces(business_agent)
-        enriched_query = await self.ctx_engineer.build(
-            user_id=user_id,
-            query=query,
-            rag_namespaces=rag_namespaces,
-            collector=collector,
-        )
+        cache_key = (user_id, query, tuple(rag_namespaces))
+        enriched_query = self._ctx_cache.get(cache_key)
+        if enriched_query is None:
+            enriched_query = await self.ctx_engineer.build(
+                user_id=user_id,
+                query=query,
+                rag_namespaces=rag_namespaces,
+                collector=collector,
+            )
+            self._ctx_cache[cache_key] = enriched_query
 
         # ---- 构建 SimpleAgent 并流式执行（stream_run 为同步生成器，桥接为异步流）----
         # build() 内部会构造 MCPTool，而 MCPTool.__init__ 的 _discover_tools() 是

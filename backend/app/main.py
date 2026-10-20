@@ -1,4 +1,5 @@
 """FastAPI 应用入口"""
+import logging
 import sys
 from contextlib import asynccontextmanager
 
@@ -9,9 +10,12 @@ from prometheus_client import generate_latest
 
 from app.api.v1.router import api_router
 from app.core.bootstrap import bootstrap, init_hello_agents, validate_agents_sync
-from app.core.config import settings
+from app.core.config import settings, validate_runtime_config
 from app.core.constants import API_PREFIX
+from app.core.context_engineer import drain_background_tasks
 from app.core.logging import new_trace_id, setup_logging
+
+logger = logging.getLogger(__name__)
 
 # Windows 控制台默认 GBK 编码，而 hello_agents 的 MCP 客户端用裸 print 输出 emoji
 # （📝/🔗/✅ 等），会抛 UnicodeEncodeError 并被工具发现逻辑静默吞掉，导致 MCP 工具列表为空。
@@ -25,10 +29,15 @@ for _stream in (sys.stdout, sys.stderr):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_runtime_config()
     init_hello_agents()
     await validate_agents_sync()
     yield
-    bootstrap.shutdown()
+    # 先排空后台记忆归档再关资源：否则热重启/滚动发布时正在归档的轮次会被取消丢弃
+    try:
+        await drain_background_tasks()
+    finally:
+        bootstrap.shutdown()
 
 
 setup_logging(settings.log_level)
@@ -52,6 +61,7 @@ app.add_middleware(
 @app.middleware("http")
 async def trace_middleware(request: Request, call_next):
     trace_id = request.headers.get("X-Trace-Id") or new_trace_id()
+    request.state.trace_id = trace_id
     response = await call_next(request)
     response.headers["X-Trace-Id"] = trace_id
     return response
@@ -59,6 +69,11 @@ async def trace_middleware(request: Request, call_next):
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
+    # 未捕获异常必须留堆栈：否则线上只能看到一句“内部错误”，无从定位
+    logger.error(
+        f"未处理异常: {request.method} {request.url.path} trace_id={getattr(request.state, 'trace_id', '-')}",
+        exc_info=exc,
+    )
     return JSONResponse(
         status_code=500,
         content={"code": 5001, "message": "内部错误", "data": None},

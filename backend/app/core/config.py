@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = 64
     rag_top_k: int = 5
     rag_min_score: float = 0.3
+    # 单次上传文档大小上限（MB）：超限在落盘阶段直接拒绝，避免磁盘/内存被拖垮
+    upload_max_size_mb: int = 20
 
     # ===== 数据库 =====
     database_url: str = "postgresql+asyncpg://cs_user:cs_pass@localhost:5432/cs_db"
@@ -78,6 +80,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl: int = 7200
     refresh_token_ttl: int = 604800
+    # 反向代理白名单（逗号分隔 IP/CIDR）：仅当直连对端命中时才采信 X-Forwarded-For
+    trusted_proxies: str = ""
+
+    @property
+    def trusted_proxy_list(self) -> list[str]:
+        return [p.strip() for p in self.trusted_proxies.split(",") if p.strip()]
 
     # ===== 记忆阈值 =====
     memory_importance_threshold: float = 0.35
@@ -115,3 +123,15 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def validate_runtime_config() -> None:
+    """启动自检：生产环境禁止使用默认/过短的 JWT 密钥（否则 token 可被伪造）。"""
+    if settings.app_env.strip().lower() not in {"prod", "production"}:
+        return
+    secret = settings.jwt_secret.strip()
+    # HS256 建议 ≥32 字节随机串；仅黑名单匹配挡不住 changeme / 123456 这类弱密钥
+    if len(secret) < 32 or secret in {"change_me_in_prod", "dev", "secret"}:
+        raise RuntimeError(
+            "生产环境必须通过环境变量 JWT_SECRET 配置 ≥32 字节的随机密钥"
+        )

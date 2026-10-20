@@ -152,16 +152,34 @@ class ContextEngineer:
 
         svc = RagService()
         top_k = settings.rag_top_k
-        merged: list[dict] = []
-        for ns in namespaces:
-            started_ms = collector.now_ms() if collector else 0
-            if collector:
+
+        if collector:
+            for ns in namespaces:
                 collector.add_unique("rag_namespaces", ns)
+
+        async def _search_one(ns: str):
+            started_ms = collector.now_ms() if collector else 0
             try:
                 # 纯向量检索（关闭 HyDE+MQE 高级检索）以保证对话延迟
                 results = await svc.search(ns, query, top_k=top_k, advanced=False)
+                return ns, list(results or []), None, started_ms
             except Exception as e:  # noqa: BLE001
-                logger.warning(f"RAG 检索失败（降级，ns={ns}）: {e}")
+                return ns, [], e, started_ms
+
+        # 多库并发检索：命名空间互不依赖，串行会让延迟随库数线性叠加。
+        # 信号量限制并发度，避免“全部知识库”模式下一次性打爆 Qdrant/embedding。
+        semaphore = asyncio.Semaphore(4)
+
+        async def _search_limited(ns: str):
+            async with semaphore:
+                return await _search_one(ns)
+
+        outcomes = await asyncio.gather(*(_search_limited(ns) for ns in namespaces))
+
+        merged: list[dict] = []
+        for ns, results, error, started_ms in outcomes:
+            if error is not None:
+                logger.warning(f"RAG 检索失败（降级，ns={ns}）: {error}")
                 if collector:
                     collector.add(
                         SPAN_RAG,
@@ -169,10 +187,10 @@ class ContextEngineer:
                         started_ms=started_ms,
                         status="error",
                         namespace=ns,
-                        error=str(e)[:500],
+                        error=str(error)[:500],
                     )
                 continue
-            hits = len(results or [])
+            hits = len(results)
             if collector:
                 collector.rag_chunk_count += hits
                 collector.add(
@@ -182,10 +200,9 @@ class ContextEngineer:
                     status="ok" if hits else "empty",
                     namespace=ns,
                     chunk_count=hits,
-                    top_score=round(max((r.get("score", 0.0) for r in results or []), default=0.0), 4) or None,
+                    top_score=round(max((r.get("score", 0.0) for r in results), default=0.0), 4) or None,
                 )
-            for r in results or []:
-                merged.append(r)
+            merged.extend(results)
         if not merged:
             return ""
         merged.sort(key=lambda r: r.get("score", 0.0), reverse=True)
@@ -312,6 +329,15 @@ class ContextEngineer:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"会话结束记忆晋升失败（不阻塞）: {e}")
 
+    def schedule_after_run(self, **kwargs) -> None:
+        """把本轮记忆归档放入后台任务：done 事件与连接释放不再等待两次 embedding。
+
+        归档异常在 persist_after_run 内部已降级记日志；_BG_TASKS 持有强引用防止任务被 GC。
+        """
+        task = asyncio.create_task(self.persist_after_run(**kwargs))
+        _BG_TASKS.add(task)
+        task.add_done_callback(_BG_TASKS.discard)
+
     async def persist_after_run(
         self,
         user_id: str,
@@ -398,3 +424,15 @@ class ContextEngineer:
                     status="error",
                     error=str(e)[:500],
                 )
+
+
+async def drain_background_tasks(timeout: float = 5.0) -> None:
+    """应用关闭前排空后台归档任务：避免正在写入的记忆被事件循环取消而整轮丢失。"""
+    pending = set(_BG_TASKS)
+    if not pending:
+        return
+    _, not_done = await asyncio.wait(pending, timeout=timeout)
+    if not_done:
+        logger.warning(
+            f"后台记忆归档仍有 {len(not_done)} 个任务未在 {timeout}s 内完成，已放弃等待"
+        )

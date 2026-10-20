@@ -1,5 +1,6 @@
 """对话接口（SSE 流式 + 非流式备用）"""
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -11,6 +12,8 @@ from app.core.security import detect_injection
 from app.schemas.api import ChatRequest
 from app.services.chat_service import ChatService
 from app.utils.sse import SSE_HEADERS, sse_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -39,8 +42,13 @@ async def chat_stream(
         except asyncio.CancelledError:
             # 客户端断开
             raise
-        except Exception as e:
-            yield sse_event("error", {"code": 5001, "message": str(e)})
+        except Exception:
+            # 内部异常细节（SQL/路径/堆栈）不能透给客户，只回泛化文案 + trace_id 供排查
+            logger.exception(f"对话流处理异常 trace_id={trace_id}")
+            yield sse_event(
+                "error",
+                {"code": 5001, "message": "服务暂时不可用，请稍后重试", "trace_id": trace_id},
+            )
 
     return StreamingResponse(
         gen(),

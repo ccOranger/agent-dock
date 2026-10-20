@@ -1,11 +1,14 @@
 """
 MCPLoader：从 DB 读取 MCP 配置，加载为 MCPTool 并注册
 """
+import hashlib
+import json
 import logging
 import os
 import shutil
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 # 单个 MCP 服务工具发现（建连 + list_tools）的硬超时上限（秒）
 DEFAULT_MCP_TIMEOUT = 15
+
+# 已发现工具的 MCPTool 实例缓存有效期（秒）。
+# MCPTool.__init__ 的 _discover_tools() 会建连并拉取工具列表，而每轮对话都会构建
+# Agent；缓存后同一服务在 TTL 内不再重复建连，只有配置变更（指纹变化）才重新发现。
+MCP_TOOL_CACHE_TTL = 300
+_tool_cache: dict[str, tuple[float, "MCPTool"]] = {}
+_tool_cache_lock = threading.Lock()
 
 # backend 根目录（本文件位于 backend/app/tools/mcp_loader.py）：stdio 服务脚本按此重定位
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -105,6 +115,35 @@ def _build_mcp_server_source(cfg: dict) -> dict | list:
     return source
 
 
+def _cache_key(name: str, server_source: dict | list, timeout_seconds: int) -> str:
+    """按服务名 + 最终 server_source + 超时生成配置指纹（配置变更即自然失效）。"""
+    raw = json.dumps(
+        {"name": name, "source": server_source, "timeout": timeout_seconds},
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _get_cached_tool(key: str) -> "MCPTool | None":
+    now = time.monotonic()
+    with _tool_cache_lock:
+        entry = _tool_cache.get(key)
+        if entry is None:
+            return None
+        created_at, tool = entry
+        if now - created_at > MCP_TOOL_CACHE_TTL:
+            _tool_cache.pop(key, None)
+            return None
+        return tool
+
+
+def _cache_tool(key: str, tool: "MCPTool") -> None:
+    with _tool_cache_lock:
+        _tool_cache[key] = (time.monotonic(), tool)
+
+
 def _register_one(registry: ToolRegistry, name: str, cfg: dict, timeout_seconds: int) -> list[str]:
     """在独立守护线程中构造并注册 MCPTool，带硬超时；返回本次新注册的工具名。
 
@@ -114,13 +153,23 @@ def _register_one(registry: ToolRegistry, name: str, cfg: dict, timeout_seconds:
     """
     outcome: dict[str, Any] = {}
     before = set(registry.list_tools())
+    server_source = _build_mcp_server_source(cfg)
+    if not server_source:
+        logger.warning(f"⚠️ 配置缺少 endpoint/command，跳过: {name}")
+        return []
+
+    # 先查缓存：命中则只把包装工具注册进本轮 registry，不再建连
+    key = _cache_key(name, server_source, timeout_seconds)
+    cached = _get_cached_tool(key)
+    if cached is not None:
+        cached.expandable = True
+        registry.register_tool(cached)
+        added = sorted(set(registry.list_tools()) - before)
+        logger.info(f"♻️ MCP 工具命中缓存: {name}，复用 {len(added)} 个工具")
+        return added
 
     def _work() -> None:
         try:
-            server_source = _build_mcp_server_source(cfg)
-            if not server_source:
-                outcome["skip"] = "配置缺少 endpoint/command"
-                return
             tool = MCPTool(name=cfg["name"], server_command=server_source)
             # hello_agents 0.2.9 的 MCPTool 默认 expandable=False，会被当作单个“元工具”
             # 注册（参数只有 action/tool_name/arguments），模型看不到真实函数而无法调用。
@@ -128,6 +177,7 @@ def _register_one(registry: ToolRegistry, name: str, cfg: dict, timeout_seconds:
             # 工具展开为独立的 MCPWrappedTool（带真实名称/参数），模型才能发起工具调用。
             tool.expandable = True
             registry.register_tool(tool)
+            outcome["tool"] = tool
             outcome["tool_count"] = len(getattr(tool, "_available_tools", []) or [])
         except Exception as exc:  # noqa: BLE001
             outcome["error"] = exc
@@ -142,9 +192,10 @@ def _register_one(registry: ToolRegistry, name: str, cfg: dict, timeout_seconds:
     if "error" in outcome:
         logger.error(f"MCP 工具注册失败: {name}, err={outcome['error']}")
         return []
-    if "skip" in outcome:
-        logger.warning(f"⚠️ {outcome['skip']}，跳过: {name}")
-        return []
+    tool = outcome.get("tool")
+    if tool is not None:
+        # 只在发现成功（哪怕是 0 个工具）时缓存，避免把建连失败也固定下来
+        _cache_tool(key, tool)
     added = sorted(set(registry.list_tools()) - before)
     count = outcome.get("tool_count", 0)
     if count == 0:

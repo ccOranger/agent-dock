@@ -10,8 +10,9 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
-from app.models.repositories import DocumentRepo
 from app.core.config import settings
+from app.core.exceptions import ParamError
+from app.models.repositories import DocumentRepo
 from app.services import qdrant_helper
 from app.tools.rag_factory import get_rag_tool, invalidate_rag_tool
 
@@ -50,61 +51,89 @@ def _parse_rag_result(result: object) -> tuple[int, str | None]:
     return (int(m.group(1)) if m else 0), None
 
 
+def _save_upload(file: UploadFile, max_bytes: int) -> Path:
+    """把上传内容写到随机临时文件，并限制体积（超限抛 ParamError）。
+
+    - 用 mkstemp 生成随机名：原始文件名可能含 ../（路径穿越）或与他人同名（并发覆盖）；
+    - 分块拷贝并累计大小：落盘阶段设硬上限，超限立即清理，不把超大文件留在磁盘上。
+    """
+    suffix = Path(file.filename or "").suffix[:16]
+    fd, name = tempfile.mkstemp(prefix="cs_upload_", suffix=suffix)
+    tmp_path = Path(name)
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise ParamError(f"文件大小超过上限（{max_bytes // (1024 * 1024)} MB）")
+                out.write(chunk)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return tmp_path
+
+
 class DocumentService:
     async def upload(self, file: UploadFile, namespace: str, title: str, uploaded_by: str):
-        tmp_path = Path(tempfile.gettempdir()) / file.filename
-        with tmp_path.open("wb") as f:
-            shutil.copyfileobj(file.file, f)
-
-        doc = await DocumentRepo.create(
-            title=title,
-            source=str(tmp_path),
-            content_type=file.content_type,
-            rag_namespace=namespace,
-            uploaded_by=uploaded_by,
-            status="processing",
-            size_bytes=tmp_path.stat().st_size,
-        )
+        # 随机临时文件名 + 大小上限：规避路径穿越、同名并发覆盖与超大文件 DoS
+        max_bytes = settings.upload_max_size_mb * 1024 * 1024
+        # 请求体在进入 handler 前已被 multipart 解析器完整落盘，尽早按声明大小拒绝，
+        # 避免超大文件先占满磁盘、再被分块计数拒掉时峰值磁盘占用翻倍
+        if file.size is not None and file.size > max_bytes:
+            raise ParamError(f"文件大小超过上限（{settings.upload_max_size_mb} MB）")
+        tmp_path = await asyncio.to_thread(_save_upload, file, max_bytes)
 
         try:
-            rag_tool = get_rag_tool(namespace)
-            result = await asyncio.to_thread(
-                rag_tool.run,
-                {
-                    "action": "add_document",
-                    "file_path": str(tmp_path),
-                    "namespace": namespace,
-                    "chunk_size": settings.rag_chunk_size,
-                    "chunk_overlap": settings.rag_chunk_overlap,
-                },
+            doc = await DocumentRepo.create(
+                title=title,
+                source=str(tmp_path),
+                content_type=file.content_type,
+                rag_namespace=namespace,
+                uploaded_by=uploaded_by,
+                status="processing",
+                size_bytes=tmp_path.stat().st_size,
             )
-            chunk_count, error = _parse_rag_result(result)
-            if error:
-                await DocumentRepo.update_status(doc.id, "failed", error_message=error)
-                raise RuntimeError(error)
-            # 索引成功后归档原始文件（供后台查看/下载），与向量 source_path 解耦，失败不阻断入库
-            archive_info: dict = {"original_filename": file.filename}
-            try:
-                arc = _archive_path(namespace, str(doc.id), file.filename)
-                arc.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(tmp_path, arc)
-                archive_info["archive_path"] = str(arc)
-            except Exception:  # noqa: BLE001
-                pass
-            await DocumentRepo.update_status(
-                doc.id, "ready", chunk_count=chunk_count, metadata_=archive_info
-            )
-            doc.metadata_ = archive_info
-            invalidate_rag_tool(namespace)
-        except RuntimeError:
-            raise
-        except Exception as e:
-            await DocumentRepo.update_status(doc.id, "failed", error_message=str(e))
-            raise
-        finally:
-            tmp_path.unlink(missing_ok=True)
 
-        return doc
+            try:
+                rag_tool = get_rag_tool(namespace)
+                result = await asyncio.to_thread(
+                    rag_tool.run,
+                    {
+                        "action": "add_document",
+                        "file_path": str(tmp_path),
+                        "namespace": namespace,
+                        "chunk_size": settings.rag_chunk_size,
+                        "chunk_overlap": settings.rag_chunk_overlap,
+                    },
+                )
+                chunk_count, error = _parse_rag_result(result)
+                if error:
+                    await DocumentRepo.update_status(doc.id, "failed", error_message=error)
+                    raise RuntimeError(error)
+                # 索引成功后归档原始文件（供后台查看/下载），与向量 source_path 解耦，失败不阻断入库
+                archive_info: dict = {"original_filename": file.filename}
+                try:
+                    arc = _archive_path(namespace, str(doc.id), file.filename)
+                    arc.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(tmp_path, arc)
+                    archive_info["archive_path"] = str(arc)
+                except Exception:  # noqa: BLE001
+                    pass
+                await DocumentRepo.update_status(
+                    doc.id, "ready", chunk_count=chunk_count, metadata_=archive_info
+                )
+                doc.metadata_ = archive_info
+                invalidate_rag_tool(namespace)
+            except RuntimeError:
+                raise
+            except Exception as e:
+                await DocumentRepo.update_status(doc.id, "failed", error_message=str(e))
+                raise
+            return doc
+        finally:
+            # 建库失败/请求取消也要清理：每份上传都是唯一随机名，残留会持续累积
+            tmp_path.unlink(missing_ok=True)
 
     async def delete(self, doc_id: str, namespace: str, source_path: str | None = None):
         """删除文档：先按 source_path 精确清理 Qdrant 向量，再删 DB 行，并清理归档原文。"""

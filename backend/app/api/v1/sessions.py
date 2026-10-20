@@ -3,9 +3,11 @@ import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_customer
 from app.core.exceptions import Forbidden, NotFound
+from app.models.entities import Session
 from app.models.repositories import MessageRepo, SessionRepo
 from app.schemas.api import SessionCreate, SessionOut, SessionUpdate
 from app.schemas.common import ApiResponse, PaginatedData
@@ -24,8 +26,11 @@ def _to_out(s) -> SessionOut:
     )
 
 
-async def _get_owned(session_id: str, user) -> "SessionRepo":
-    sess = await SessionRepo.get(session_id)
+async def _get_owned(
+    session_id: str, user, db: AsyncSession | None = None
+) -> Session:
+    # 传入 db 时在当前事务内查询：后续修改/删除直接作用于受管对象，避免 detached ORM 回写
+    sess = await SessionRepo.get(session_id, db=db)
     if sess is None:
         raise NotFound("会话不存在")
     if str(sess.user_id) != str(user.id):
@@ -61,16 +66,15 @@ async def get_session(session_id: uuid.UUID, user=Depends(current_customer)):
 
 @router.patch("/{session_id}", response_model=ApiResponse[SessionOut])
 async def update_session(session_id: uuid.UUID, body: SessionUpdate, user=Depends(current_customer)):
-    sess = await _get_owned(str(session_id), user)
-    prev_status = sess.status
-    if body.title is not None:
-        sess.title = body.title
-    if body.status is not None:
-        sess.status = body.status
     from app.core.database import SessionLocal
 
     async with SessionLocal() as db:
-        db.add(sess)
+        sess = await _get_owned(str(session_id), user, db)
+        prev_status = sess.status
+        if body.title is not None:
+            sess.title = body.title
+        if body.status is not None:
+            sess.status = body.status
         await db.commit()
         await db.refresh(sess)
     if body.status == "closed" and prev_status != "closed":
@@ -87,10 +91,10 @@ async def update_session(session_id: uuid.UUID, body: SessionUpdate, user=Depend
 
 @router.delete("/{session_id}", response_model=ApiResponse)
 async def delete_session(session_id: uuid.UUID, user=Depends(current_customer)):
-    sess = await _get_owned(str(session_id), user)
     from app.core.database import SessionLocal
 
     async with SessionLocal() as db:
+        sess = await _get_owned(str(session_id), user, db)
         await db.delete(sess)
         await db.commit()
     return ApiResponse()
@@ -105,6 +109,7 @@ async def list_messages(
 ):
     await _get_owned(str(session_id), user)
     items = await MessageRepo.list_by_session(session_id, page=page, page_size=page_size)
+    total = await MessageRepo.count_by_session(session_id)
     return ApiResponse(
-        data=PaginatedData(items=items, total=len(items), page=page, page_size=page_size)
+        data=PaginatedData(items=items, total=total, page=page, page_size=page_size)
     )

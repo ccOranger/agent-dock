@@ -117,9 +117,9 @@ class SessionRepo:
             return sess
 
     @staticmethod
-    async def get(session_id: uuid.UUID | str) -> Session | None:
-        async with SessionLocal() as db:
-            return await db.get(Session, uuid.UUID(str(session_id)))
+    async def get(session_id: uuid.UUID | str, db: AsyncSession | None = None) -> Session | None:
+        async with _session(db) as s:
+            return await s.get(Session, uuid.UUID(str(session_id)))
 
     @staticmethod
     async def list_by_user(user_id: uuid.UUID | str, page: int = 1, page_size: int = 20) -> tuple[list[Session], int]:
@@ -307,6 +307,18 @@ class MessageRepo:
                 }
                 for r in reversed(rows)
             ]
+
+    @staticmethod
+    async def count_by_session(session_id: uuid.UUID | str) -> int:
+        """会话消息总数（分页 total 必须单独 count，不能用当前页条数代替）。"""
+        async with SessionLocal() as db:
+            return (
+                await db.execute(
+                    select(func.count())
+                    .select_from(Message)
+                    .where(Message.session_id == uuid.UUID(str(session_id)))
+                )
+            ).scalar_one()
 
     @staticmethod
     async def list_by_session(

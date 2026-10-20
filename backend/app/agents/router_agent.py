@@ -8,9 +8,9 @@ import asyncio
 import json
 import logging
 
-from hello_agents import HelloAgentsLLM
 from hello_agents.agents import SimpleAgent
 
+from app.agents.llm_factory import get_llm
 from app.agents.prompts.router import ROUTER_SYSTEM_PROMPT
 from app.agents.registry import AGENT_REGISTRY, list_agents, list_effective_agents
 from app.core.config import settings
@@ -107,7 +107,8 @@ def annotate_intent_evidence(intents: list[dict], agents: list[dict], query: str
 
 class RouterAgent:
     def __init__(self):
-        self.llm = HelloAgentsLLM(model=settings.router_model)
+        # 进程级复用 LLM 客户端：避免每次请求都新建 OpenAI 连接池
+        self.llm = get_llm(settings.router_model)
         # 默认提示词（仅代码注册表、无上下文）：保证无 DB 时仍可工作，也供测试直接读取
         self.agent = SimpleAgent(
             name=ROUTER_AGENT_NAME,

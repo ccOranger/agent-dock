@@ -3,10 +3,10 @@ BaseBusinessAgent：所有业务 Agent 的抽象基类
 """
 from abc import ABC, abstractmethod
 
-from hello_agents import HelloAgentsLLM
 from hello_agents.agents import SimpleAgent
 from hello_agents.tools import ToolRegistry
 
+from app.agents.llm_factory import get_llm
 from app.core.config import settings
 
 
@@ -72,7 +72,7 @@ class BaseBusinessAgent(ABC):
         available_tool_names = list(self.registered_custom_tools) + mcp_tool_names
         return SimpleAgent(
             name=self.name,
-            llm=HelloAgentsLLM(model=model),
+            llm=get_llm(model),
             system_prompt=self._final_system_prompt(available_tool_names),
             tool_registry=registry,
         )
