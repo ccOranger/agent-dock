@@ -130,12 +130,13 @@ services:
 
 **`backend/.env` 指向 localhost**（仅影响宿主开发后端；Docker 里的 backend 用根 `.env` + compose `environment` 覆盖，二者互不干扰）：
 ```ini
-DATABASE_URL=postgresql+asyncpg://cs_user:cs_pass@localhost:5432/cs_db
-REDIS_URL=redis://localhost:6379/0
-QDRANT_URL=http://localhost:6333
+DATABASE_URL=postgresql+asyncpg://cs_user:cs_pass@127.0.0.1:5432/cs_db
+REDIS_URL=redis://127.0.0.1:6379/0
+QDRANT_URL=http://127.0.0.1:6333
 QDRANT_API_KEY=
 ```
 > 用户名/库名取基础 compose 默认（`cs_user` / `cs_pass` / `cs_db`）；生产叠加才启用的 Redis 密码 / Qdrant API Key 在基础栈下为空。
+> ⚠️ **主机用 `127.0.0.1` 字面量、不要用 `localhost`**：Windows 上 `localhost` 先解为 IPv6 `::1`，而 override 只把端口绑在 `127.0.0.1`，导致每次连接都走“`::1` 尝试→失败→回退”，hello_agents 又多集合反复建连，会显著拖慢启动。
 
 **启动流程**（PowerShell，仓库根）：
 ```powershell
