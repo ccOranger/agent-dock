@@ -1,0 +1,13 @@
+# 开发用叠加：把基础设施端口暴露到宿主机回环，供 start_all.ps1 在宿主机跑的后端直连。
+# docker compose 会自动合并本文件（无需 -f 指定）。仅绑定 127.0.0.1，不对外暴露。
+# 生产/部署形态不受影响：基础 docker-compose.yml 里 backend 通过服务名访问这三者。
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+  qdrant:
+    ports:
+      - "127.0.0.1:6333:6333"

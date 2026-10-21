@@ -113,6 +113,72 @@ $COMPOSE exec -T postgres pg_restore -U cs_user -d cs_db --clean --if-exists --n
 - 脚本会在每个窗口先设 `$env:PYTHONIOENCODING="utf-8"`（规避 Windows GBK 控制台下 hello-agents 打印 emoji 崩溃，见 §4）。
 - 请用 **`http://localhost:5173 / :5174`** 访问，不要用 `127.0.0.1`——Vite 默认可能只监听 IPv6 `::1`。
 
+### 2.4 混合模式：宿主开发后端连本机 Docker 库
+
+适用：想要 §2.3 的后端热重载 + 前端 HMR，又不想依赖云端库——让**应用层跑在宿主机、基础设施（Postgres/Qdrant/Redis）跑在 Docker**。好处是离线、数据本地隔离、与部署形态用同一套引擎版本。
+
+**前置：暴露三件套端口**。基础 `docker-compose.yml` 只发布了 backend/web 端口，`postgres/qdrant/redis` 未对宿主机发布（仅供容器内按服务名访问）。加一个自动合并的 `docker-compose.override.yml` 把端口绑到回环：
+```yaml
+services:
+  postgres:
+    ports: ["127.0.0.1:5432:5432"]
+  redis:
+    ports: ["127.0.0.1:6379:6379"]
+  qdrant:
+    ports: ["127.0.0.1:6333:6333"]
+```
+
+**`backend/.env` 指向 localhost**（仅影响宿主开发后端；Docker 里的 backend 用根 `.env` + compose `environment` 覆盖，二者互不干扰）：
+```ini
+DATABASE_URL=postgresql+asyncpg://cs_user:cs_pass@localhost:5432/cs_db
+REDIS_URL=redis://localhost:6379/0
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+```
+> 用户名/库名取基础 compose 默认（`cs_user` / `cs_pass` / `cs_db`）；生产叠加才启用的 Redis 密码 / Qdrant API Key 在基础栈下为空。
+
+**启动流程**（PowerShell，仓库根）：
+```powershell
+# ① 只起基础设施，别起全栈（容器 backend 会占 8000）
+docker compose up -d postgres qdrant redis
+
+# ② 首次建表/种子：init 在 backend entrypoint 里，单起 postgres 库是空的
+docker compose run --rm backend python ../scripts/init_db.py
+docker compose run --rm backend python ../scripts/seed_data.py   # 要演示数据才跑
+
+# ③ 若之前跑过全栈，停掉容器 backend/web 以释放 8000
+docker compose stop backend web
+
+# ④ 正常开发（后端即连上面这套本机库）
+.\scripts\start_all.ps1
+```
+
+**要点与坑**：
+- **数据两套要分清**：本机 `pgdata/qdrantdata/redisdata` 卷与云端库是**两份数据**。切模式后发现「后台数据对不上」先确认当前连的是 localhost 还是云端。回切云端只需把 `backend/.env` 对应行注释/反注释换一下。
+- **不能同时跑两套后端**：容器 backend 与 `start_all.ps1` 的宿主后端都绑 `127.0.0.1:8000`，同起会 address in use；切回 Docker 全栈前先关宿主后端窗口。
+- **`override` 只影响端口暴露**：不改基础 compose 语义，`docker compose up -d --build` 全栈部署照旧走服务名内网访问。
+- **别 `down -v`**：停服用 `docker compose stop`（保留数据）；`down -v` 会连数据卷一起删。
+- 恢复全栈演示：`docker compose start backend web` 或 `docker compose up -d`。
+
+### 2.5 Docker 重启 / 重建 / 改配置的区别
+
+核心区别：**`restart` 只重启容器（用现有镜像），不会应用你在宿主机改的代码/配置**。前后端代码都 build 进镜像（非 bind mount），改了就得重建。
+
+| 你改了什么 | 用哪条命令 | 说明 |
+|------|---------|------|
+| 只重启后端进程（不改代码/清状态） | `docker compose restart backend` | 镜像不变 |
+| 后端代码 / manifest / 新增场景包 | `docker compose up -d --build backend` | 代码编译进镜像，**`restart` 不生效**；改包需重启才重载（lru_cache） |
+| 前端页面（`.vue`） | `docker compose up -d --build web` | `web.Dockerfile` 多阶段 `npm run build` 成 dist 再进镜像；起完需**硬刷新** `Ctrl+F5`（index.html 可能缓存） |
+| `.env` / compose 文件（环境变量/端口） | `docker compose up -d` | 会 diff 出变化服务重建；`restart` **读不到新 `.env`** |
+| 重启整套（含数据库） | `docker compose restart` | 数据在命名卷，不删 |
+| 彻底停再起 | `docker compose down` → `up -d` | ⚠️ **别加 `-v`**（会删数据卷） |
+
+补充：
+- **开发期改前端别走 Docker**：`up -d --build web` 每次要重建 1–2 分钟。日常调 UI 用 §2.3 / §2.4 的 Vite 热更新，调好再固化进镜像。
+- **`INIT_ON_START=true`**（基础栈默认）时后端每次重启都会再跑一次 `init_db + seed`（幂等）；生产建议置 `false`，启动更快也更干净。
+- **强敏感配置**（`JWT_SECRET`、DB/Redis/Qdrant 密码）属于容器创建时烘焙的环境变量，改后必须走 `up -d` 重建才重读，`restart` 无效。
+- 验证是否起来：`docker compose ps`（各服务 `running/healthy`）；`docker compose logs -f backend`（应输出 `[自检] 数据库 / Redis / Qdrant / 模型`）。
+
 ## 3. 从零手工启动
 
 1. PostgreSQL / Redis / Qdrant（如需 semantic 再加 Neo4j）就绪。
