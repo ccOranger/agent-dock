@@ -46,7 +46,7 @@ setup_logging(settings.log_level)
 
 app = FastAPI(
     title="smart-customer-service",
-    version="1.3.0",
+    version="0.1.0",
     lifespan=lifespan,
     docs_url="/docs",
 )
