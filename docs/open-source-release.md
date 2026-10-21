@@ -1,7 +1,7 @@
 # 开源发布检查清单（v0.1）
 
 > 目标：把当前仓库整理成"陌生人 30 分钟内能跑起来"的开源项目。
-> 关联文档：[产品定位](./positioning.md)、[领域解耦清单](./domain-decoupling.md)、[开发清单](./development-checklist.md)。
+> 关联文档：[产品定位](./positioning.md)、[开发清单](./development-checklist.md)。
 > 现状基线：无 LICENSE / Dockerfile / docker-compose；`.env`、运行数据已被 gitignore；`seed_data.py` 含演示默认口令；README 仍是客服系统叙事。
 
 ## 0. 发布目标
@@ -32,7 +32,7 @@
   - [x] 种子脚本显式要求 `SEED_DEMO=true`；
   - [x] 首次登录强制改密，或在初始化向导中生成随机密码并打印一次；
   - [x] README 显著提示"不要在生产使用演示口令"。
-- [ ] `packs/customer_service/tools/mock_data.py` 的示例数据去标识化（姓名、手机号、订单号均为虚构）。
+- [ ] `backend/app/tools/custom/mock_data.py` 的示例数据去标识化（姓名、手机号、订单号均为虚构）。
 - [ ] 确认没有大文件/构建产物入库：`git count-objects -vH`。
 - [x] 增加 `.gitattributes`（换行符）与统一编码说明（项目含中文，建议 UTF-8）。
 
@@ -43,14 +43,14 @@
   - [x] 能力清单（路由、记忆、知识、工具、追踪）
   - [x] 架构图（后端、两个前端、Postgres/Qdrant/Redis/MCP）
   - [x] 3 分钟快速开始
-  - [x] 场景包说明（客服包 / IT Helpdesk 包）
+  - [x] 业务扩展说明（代码 Agent / 自定义工具目录）
   - [x] 路线图与“明确不做什么”
   - [x] 许可证与商业支持入口
 - [x] 新增 `docs/quickstart.md`（从零到对话成功，含常见报错）。
 - [x] 新增 `docs/configuration.md`（`.env` 全量说明与默认值）。
 - [x] 新增 `docs/deployment.md`（Docker、反向代理、HTTPS、SSE 缓冲关闭）。
 - [x] 新增 `docs/faq.md`（模型接入、Qdrant、MCP stdio、Windows 编码）。
-- [x] 新增 `CONTRIBUTING.md`（开发环境、测试命令、提交规范、场景包贡献方式）。
+- [x] 新增 `CONTRIBUTING.md`（开发环境、测试命令、提交规范、业务 Agent/工具贡献方式）。
 - [ ] 新增 `docs/architecture.md`（路由、上下文工程、记忆生命周期、追踪模型；待 M4 前后补）。
 - [ ] 保留 `docs/updates/*` 作为开发历史，不要求外部读者通读。
 
@@ -119,15 +119,15 @@
 ## 8. 发布物料
 
 - [ ] 3 分钟演示视频或 GIF：登录 → 导入知识库 → 多意图对话 → 工具调用 → 转人工 → 链路查看。
-- [ ] 5–8 张截图：管理台、链路详情、记忆页、Agent 配置、场景包切换。
+- [ ] 5–8 张截图：管理台、链路详情、记忆页、Agent 配置、业务场景切换。
 - [ ] 技术文章三篇（差异化证明）：
   1. 多意图路由与提示词去具名化
   2. 记忆生命周期与跨轮上下文
   3. 一轮对话的全链路追踪模型
 - [ ] Release Notes：v0.1 能力、已知限制、升级方式。
-- [ ] 路线图 issue（置顶）：第二个场景包、Docker 优化、评测、RBAC。
+- [ ] 路线图 issue（置顶）：第二个业务场景、Docker 优化、评测、RBAC。
 
-> 2026-10-20：首篇技术文章初稿已完成（[docs/articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)），待外部发布；截图与 GIF 待 M4 演示包就绪后补。
+> 2026-10-20：首篇技术文章初稿已完成（[docs/articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)），待外部发布；截图与 GIF 待演示数据就绪后补。
 
 ## 9. 发布后运营
 

@@ -48,7 +48,6 @@ REQUIRED_FILES = (
     "docs/quickstart.md",
     "docs/deployment.md",
     "docs/demo-script.md",
-    "docs/packs.md",
 )
 
 # 绝不允许进入版本库的路径片段（密钥、运行数据、构建产物）

@@ -22,6 +22,7 @@ from hello_agents.agents import SimpleAgent
 from app.agents.canned_scripts import match_canned_script
 from app.agents.registry import AGENT_REGISTRY, resolve_business_agent
 from app.agents.router_agent import RouterAgent
+from app.agents.scene_router import build_scene_router_profile
 from app.core.config import settings
 from app.core.context_engineer import ContextEngineer
 from app.core.tracing import (
@@ -31,11 +32,15 @@ from app.core.tracing import (
     SPAN_BUILD,
     SPAN_CANNED,
     SPAN_RESOLVE,
+    SPAN_ROUTE,
     SPAN_RUN,
 )
+from app.schemas.scene import SceneContext, SceneRouterProfile
 
 logger = logging.getLogger(__name__)
 
+# 全局默认阈值（无场景档案时的回退值）；场景档案非空时以档案为准。
+# 保留模块级常量：既有调用方/测试通过 monkeypatch 覆盖它来固定行为。
 CONFIDENCE_THRESHOLD = settings.router_confidence_threshold
 
 _SENTINEL = object()
@@ -342,22 +347,44 @@ class Orchestrator:
         last_route_to: str | None = None,
         max_intents: int | None = None,
         collector=None,
+        scene: SceneContext | None = None,
+        profile: SceneRouterProfile | None = None,
     ) -> AsyncIterator[dict]:
         """一轮对话的完整调度。
 
         - history / last_route_to 一并交给路由，使追问能续接上一轮的 Agent
-        - max_intents：本轮最多执行的意图数，默认取 settings.router_max_intents
+        - max_intents：本轮最多执行的意图数；优先级：显式参数 > 场景档案 > 全局默认
         - user_message_id：本轮用户消息 id，归档记忆时写入溯源列
         - collector：链路采集器（app.core.tracing.TraceCollector），为空则不采集
+        - scene：场景快照；M3 起由它派生路由档案（mode=direct 时跳过路由 LLM）
+        - profile：已构建好的场景路由档案；不传则按 scene 现场派生，保证两者同源
         """
-        max_intents = max(1, int(max_intents if max_intents is not None else settings.router_max_intents))
+        if scene is not None and profile is None and scene.candidates:
+            # 兼容旧调用方只传 scene：候选非空时按同一逻辑派生档案；
+            # 候选为空（手工构造的旧测试快照）则保持旧的 direct_agent 语义。
+            profile = build_scene_router_profile(scene)
+        max_intents = max(
+            1,
+            int(
+                max_intents
+                if max_intents is not None
+                else (profile.max_intents if profile is not None else settings.router_max_intents)
+            ),
+        )
+        # 阈值随场景覆盖：主意图不达标本轮转人工
+        threshold = (
+            profile.confidence_threshold if profile is not None else CONFIDENCE_THRESHOLD
+        )
         self._ctx_cache.clear()
 
         # ---- 0. 高频固定话术（身份 / 能力 / 探听配置）：命中则逐字下发硬模板 ----
         # 不进路由、不建 Agent：措辞完全可控，同时省掉路由 LLM + MCP 建连 + RAG/记忆检索的数秒等待。
         # 不发 route 事件——本轮确实没有 Agent 参与，last_route_to 保留上一轮的真实承接方，
         # 后续追问续接才不会被一个并不存在的 Agent 名干扰；记忆归档也一并跳过（无业务信息量）。
-        canned = await match_canned_script(query)
+        # 话术按场景合并：全局条（如探听拒答）+ 本场景覆盖条。
+        canned = await match_canned_script(
+            query, scene.scene_id if scene is not None else None
+        )
         if canned is not None:
             logger.info(f"[canned] 命中固定话术 {canned.key}，跳过路由与 Agent 执行")
             if collector:
@@ -367,17 +394,73 @@ class Orchestrator:
             yield {"type": "text", "data": {"content": canned.text}}
             return
 
-        # ---- 1. 路由（可多意图） ----
-        # status 事件：前端"思考中"占位气泡的真实阶段进度（不计入 produced 内容）
-        yield {"type": "status", "data": {"stage": "routing", "text": "正在分析问题意图…"}}
-        intent_result = await self.router.route(
-            query, history=history, last_route_to=last_route_to, collector=collector
+        # ---- 1. 路由（场景直连则跳过；否则可多意图） ----
+        direct_agent = (
+            profile.direct_agent
+            if profile is not None
+            else (scene.direct_agent if scene is not None else None)
         )
-        intents: list[dict] = intent_result["intents"]
-        # 本轮生效的兜底 Agent（由路由层从生效清单派生，避免指向已禁用的 Agent）
-        fallback_agent = intent_result.get("fallback_agent")
-        if collector:
-            collector.record_intents(intents, max_intents)
+        scene_code = scene.code if scene is not None else None
+        if direct_agent:
+            # 直连不做意图识别：0 次路由 LLM，首字延迟只受业务 Agent 自身影响
+            intents = [
+                {
+                    "agent_name": direct_agent,
+                    "confidence": 1.0,
+                    "reason": "scene_direct",
+                    "is_fallback": False,
+                }
+            ]
+            fallback_agent = direct_agent
+            if collector:
+                collector.router_skipped = True
+                # 直连没有路由 LLM，但同样记录配置指纹：链路能解释“这轮用的哪份路由配置”
+                collector.prompt_hash = profile.prompt_hash if profile is not None else None
+                collector.record_intents(intents, max_intents)
+                collector.add(
+                    SPAN_ROUTE,
+                    direct_agent,
+                    status="ok",
+                    scene_code=scene_code,
+                    router_skipped=True,
+                    router_mode=profile.mode if profile is not None else "direct",
+                    candidate_count=len(profile.candidates) if profile is not None else None,
+                    prompt_hash=profile.prompt_hash if profile is not None else None,
+                )
+            logger.info(f"[route] 场景直连 scene={scene_code} agent={direct_agent}")
+        else:
+            # status 事件：前端"思考中"占位气泡的真实阶段进度（不计入 produced 内容）
+            yield {"type": "status", "data": {"stage": "routing", "text": "正在分析问题意图…"}}
+            route_kwargs = {
+                "history": history,
+                "last_route_to": last_route_to,
+                "collector": collector,
+            }
+            if profile is not None:
+                route_kwargs["profile"] = profile
+            intent_result = await self.router.route(query, **route_kwargs)
+            intents: list[dict] = intent_result["intents"]
+            # 本轮生效的兜底 Agent（由路由层从生效清单派生，避免指向已禁用的 Agent）
+            fallback_agent = intent_result.get("fallback_agent")
+            # 候选边界：档案已限定提示词范围，这里做最后一道闸（防模型臆造名称）
+            allowed = (
+                {c["name"] for c in profile.candidates if c.get("name")}
+                if profile is not None
+                else (set(scene.agent_names) if scene is not None and scene.agent_names else set())
+            )
+            if allowed:
+                intents = [i for i in intents if i["agent_name"] in allowed]
+                if not intents:
+                    intents = [
+                        {
+                            "agent_name": fallback_agent or next(iter(allowed)),
+                            "confidence": 0.0,
+                            "reason": "scene_fallback",
+                            "is_fallback": True,
+                        }
+                    ]
+            if collector:
+                collector.record_intents(intents, max_intents)
         primary = intents[0]
         agent_name = primary["agent_name"]
         confidence = primary["confidence"]
@@ -394,12 +477,18 @@ class Orchestrator:
                 "reason": primary["reason"],
                 "intents": intents[:max_intents],
                 "intent_total": min(len(intents), max_intents),
+                "scene_code": scene_code,
+                "router_skipped": bool(direct_agent),
+                # M3：场景路由档案的可观测字段（同一 prompt_hash 即同一路由配置）
+                "mode": profile.mode if profile is not None else None,
+                "candidate_count": len(profile.candidates) if profile is not None else None,
+                "prompt_hash": profile.prompt_hash if profile is not None else None,
             },
         }
 
         # ---- 2. 低置信度 → 转人工（主意图不达标则整轮转人工；
         #          仅次要意图不达标则丢弃该分支、主意图照常应答）----
-        qualified = [i for i in intents if i["confidence"] >= CONFIDENCE_THRESHOLD]
+        qualified = [i for i in intents if i["confidence"] >= threshold]
         if not qualified:
             # 例外：兜底意图的 confidence 是提示词约定的固定低值（见 router_agent.FALLBACK_CONFIDENCE），
             # 不属于“模型拿不准”，默认交给兜底 Agent 应答而不是整轮转人工（可用 ROUTER_FALLBACK_ANSWER 关闭）
@@ -495,6 +584,7 @@ class Orchestrator:
                 history=history,
                 collector=collector,
                 intent_index=index,
+                scene=scene,
             ):
                 etype = event.get("type")
                 data = event.get("data") or {}
@@ -577,6 +667,7 @@ class Orchestrator:
         history: list[dict] | None = None,
         collector=None,
         intent_index: int = 0,
+        scene: SceneContext | None = None,
     ) -> AsyncIterator[dict]:
         """构建并流式执行单个业务 Agent（含 MCP 预取与上下文工程）。"""
         agent_name = getattr(business_agent, "name", "?")
@@ -593,7 +684,9 @@ class Orchestrator:
 
         # ---- 上下文工程 ----
         # 多意图共享同一 query：按 (用户, query, 命名空间) 缓存，第二个意图不再重复检索
-        rag_namespaces = await self._resolve_rag_namespaces(business_agent)
+        rag_namespaces = await self._resolve_rag_namespaces(
+            business_agent, scene_id=scene.scene_id if scene is not None else None
+        )
         cache_key = (user_id, query, tuple(rag_namespaces))
         enriched_query = self._ctx_cache.get(cache_key)
         if enriched_query is None:
@@ -658,12 +751,13 @@ class Orchestrator:
                 simple_agent._history.append(Message(content, role))
 
     @staticmethod
-    async def _resolve_rag_namespaces(business_agent) -> list[str]:
+    async def _resolve_rag_namespaces(business_agent, scene_id: str | None = None) -> list[str]:
         """解析业务 Agent 实际检索的知识库命名空间列表。
 
         优先级：
-        - search_all_knowledge_bases=True：覆盖所有启用中的知识库（含自身默认空间 + 显式多库），
-          使管理后台新建的知识库无需改代码即可被命中。
+        - search_all_knowledge_bases=True：只覆盖本场景归属的启用知识库（场景隔离）；
+          全局共享库不会自动注入，需显式写进 rag_namespace(s) 才会被检索。
+          无场景上下文（scene_id=None，如后台调试）时保持旧行为：全部启用库。
         - 否则：rag_namespace（单库）与 rag_namespaces（显式多库）合并去重，按声明顺序检索。
         """
         own = business_agent.rag_namespace
@@ -682,7 +776,16 @@ class Orchestrator:
             from app.models.repositories import KnowledgeBaseRepo
 
             bases = await KnowledgeBaseRepo.list_all()
-            namespaces = [b.namespace for b in bases if b.is_active]
+            if scene_id:
+                # 只自动覆盖本场景的库；全局库（scene_id 为空）不自动注入，
+                # 需 Agent 在 rag_namespace(s) 里显式绑定，避免“全库检索”变成跨场景泄露。
+                namespaces = [
+                    b.namespace
+                    for b in bases
+                    if b.is_active and b.scene_id is not None and str(b.scene_id) == str(scene_id)
+                ]
+            else:
+                namespaces = [b.namespace for b in bases if b.is_active]
             # 自身默认空间与显式多库前置（优先级更高），再补齐其余启用库
             return _dedupe(([own] if own else []) + extra + namespaces)
         return _dedupe(([own] if own else []) + extra)

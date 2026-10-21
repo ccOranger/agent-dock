@@ -2,9 +2,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.schemas.scene import DEFAULT_SCENE_ID
 
 
 class Base(DeclarativeBase):
@@ -20,6 +22,60 @@ class TimestampMixin:
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Scene(Base, TimestampMixin):
+    """对外业务场景：Agent 池、路由配置、话术与嵌入配置的隔离边界。"""
+
+    __tablename__ = "scenes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(32), unique=True)
+    display_name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    router_mode: Mapped[str] = mapped_column(String(16), default="auto")
+    router_model: Mapped[str | None] = mapped_column(String(64))
+    router_confidence_threshold: Mapped[float | None] = mapped_column(Float)
+    router_max_intents: Mapped[int | None] = mapped_column(Integer)
+    # 不建外键：与 agents.scene_id 形成循环；是否在池内由场景路由档案校验并降级
+    fallback_agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    fallback_text: Mapped[str | None] = mapped_column(Text)
+    extra_router_prompt: Mapped[str | None] = mapped_column(Text)
+    widget_config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    allowed_origins: Mapped[list] = mapped_column(JSONB, default=list)
+    publish_key: Mapped[str | None] = mapped_column(String(64))
+    api_key_hash: Mapped[str | None] = mapped_column(String(128))
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+
+class SceneAgent(Base):
+    """场景 ↔ Agent；enabled 只影响本场景，不改变 Agent 全局状态。"""
+
+    __tablename__ = "scene_agents"
+
+    scene_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scenes.id", ondelete="CASCADE"), primary_key=True
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Visitor(Base, TimestampMixin):
+    """匿名访客；按场景隔离，id 由服务端签发。"""
+
+    __tablename__ = "visitors"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    scene_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scenes.id", ondelete="CASCADE"))
+    external_key: Mapped[str | None] = mapped_column(String(128))
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class StaffUser(Base, TimestampMixin):
@@ -54,9 +110,18 @@ class CustomerUser(Base, TimestampMixin):
 
 class Session(Base, TimestampMixin):
     __tablename__ = "sessions"
+    __table_args__ = (
+        CheckConstraint("(user_id IS NULL) <> (visitor_id IS NULL)", name="ck_sessions_actor"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customer_users.id", ondelete="CASCADE"))
+    # 默认场景：M2 之前的旧代码只写 user_id 时仍能落库；DB 侧也有同样的默认值
+    scene_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scenes.id", ondelete="RESTRICT"),
+        default=lambda: uuid.UUID(DEFAULT_SCENE_ID),
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("customer_users.id", ondelete="CASCADE"))
+    visitor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("visitors.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(128), default="新对话")
     status: Mapped[str] = mapped_column(String(16), default="active")
     assigned_agent: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("staff_users.id"))
@@ -84,10 +149,15 @@ class Message(Base):
 
 class Memory(Base, TimestampMixin):
     __tablename__ = "memories"
-    __table_args__ = (UniqueConstraint("user_id", "memory_uid", name="uq_memories_user_uid"),)
+    # 唯一性由 init_db.sql 的 uq_memories_actor_uid（NULLS NOT DISTINCT）保证；
+    # SQLAlchemy 2.0.35 的 UniqueConstraint 尚不支持 postgresql_nulls_not_distinct。
+    __table_args__ = (
+        CheckConstraint("(user_id IS NULL) <> (visitor_id IS NULL)", name="ck_memories_actor"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customer_users.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("customer_users.id", ondelete="CASCADE"))
+    visitor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("visitors.id", ondelete="CASCADE"))
     memory_uid: Mapped[str] = mapped_column(String(64))
     session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
     # 溯源到产生该记忆的那条用户消息；随消息删除级联（注意：删会话会连带删掉其来源记忆行）
@@ -122,6 +192,8 @@ class KnowledgeBase(Base, TimestampMixin):
     __tablename__ = "knowledge_bases"
 
     namespace: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # NULL=平台共享；场景自有知识库必须显式绑定后才会被检索
+    scene_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scenes.id", ondelete="RESTRICT"))
     display_name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -138,8 +210,9 @@ class CannedScript(Base, TimestampMixin):
     __tablename__ = "canned_scripts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    # 业务可读唯一标识（如 identity / capability / probing / business_hours）
-    key: Mapped[str] = mapped_column(String(64), unique=True)
+    scene_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scenes.id", ondelete="CASCADE"))
+    # 业务可读标识；唯一性由 init_db.sql 的 (scene_id, key) NULLS NOT DISTINCT 保证
+    key: Mapped[str] = mapped_column(String(64))
     title: Mapped[str | None] = mapped_column(String(128))
     # 分组：identity | capability | probing | business（探听类在种子里给了最高优先级）
     category: Mapped[str] = mapped_column(String(16), default="business")
@@ -161,7 +234,9 @@ class AgentMeta(Base, TimestampMixin):
     __tablename__ = "agents"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    name: Mapped[str] = mapped_column(String(64), unique=True)
+    # NULL=全局；非空=场景自有。唯一性由 init_db.sql 的 (scene_id, name) NULLS NOT DISTINCT 保证
+    scene_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scenes.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(64))
     display_name: Mapped[str | None] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text)
     # ---- 路由线索：供路由 Agent 判定“何时选我”，代码/动态 Agent 均适用 ----
@@ -191,6 +266,7 @@ class ToolMeta(Base, TimestampMixin):
     __tablename__ = "tools"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    scene_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scenes.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(64), unique=True)
     type: Mapped[str] = mapped_column(String(16))
     schema_: Mapped[dict] = mapped_column("schema", JSONB)
@@ -252,7 +328,9 @@ class RequestTrace(Base):
     # HTTP 层 trace_id（structlog / X-Trace-Id），用于日志与链路互查
     trace_id: Mapped[str] = mapped_column(String(64))
     session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    scene_code: Mapped[str] = mapped_column(String(32), default="default")
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    visitor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     user_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     assistant_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
@@ -269,6 +347,10 @@ class RequestTrace(Base):
     tool_call_count: Mapped[int] = mapped_column(Integer, default=0)
     tool_error_count: Mapped[int] = mapped_column(Integer, default=0)
     confidence: Mapped[float | None] = mapped_column(Float)
+    router_skipped: Mapped[bool] = mapped_column(Boolean, default=False)
+    router_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
+    router_ms: Mapped[int | None] = mapped_column(Integer)
+    prompt_hash: Mapped[str | None] = mapped_column(String(16))
     outcome: Mapped[str | None] = mapped_column(String(16))
     handover_reason: Mapped[str | None] = mapped_column(String(32))
     error_code: Mapped[int | None] = mapped_column(Integer)
@@ -279,3 +361,15 @@ class RequestTrace(Base):
 
     spans: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SchemaMeta(Base):
+    """schema 版本表；启动时断言，不匹配请全量重建。"""
+
+    __tablename__ = "schema_meta"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

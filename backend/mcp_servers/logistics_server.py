@@ -4,7 +4,7 @@
 - query_logistics(order_id)                按订单号查物流轨迹
 - query_order_logistics_status(order_id)   仅返回精简的运输状态文本
 
-数据来源与进程内自定义工具一致：app.packs.customer_service.tools.mock_data。
+数据来源与进程内自定义工具一致：app.tools.custom.mock_data。
 """
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ import sys
 from pathlib import Path
 
 # 以脚本绝对路径被拉起时，把 backend 根目录加入 sys.path，
-# 从而能 import app.packs.customer_service.tools.mock_data（该链路各 __init__ 均为空，无副作用）。
+# 从而能 import app.tools.custom.mock_data（该链路各 __init__ 均为空，无副作用）。
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
-from app.packs.customer_service.tools import mock_data  # noqa: E402
+from app.tools.custom import mock_data  # noqa: E402
 
 mcp = FastMCP("mcp_logistics")
 

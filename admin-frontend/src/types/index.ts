@@ -9,6 +9,9 @@ export interface InquirySession {
   title: string
   status: 'active' | 'closed' | 'handover'
   last_route_to?: string | null
+  /** 会话归属场景：跨场景会话互不可见 */
+  scene_id?: string | null
+  scene_code?: string | null
   user_id: string
   username: string
   display_name?: string | null
@@ -33,7 +36,9 @@ export interface InquiryDetail {
     title: string
     status: string
     last_route_to?: string | null
-    user_id: string
+    scene_id?: string | null
+    scene_code?: string | null
+    user_id: string | null
     created_at: string
     updated_at: string
   }
@@ -61,6 +66,13 @@ export interface RequestTraceSummary {
   trace_id: string
   session_id?: string | null
   user_id?: string | null
+  /** 本轮请求归属场景（无码请求落默认场景） */
+  scene_code?: string | null
+  /** 路由维度：直连跳过 / 兜底降级 / 路由耗时 / 提示词指纹（与后台路由档案同源） */
+  router_skipped?: boolean | null
+  router_fallback?: boolean | null
+  router_ms?: number | null
+  prompt_hash?: string | null
   user_message_id?: string | null
   assistant_message_id?: string | null
   intent_count: number
@@ -102,6 +114,9 @@ export interface KnowledgeBase {
   description?: string | null
   is_active: boolean
   document_count: number
+  /** 归属场景：NULL=平台共享；非空=仅该场景的 search_all 自动覆盖 */
+  scene_id?: string | null
+  scene_code?: string | null
 }
 
 export interface DocumentItem {
@@ -160,6 +175,8 @@ export interface AgentInfo {
   system_prompt?: string | null
   search_all_knowledge_bases?: boolean
   sort_order?: number
+  /** 归属场景：动态 Agent 属于创建它的场景；NULL=全局（代码 Agent/平台共享） */
+  scene_id?: string | null
 }
 
 // ===== 路由分发器（只读）=====
@@ -218,6 +235,115 @@ export interface RouterPromptPreview {
   fallback_agent: string
   fallback_from_candidates: boolean
   candidates: RouterCandidate[]
+}
+
+// ===== M3 场景路由档案（派生视图，不是实体）=====
+/** 实际生效方式：direct=直连、llm=走路由模型、unconfigured=未配置可用 Agent */
+export type RouterEffectiveMode = 'direct' | 'llm' | 'unconfigured'
+/** 参数来源：scene=本场景覆盖、global=继承全局默认 */
+export type RouterConfigSource = 'scene' | 'global'
+/** 兜底 Agent 来源：scene=场景配置；configured_missing=配置失效已降级；preferred/pool_first=池内派生 */
+export type RouterFallbackSource =
+  | 'scene'
+  | 'configured_missing'
+  | 'preferred'
+  | 'pool_first'
+  | 'empty'
+
+export type RouterWarningCode =
+  | 'no_agents'
+  | 'single_agent_direct'
+  | 'fallback_not_in_pool'
+  | 'agent_description_only'
+  | 'no_knowledge_base'
+  | 'no_identity_script'
+  | 'scene_disabled'
+
+/** 单个场景的路由档案：后台看到的就是运行时用的那份 */
+export interface RouterSceneProfile {
+  scene_id: string
+  scene_code: string
+  scene_name: string
+  scene_status: SceneStatus
+  is_default: boolean
+  mode: RouterEffectiveMode
+  /** 直连目标（仅 mode=direct 时非空） */
+  direct_agent: string | null
+  configured_mode: SceneRouterMode
+  model: string
+  model_source: RouterConfigSource
+  confidence_threshold: number
+  threshold_source: RouterConfigSource
+  max_intents: number
+  max_intents_source: RouterConfigSource
+  fallback_agent: string | null
+  fallback_source: RouterFallbackSource
+  fallback_text: string
+  fallback_text_source: 'scene' | 'default'
+  candidate_count: number
+  warnings: RouterWarningCode[]
+  prompt_chars: number
+  prompt_hash: string
+  /** 列表摘要不带候选明细 */
+  candidates?: RouterCandidate[]
+}
+
+/** 列表接口：不返回候选明细与提示词正文 */
+export type RouterSceneSummary = Omit<RouterSceneProfile, 'candidates'>
+
+/** 详情接口：带候选明细与线索完整度 */
+export interface RouterSceneDetail extends RouterSceneProfile {
+  candidates: RouterCandidate[]
+}
+
+export interface RouterScenePrompt {
+  scene_code: string
+  scene_name: string
+  mode: RouterEffectiveMode
+  prompt: string
+  prompt_chars: number
+  prompt_hash: string
+  scene_block: string
+  candidate_count: number
+  candidates: RouterCandidate[]
+}
+
+export interface RouterIntent {
+  agent_name: string
+  confidence: number
+  reason: string
+  is_fallback?: boolean
+  matched_keywords?: string[]
+  clue_basis?: string
+}
+
+export interface RouterSceneTestResult {
+  scene_code: string
+  mode: RouterEffectiveMode
+  router_skipped: boolean
+  candidate_count: number
+  prompt_hash: string
+  elapsed_ms: number
+  agent_name: string | null
+  confidence: number | null
+  reason: string | null
+  intents: RouterIntent[]
+  fallback_agent: string | null
+}
+
+export interface RouterSceneStats {
+  scene_code: string
+  scene_name: string
+  hours: number
+  requests: number
+  router_skipped: number
+  router_fallback: number
+  handover: number
+  skip_rate: number
+  fallback_rate: number
+  handover_rate: number
+  avg_router_ms: number | null
+  avg_total_latency_ms: number | null
 }
 
 export type MCPTransport = 'sse' | 'http' | 'stdio'
@@ -345,32 +471,120 @@ export const TICKET_URGENCY_LABELS: Record<TicketUrgency, string> = {
   high: '高',
 }
 
-// ===== 场景包（运营台展示与整体启停）=====
-export interface PackAgentInfo {
-  name: string
+// ===== 场景（多业务接入单元）=====
+export type SceneStatus = 'active' | 'paused' | 'archived'
+export type SceneRouterMode = 'auto' | 'llm' | 'direct'
+
+/**
+ * 路由不是实体：每个场景的「路由档案」由 router_mode + 绑定 Agent 派生。
+ * auto 下 0 个=未配置、1 个=直连、>=2 个=LLM 路由；llm 永不直连；direct 强制直连。
+ */
+export interface Scene {
+  id: string
+  /** 对外唯一标识：chat 请求用它区分场景，创建后不可修改 */
+  code: string
   display_name: string
-  description: string
-  enabled: boolean
+  description?: string | null
+  status: SceneStatus
+  /** 默认场景：无 scene_code 的请求落在这里，只允许改展示名与描述 */
+  is_default: boolean
+  router_mode: SceneRouterMode
+  router_model?: string | null
+  router_confidence_threshold?: number | null
+  router_max_intents?: number | null
+  fallback_agent_id?: string | null
+  fallback_text?: string | null
+  extra_router_prompt?: string | null
+  publish_key?: string | null
+  allowed_origins: string[]
+  /** 嵌入组件外观；只含后台显式保存过的键，缺省值以后端为准 */
+  widget_config?: Record<string, unknown>
+  /** 是否已配置服务端 API key（哈希不出后台接口） */
+  api_key_set?: boolean
+  /** 启用中的绑定 Agent 数（停用的绑定不计入） */
+  agent_count: number
+  created_at?: string | null
+  updated_at?: string | null
+  bound_agent_ids?: string[]
 }
 
-export interface PackToolInfo {
-  name: string
-  description: string
+export interface SceneOption {
+  /** 场景 id：前端把各类资源的 scene_id 映射回可读名称 */
+  id: string
+  code: string
+  display_name: string
+  is_default: boolean
 }
 
-export interface ScenePack {
+/** 绑定弹窗的一行：可绑定范围仅全局 Agent + 本场景专属 Agent */
+export interface SceneAgentOption {
+  id: string
   name: string
   display_name: string
-  version: string
-  /** 包内至少一个 Agent 启用，且 manifest 未停用 */
+  source: 'code' | 'dynamic'
   enabled: boolean
-  /** manifest 的 enabled 声明；false 时不允许运行时开启 */
-  manifest_enabled: boolean
-  /** 包声明的运营台通用能力（如 tickets） */
-  features: string[]
-  agents: PackAgentInfo[]
-  tools: PackToolInfo[]
-  knowledge_namespaces: string[]
+  bound: boolean
+  scene_enabled: boolean
+  sort_order: number
+}
+
+export interface SceneBoundAgent {
+  id: string
+  name: string
+  display_name: string
+  description?: string | null
+  source: 'code' | 'dynamic'
+  sort_order: number
+}
+
+/** 知识库绑定弹窗的一行：其他场景占用的库不可选（避免抢绑） */
+export interface SceneKnowledgeBaseOption {
+  namespace: string
+  display_name: string
+  is_active: boolean
+  scene_id?: string | null
+  scene_code?: string | null
+  bound: boolean
+  available: boolean
+}
+
+/** 嵌入与公开接入配置：未传字段保持原值，widget_config 是全量替换而不是深合并 */
+export interface SceneWidgetPayload {
+  widget_config?: Record<string, unknown>
+  allowed_origins?: string[]
+  allow_anonymous?: boolean
+}
+
+export interface SceneRotateKeyResult {
+  /** 一次性明文，关闭抽屉后无法再次查看 */
+  api_key: string
+  api_key_set: boolean
+}
+
+export interface SceneCreatePayload {
+  code: string
+  display_name: string
+  description?: string | null
+  router_mode?: SceneRouterMode
+  fallback_agent_id?: string | null
+  fallback_text?: string | null
+  extra_router_prompt?: string | null
+  agent_ids?: string[]
+}
+
+export interface SceneUpdatePayload {
+  display_name?: string
+  description?: string | null
+  status?: SceneStatus
+  router_mode?: SceneRouterMode
+  router_model?: string | null
+  router_confidence_threshold?: number | null
+  router_max_intents?: number | null
+  fallback_agent_id?: string | null
+  fallback_text?: string | null
+  extra_router_prompt?: string | null
+  /** 传了才全量替换绑定；顺序即路由候选顺序 */
+  agent_ids?: string[]
 }
 
 // ===== 高频固定话术（硬模板）=====
@@ -379,6 +593,8 @@ export type CannedScriptCategory = 'identity' | 'capability' | 'probing' | 'busi
 export interface CannedScript {
   id: string
   key: string
+  /** 归属场景：NULL=全局（如 probing），非空=该场景覆盖行（同 key 覆盖全局） */
+  scene_id?: string | null
   title?: string | null
   category: CannedScriptCategory
   /** 问法主干：归一化后整句全等才命中 */
@@ -396,6 +612,7 @@ export interface CannedScript {
 
 export interface CannedScriptPayload {
   key: string
+  scene_code?: string | null
   title?: string | null
   category: CannedScriptCategory
   patterns: string[]
@@ -407,6 +624,7 @@ export interface CannedScriptPayload {
 
 export interface CannedMatchResult {
   query: string
+  scene_code?: string | null
   normalized: string
   matched: boolean
   key?: string | null

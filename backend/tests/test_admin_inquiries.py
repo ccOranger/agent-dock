@@ -63,7 +63,11 @@ def _capture_list(monkeypatch, captured: dict):
         captured.update(filters)
         return SAMPLE_ROWS, 42
 
+    async def fake_scenes():
+        return []
+
     monkeypatch.setattr(ai.SessionRepo, "list_all_filtered", fake_list_all_filtered)
+    monkeypatch.setattr(ai.SceneRepo, "list_all", fake_scenes)
 
 
 def test_list_sessions_pagination_and_filters_passthrough(client, monkeypatch):
@@ -119,6 +123,11 @@ def test_export_csv_header_bom_and_rows(client, monkeypatch):
 
     monkeypatch.setattr(ai.SessionRepo, "export_rows", fake_export_rows)
 
+    async def fake_scenes():
+        return []
+
+    monkeypatch.setattr(ai.SceneRepo, "list_all", fake_scenes)
+
     resp = client.get(f"{ai.router.prefix}/sessions/export", params={"status": "closed"})
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
@@ -139,6 +148,7 @@ def test_get_inquiry_detail_with_messages(client, monkeypatch):
         id="s-1",
         title="订单查询",
         status="closed",
+        scene_id="scene-1",
         last_route_to="order_service",
         user_id="u-c1",
         created_at=datetime(2025, 1, 1, 10, 0, 0),
@@ -150,10 +160,14 @@ def test_get_inquiry_detail_with_messages(client, monkeypatch):
         assert session_id == "s-1"
         return sess
 
+    async def fake_scene_get(scene_id):
+        return SimpleNamespace(code="mall_order")
+
     async def fake_list_by_session(session_id):
         return messages
 
     monkeypatch.setattr(ai.SessionRepo, "get", fake_get)
+    monkeypatch.setattr(ai.SceneRepo, "get", fake_scene_get)
     monkeypatch.setattr(ai.MessageRepo, "list_by_session", fake_list_by_session)
 
     resp = client.get(f"{ai.router.prefix}/sessions/s-1")

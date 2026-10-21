@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import admin_tickets as at
 from app.models.entities import Ticket
-from app.packs.customer_service.tools.ticket_tool import CreateTicketTool, EscalateTool, UpdateTicketTool
+from app.tools.custom.ticket_tool import CreateTicketTool, EscalateTool, UpdateTicketTool
 
 
 # ---------------------------------------------------------------- 建表 DDL 与 ORM 对齐

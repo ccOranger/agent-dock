@@ -10,13 +10,39 @@
 
 ## [Unreleased]
 
-面向 v0.2 的候选项（只记录，不影响当前发布）：
+### 新增：多场景平台化（M0–M7）
 
-- 聊天端挂件化（iframe / Web Component 嵌入第三方页面）；
+- **业务场景**：`scenes` + `scene_agents`；对外仍是 `/chat/stream`，用 `scene_code` 区分场景，无码请求落默认场景（固定 `default_assistant` 直连，不路由）。
+- **场景隔离**：话术、知识库、会话、记忆、链路全部带场景维度。话术 `scene_id NULL` 为全局，同 key 场景行覆盖全局；知识库 `scene_id NULL` 为平台共享，`search_all` 只覆盖本场景归属库；跨场景复用 `session_id` 返回 404。
+- **场景路由档案**：由场景配置 + Agent 池 + 全局模板派生的只读视图（direct / llm / unconfigured、候选、警告、`prompt_hash`），后台可查看详情、提示词并试运行；路由不是独立实体。
+- **公开接入**：`GET /public/scenes/{code}` 下发展示配置与鉴权方式，`POST /public/scenes/{code}/visitors` 签发匿名访客；聊天鉴权支持客户 Token / `X-API-Key` / `X-Publish-Key` / 已发布匿名四种方式。
+- **动态 CORS**：按场景 `allowed_origins` 校验跨域（全局 `ALLOWED_ORIGINS` 继续放行自有前端）；场景码从路径、`?scene_code=` 或 `X-Scene-Code` 解析，preflight 未授权 403/2003，带 TTL 缓存与主动失效。
+- **限流**：按 `scene + user/visitor/ip` 分桶的分钟频次 / 日配额 / 并发流（默认 30 / 2000 / 3），Redis 故障 fail-open，SSE 结束释放并发槽。
+- **嵌入组件**：`embed.html` 独立 Vite 入口（不引入 Element Plus）+ `public/widget.js` 一行 script；气泡 + iframe 隔离宿主样式，主题/标题/欢迎语由后台下发，移动端全屏，postMessage 驱动关闭与未读角标。
+- **后台场景化**：场景管理、接入抽屉（外观、允许来源、匿名开关、嵌入代码、实时预览、key 换发）、路由档案页；话术 / 知识库 / 链路 / 咨询列表均增加场景维度。
+- **初始化**：`scripts/init_db.sql` 作为唯一 DDL 源；`rebuild_and_seed.py` 支持 `SEED_DEMO=false`（生产初始化，随机管理员密码）与 `true`（演示数据）两种模式；不做旧库迁移，重建后校验行数。
+
+### 移除：场景包机制
+
+- 删除 `manifest.yaml`、`app/packs/loader.py`、`/api/v1/admin/packs` 与运营台「场景包」页；导航不再按 `features` 显隐（工单入口固定可见）。
+- 客服/IT 代码资产迁回 `app/agents/business/`、`app/agents/prompts/`、`app/tools/custom/`，由 `registry.py` / `custom_catalog.py` 显式登记，能力与工具名保持不变。
+
+### 变更
+
+- 默认场景只绑定 `default_assistant`，不再挂全部代码 Agent；业务 Agent 通过场景绑定进入候选。
+- 旧路径 `GET /admin/router` 与 `/admin/router/prompt` 保留为全局视图别名，计划 v0.3 移除。
+- 两个前端 vite 支持 `VITE_API_TARGET`（默认 `http://localhost:8000`），嵌入地址可用 `VITE_EMBED_URL` 覆盖（默认复用 `VITE_PUBLIC_CHAT_URL`）。
+
+### 修复
+
+- `publish_key` 含非 ASCII 字符时 `hmac.compare_digest` 抛 TypeError → 统一 UTF-8 编码后比较。
+
+面向后续版本的候选项（只记录，不影响当前发布）：
+
 - 版本化数据库迁移（Alembic 或 `scripts/migrations/NNN_*.sql` + `schema_version`）；
 - RBAC 与审计增强、SSO（企业版方向）；
 - 评测与回归集（基于 `request_traces` 构建 golden set）；
-- 后台 IA 去客服化：`canned_scripts` → 通用 `response_templates`，`app_users` 合并、Ticket 迁包。
+- 后台 IA 去客服化：`canned_scripts` → 通用 `response_templates`，`app_users` 合并、Ticket 领域拆分。
 
 ## [0.1.0] - 2026-10-20
 
@@ -85,7 +111,7 @@
 - **无内置 mock 模型模式**：对话与向量必须连 OpenAI 兼容端点；内网需自备本地模型服务（详见离线部署章节）。`EMBED_MODEL_TYPE` 由框架支持 `dashscope`（配 `EMBED_BASE_URL` 时走 OpenAI 兼容 REST）/ `local` / `tfidf`，其中 `local` 依赖 sentence-transformers（当前镜像未包含）。
 - semantic 记忆需 Neo4j，默认未启用。
 - MCP 的 `npx` 型示例需外网；stdio 型服务要求容器内存在对应运行时。
-- 运营台截图与演示 GIF 尚未随包发布（清单见 `docs/packs.md` 第 9 节）。
+- 运营台截图与演示 GIF 尚未随包发布（原截图清单所在文档已随场景包机制移除）。
 - 前端构建有 chunk 体积告警；后台部分列表存在 N+1 查询（已列入发布后清单）。
 
 ### 升级方式

@@ -11,6 +11,16 @@
       <el-table :data="bases" v-loading="basesLoading">
         <el-table-column prop="namespace" label="Namespace" width="180" />
         <el-table-column prop="display_name" label="名称" width="160" />
+        <el-table-column label="归属场景" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.scene_code" size="small" type="success">
+              {{ sceneName(row.scene_code) }}
+            </el-tag>
+            <el-tooltip v-else content="平台共享库：需在 Agent 的 RAG 命名空间里显式引用才会检索" placement="top">
+              <el-tag size="small" type="info">平台共享</el-tag>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column prop="description" label="描述" min-width="180" />
         <el-table-column prop="document_count" label="文档数" width="90" />
         <el-table-column label="启用" width="90">
@@ -126,6 +136,20 @@
         <el-form-item label="名称">
           <el-input v-model="baseForm.display_name" />
         </el-form-item>
+        <el-form-item label="归属场景">
+          <el-select v-model="baseForm.scene_code" :disabled="baseEditing" clearable placeholder="平台共享" style="width: 100%">
+            <el-option label="平台共享（不自动检索）" value="" />
+            <el-option
+              v-for="scene in scenes"
+              :key="scene.code"
+              :label="scene.display_name"
+              :value="scene.code"
+            />
+          </el-select>
+          <div class="form-tip">
+            归属场景后，该场景内开启「检索全部知识库」的 Agent 会自动覆盖这个库；平台共享库只在 Agent 显式写了命名空间时才会被检索。归属创建后可在场景弹窗内调整。
+          </div>
+        </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="baseForm.description" type="textarea" :rows="2" />
         </el-form-item>
@@ -182,11 +206,12 @@ import {
   apiListBases,
   apiListDocuments,
   apiRagSearch,
+  apiSceneOptions,
   apiUpdateBase,
   apiUpdateEntry,
 } from '@/api'
 import { useAuthStore } from '@/stores/auth'
-import type { Chunk, DocumentItem, KnowledgeBase, SearchResult } from '@/types'
+import type { Chunk, DocumentItem, KnowledgeBase, SceneOption, SearchResult } from '@/types'
 import DocumentUploader from '@/components/DocumentUploader.vue'
 
 const auth = useAuthStore()
@@ -200,6 +225,12 @@ function fmt(v?: string | null) {
 const bases = ref<KnowledgeBase[]>([])
 const basesLoading = ref(false)
 const ns = ref<string>('')
+const scenes = ref<SceneOption[]>([])
+
+function sceneName(code?: string | null) {
+  if (!code) return ''
+  return scenes.value.find((s) => s.code === code)?.display_name || code
+}
 
 async function loadBases() {
   basesLoading.value = true
@@ -218,16 +249,21 @@ function selectNs(namespace: string) {
 
 const baseDialog = ref(false)
 const baseEditing = ref(false)
-const baseForm = reactive({ namespace: '', display_name: '', description: '' })
+const baseForm = reactive({ namespace: '', display_name: '', description: '', scene_code: '' })
 
 function openBaseCreate() {
   baseEditing.value = false
-  Object.assign(baseForm, { namespace: '', display_name: '', description: '' })
+  Object.assign(baseForm, { namespace: '', display_name: '', description: '', scene_code: '' })
   baseDialog.value = true
 }
 function openBaseEdit(row: KnowledgeBase) {
   baseEditing.value = true
-  Object.assign(baseForm, { namespace: row.namespace, display_name: row.display_name, description: row.description || '' })
+  Object.assign(baseForm, {
+    namespace: row.namespace,
+    display_name: row.display_name,
+    description: row.description || '',
+    scene_code: row.scene_code || '',
+  })
   baseDialog.value = true
 }
 async function submitBase() {
@@ -235,7 +271,12 @@ async function submitBase() {
     if (baseEditing.value) {
       await apiUpdateBase(baseForm.namespace, { display_name: baseForm.display_name, description: baseForm.description })
     } else {
-      await apiCreateBase({ namespace: baseForm.namespace, display_name: baseForm.display_name, description: baseForm.description })
+      await apiCreateBase({
+        namespace: baseForm.namespace,
+        display_name: baseForm.display_name,
+        description: baseForm.description,
+        scene_code: baseForm.scene_code || null,
+      })
     }
     ElMessage.success('已保存')
     baseDialog.value = false
@@ -402,6 +443,11 @@ function scoreType(s: number) {
 }
 
 onMounted(async () => {
+  apiSceneOptions()
+    .then((list) => (scenes.value = list))
+    .catch(() => {
+      /* 场景下拉失败不影响知识库管理 */
+    })
   await loadBases()
   if (ns.value) loadDocs()
 })
@@ -417,6 +463,12 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  margin-top: 4px;
 }
 .result {
   margin-top: 12px;

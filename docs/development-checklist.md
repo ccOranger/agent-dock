@@ -1,8 +1,9 @@
 # 开发清单（v0.1）
 
 > 用途：把定位与解耦方案落成可执行任务，按里程碑推进。
-> 关联文档：[产品定位](./positioning.md)、[领域解耦清单](./domain-decoupling.md)、[开源发布检查清单](./open-source-release.md)。
+> 关联文档：[产品定位](./positioning.md)、[开源发布检查清单](./open-source-release.md)。
 > 估算假设：单人开发，每周投入 20–30 小时；以"可发布"为目标，不为完美主义加需求。
+> 历史说明：本文保留 v0.1 阶段的执行记录；场景包机制已在多场景平台化改造后移除，业务资产现位于 `app/agents/business/`、`app/agents/prompts/`、`app/tools/custom/`。
 
 ## 0. 当前基线
 
@@ -64,6 +65,9 @@
 > M0 验收（2026-10-20）：本地 ruff、pytest（277 passed / 2 skipped）、两端构建均通过；GitHub Actions 首次运行已全绿（backend lint + pytest、frontend 两端 build）。CI 环境 pytest 275 passed / 4 skipped（Linux 跳过 2 个 Windows 专用用例）。
 
 ### M1 领域解耦 P0（低风险归位）
+
+> 注：场景包机制已在多场景平台化改造后移除；以下 M1/M4 条目为历史执行记录，业务资产现位于
+> `app/agents/business/`、`app/agents/prompts/`、`app/tools/custom/`，由注册表显式登记。
 
 - [x] **M1-1 建立场景包目录**（0.5d）
   - `backend/app/packs/customer_service/{agents,prompts,tools,seeds,ui}/`
@@ -161,7 +165,7 @@
 - [x] **M3-3 运维文档**（1–2d）
   - 新增 `docs/quickstart.md`、`configuration.md`、`deployment.md`、`faq.md`；`runbook.md` 保持为排障手册并互相引用
 - [ ] **M3-4 截图与 GIF**（1d）
-  - 本轮按计划跳过；截图清单已写入 [场景包开发指南](./packs.md) 第 9 节（含场景包页与停用客服包验收），待 M4 Docker 演示就绪后统一补录
+  - 本轮按计划跳过；截图清单原记录在《场景包开发指南》（已随机制移除）第 9 节（含场景包页与停用客服包验收），待 M4 Docker 演示就绪后统一补录
 - [x] **M3-5 技术文章**（2–3d，可延后）
   - 首篇初稿完成：`docs/articles/01-multi-intent-routing.md`（多意图路由与提示词去具名化）；外部发布随 M5
 
@@ -180,12 +184,12 @@
   - 验收：停用客服包后系统仍可用（Docker 实测：`PATCH /admin/packs/customer_service {enabled:false}` 后，「笔记本开不了机」路由到 it_incident + it_asset，
     工具 `create_it_ticket`/`query_it_asset` 执行成功，回复 306 字并返回工单号 TK-2E2A151A）
 - [x] **M4-5 场景包文档**（1d）
-  - 新增 [场景包开发指南](./packs.md)：manifest 字段、目录约定、注册链路、包启停与新增包清单
+  - 新增《场景包开发指南》（已随机制移除）：manifest 字段、目录约定、注册链路、包启停与新增包清单
 
 > M4 验收（2026-10-20）：M4-1–M4-5 全部完成。IT Helpdesk 包 3 Agent + 4 工具 + 3 命名空间已接入；
 > 后端 `ruff` 不报错、pytest 324 passed / 3 skipped，两端镜像构建通过；
 > Docker 演示环境实测：两包并存、客服包停用后仍可对话与建单、工单 `metadata.pack=it_helpdesk` 可回溯。
-> 遗留：M3-4 运营台/对话演示截图仍未补录（清单见 [packs.md 第 9 节](./packs.md)）。
+> 遗留：M3-4 运营台/对话演示截图仍未补录（清单见原《场景包开发指南》第 9 节，该文已随机制移除）。
 
 ### M5 v0.1 发布
 

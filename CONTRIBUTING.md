@@ -61,7 +61,7 @@ CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest
 ## 分支与提交
 
 - `main` 始终保持可发布；功能、修复、文档分别使用 `feat/`、`fix/`、`docs/`、`chore/` 前缀分支
-- 提交信息使用 Conventional Commits，例如 `feat: 支持场景包切换`
+- 提交信息使用 Conventional Commits，例如 `feat: 支持业务场景切换`
 - 一个 PR 只做一件事；包含数据库结构变更时，在描述中说明升级方式与回滚方式
 
 ## Pull Request 检查清单
@@ -85,6 +85,7 @@ CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest
 
 当前开发阶段仍以 `scripts/rebuild_and_seed.py` 全量重建为主（会清空数据）。涉及线上兼容的变更，需要在 PR 中说明迁移 SQL，后续版本将接入 Alembic 版本化迁移。
 
-## 场景包与领域边界
+## 业务代码边界
 
-新增业务能力时优先放进场景包目录，不要把客服/工单等业务词汇写进平台内核。具体边界见 [领域解耦清单](docs/domain-decoupling.md)。
+新增业务能力放入 `app/agents/business/`、`app/agents/prompts/` 或 `app/tools/custom/`，
+不要把客服/工单等业务词汇写进平台内核；业务隔离与对外接入通过后台「业务场景」配置。

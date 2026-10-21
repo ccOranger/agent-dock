@@ -49,7 +49,7 @@ JWT_SECRET=<≥32 字节随机串>
 | `APP_HOST` | `0.0.0.0` | 监听地址（uvicorn 由启动命令决定，通常不用改） |
 | `APP_PORT` | `8000` | 容器内端口；宿主机端口用 `BACKEND_PORT` |
 | `LOG_LEVEL` | `INFO` | 日志级别 |
-| `ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174` | CORS 白名单，逗号分隔。单镜像部署前后端同源，无需额外放行 8080；自定义域名/挂件嵌入时再加 |
+| `ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174` | CORS 白名单，逗号分隔。单镜像部署前后端同源，无需额外放行 8080；嵌入场景还会叠加各自 `scenes.allowed_origins`（后台配置，保存后立即生效） |
 
 ### 3.2 种子数据
 
@@ -142,7 +142,18 @@ JWT_SECRET=<≥32 字节随机串>
 
 路由分发器本身不入库、不可在线修改，只读视图见运营台「路由分发器」。
 
-### 3.10 上下文预算
+### 3.10 公开接入（嵌入 / API 对接）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PUBLIC_CHAT_RATE_LIMIT_PER_MINUTE` | `30` | 每个 `scene + user/visitor/ip` 每分钟对话次数；`0` 关闭该项 |
+| `PUBLIC_CHAT_DAILY_QUOTA` | `2000` | 每个 `scene + 主体` 每日配额；`0` 关闭 |
+| `PUBLIC_CHAT_MAX_CONCURRENT` | `3` | 同一主体同时未结束的 SSE 流上限；`0` 不限制 |
+| `SCENE_ORIGIN_CACHE_TTL` | `60` | 场景 `allowed_origins` 的进程内缓存秒数；后台保存来源会主动失效 |
+
+限流依赖 Redis；Redis 不可用时 fail-open（放行并每分钟告警一次）。公开接口与鉴权说明见 [API 速查](api.md#public无需登录嵌入--api-对接)。
+
+### 3.11 上下文预算
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -150,7 +161,7 @@ JWT_SECRET=<≥32 字节随机串>
 | `CONTEXT_SYSTEM_RESERVE` | `800` | 系统提示预留 |
 | `CONTEXT_HISTORY_RESERVE` | `2000` | 历史消息预留 |
 
-### 3.11 链路追踪
+### 3.12 链路追踪
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -160,7 +171,7 @@ JWT_SECRET=<≥32 字节随机串>
 | `TRACE_SAMPLE_RATE` | `1.0` | 正常应答采样率；转人工与异常轮始终全量记录 |
 | `TRACE_RETENTION_DAYS` | `30` | 保留天数，供 `scripts/cleanup_traces.py` 使用 |
 
-### 3.12 Docker Compose 与生产叠加
+### 3.13 Docker Compose 与生产叠加
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -231,6 +242,7 @@ INIT_ON_START=false
 
 - `JWT_SECRET`、`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`QDRANT_API_KEY` 不要提交到仓库；根 `.env` 已被 `.gitignore` 排除。
 - 对外环境关闭 `TRACE_STORE_PAYLOAD`，或确认链路数据的访问权限与保留期符合合规要求。
-- `ALLOWED_ORIGINS` 生产改为实际域名白名单。
+- `ALLOWED_ORIGINS` 生产改为实际域名白名单；嵌入场景还需在后台「场景 → 嵌入配置」维护 `allowed_origins`。
+- 公开聊天限流依赖 Redis，多实例部署共享同一计数；Redis 故障时自动放行，需在监控中关注告警。
 - 上传上限 `UPLOAD_MAX_SIZE_MB` 与 Nginx `client_max_body_size` 必须同步调整。
 - `/metrics` 不在 Nginx 对外暴露；需要指标时用带鉴权的 `/api/v1/admin/metrics`。

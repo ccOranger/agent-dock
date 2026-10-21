@@ -11,17 +11,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 STAFF_ROLES = ("agent", "admin")
 
 
-async def current_user(
-    request: Request,
-    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-):
-    """解析 Bearer Token，按 role 声明到对应表查询并返回账号对象。
-
-    - role == customer → customer_users 表（CustomerUser）
-    - role in (agent, admin) → staff_users 表（StaffUser）
-    """
-    if creds is None:
-        raise Unauthorized()
+async def _load_user(creds: HTTPAuthorizationCredentials, request: Request):
     payload = decode_token(creds.credentials)
     if payload is None:
         raise TokenExpired()
@@ -38,6 +28,37 @@ async def current_user(
     if user is None or not user.is_active:
         raise Unauthorized()
     request.state.user_id = str(user.id)
+    return user
+
+
+async def current_user(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+):
+    """解析 Bearer Token，按 role 声明到对应表查询并返回账号对象。
+
+    - role == customer → customer_users 表（CustomerUser）
+    - role in (agent, admin) → staff_users 表（StaffUser）
+    """
+    if creds is None:
+        raise Unauthorized()
+    return await _load_user(creds, request)
+
+
+async def optional_customer(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+):
+    """聊天入口用：没带 Authorization 返回 None（后续按公开接入/访客处理）。
+
+    带了但无效仍然报错：不能把「Token 过期」静默降级成匿名访客，
+    否则客户会在不知情的情况下丢掉自己的会话与记忆。
+    """
+    if creds is None:
+        return None
+    user = await _load_user(creds, request)
+    if user.role != "customer":
+        raise Forbidden()
     return user
 
 

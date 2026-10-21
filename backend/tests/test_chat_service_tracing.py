@@ -9,14 +9,26 @@ import pytest
 
 from app.core.config import settings
 from app.core.tracing import OUTCOME_ANSWERED, OUTCOME_ERROR
+from app.schemas.scene import DEFAULT_SCENE_ID, SceneContext
 from app.services import chat_service as cs_mod
 from app.services.chat_service import ChatService
+
+_DEFAULT_SCENE = SceneContext(
+    scene_id=DEFAULT_SCENE_ID,
+    code="default",
+    is_default=True,
+    router_mode="direct",
+    agent_names=("default_assistant",),
+    direct_agent="default_assistant",
+)
 
 
 class FakeSession:
     def __init__(self):
         self.id = "11111111-1111-1111-1111-111111111111"
         self.user_id = "22222222-2222-2222-2222-222222222222"
+        self.visitor_id = None
+        self.scene_id = DEFAULT_SCENE_ID
         self.last_route_to = "order_service"
         # 与真实 ORM 默认值保持一致：新建会话标题是占位值，等待首条消息自动补全
         self.title = "新对话"
@@ -39,8 +51,11 @@ def _install_fakes(monkeypatch, *, events, inserted: list, raiser: Exception | N
         def __call__(self):
             return FakeDB()
 
-    async def fake_get_or_create(user_id, session_id, db=None):
+    async def fake_get_or_create_for_actor(actor, scene_id, session_id, db=None):
         return sess
+
+    async def fake_resolve_scene(scene_code=None):
+        return _DEFAULT_SCENE
 
     async def fake_add(session_id, role, content, routed_to=None, db=None):
         seq = "3" if role == "user" else "4"
@@ -55,7 +70,8 @@ def _install_fakes(monkeypatch, *, events, inserted: list, raiser: Exception | N
         inserted.append(row)
 
     monkeypatch.setattr(cs_mod, "SessionLocal", FakeSessionFactory())
-    monkeypatch.setattr(cs_mod.SessionRepo, "get_or_create", fake_get_or_create)
+    monkeypatch.setattr(cs_mod, "resolve_scene", fake_resolve_scene)
+    monkeypatch.setattr(cs_mod.SessionRepo, "get_or_create_for_actor", fake_get_or_create_for_actor)
     monkeypatch.setattr(cs_mod.MessageRepo, "add", fake_add)
     monkeypatch.setattr(cs_mod.MessageRepo, "list_recent", fake_list_recent)
     monkeypatch.setattr(cs_mod.TraceRepo, "insert", fake_insert)

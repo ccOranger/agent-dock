@@ -11,10 +11,11 @@ import logging
 from hello_agents.agents import SimpleAgent
 
 from app.agents.llm_factory import get_llm
-from app.agents.prompts.router import ROUTER_SYSTEM_PROMPT
+from app.agents.prompts.router import GLOBAL_SCENE_RULES, ROUTER_SYSTEM_PROMPT, render_system_prompt
 from app.agents.registry import AGENT_REGISTRY, list_agents, list_effective_agents
 from app.core.config import settings
 from app.core.tracing import SPAN_ROUTER, clip_payload
+from app.schemas.scene import SceneRouterProfile
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +169,8 @@ class RouterAgent:
     def _build_prompt(self) -> str:
         """仅基于代码注册表构建（兼容旧测试；动态列表请用 build_prompt_async）。"""
         agents = list_agents()
-        return ROUTER_SYSTEM_PROMPT.format(
+        return render_system_prompt(
             agent_list=self._format_agent_list(agents),
-            conversation="（无）",
-            last_agent="（无）",
             max_intents=settings.router_max_intents,
             fallback_agent=self.resolve_fallback_agent(agents),
         )
@@ -187,13 +186,23 @@ class RouterAgent:
         history: list[dict] | None,
         query: str,
         last_route_to: str | None,
+        *,
+        scene_block: str = "",
+        max_intents: int | None = None,
+        fallback_agent: str | None = None,
     ) -> str:
-        return ROUTER_SYSTEM_PROMPT.format(
+        """渲染本轮系统提示词。
+
+        场景档案（SceneRouterProfile）与全局视图共用本方法：候选清单、场景约束、
+        意图上限与兜底名都可由调用方显式传入，避免两套渲染逻辑漂移。
+        """
+        return render_system_prompt(
             agent_list=RouterAgent._format_agent_list(agents),
+            scene_rules=scene_block or GLOBAL_SCENE_RULES,
             conversation=RouterAgent._format_conversation(history, query),
             last_agent=last_route_to or "（无）",
-            max_intents=settings.router_max_intents,
-            fallback_agent=RouterAgent.resolve_fallback_agent(agents),
+            max_intents=max_intents if max_intents is not None else settings.router_max_intents,
+            fallback_agent=fallback_agent or RouterAgent.resolve_fallback_agent(agents),
         )
 
     @staticmethod
@@ -271,16 +280,41 @@ class RouterAgent:
         history: list[dict] | None = None,
         last_route_to: str | None = None,
         collector=None,
+        profile: SceneRouterProfile | None = None,
     ) -> dict:
-        """识别意图，返回 {"intents": [...], "agent_name"/"confidence"/"reason"(主意图，兼容旧调用方)}。"""
-        # 每次路由实时拼入动态 Agent 清单，使后台新增的 Agent 无需改代码即可被路由到
-        agents = await list_effective_agents()
-        valid_names = {a["name"] for a in agents}
-        fallback_agent = self.resolve_fallback_agent(agents)
-        system_prompt = self._render_prompt(agents, history, query, last_route_to)
+        """识别意图，返回 {"intents": [...], "agent_name"/"confidence"/"reason"(主意图，兼容旧调用方)}。
+
+        - profile 非空：候选、场景约束、模型、意图上限与兜底全部取自场景路由档案，
+          路由只能在本场景池内选择；
+        - profile 为空：保留旧的全局视图行为（候选=全部生效 Agent），仅供兼容调用。
+        """
+        if profile is not None:
+            agents = [dict(c) for c in profile.candidates if c.get("name")]
+            valid_names = {a["name"] for a in agents}
+            fallback_agent = profile.fallback_agent or self.resolve_fallback_agent(agents)
+            max_intents = profile.max_intents
+            model = profile.model
+            system_prompt = self._render_prompt(
+                agents,
+                history,
+                query,
+                last_route_to,
+                scene_block=profile.scene_block,
+                max_intents=max_intents,
+                fallback_agent=fallback_agent,
+            )
+        else:
+            # 每次路由实时拼入动态 Agent 清单，使后台新增的 Agent 无需改代码即可被路由到
+            agents = await list_effective_agents()
+            valid_names = {a["name"] for a in agents}
+            fallback_agent = self.resolve_fallback_agent(agents)
+            max_intents = settings.router_max_intents
+            model = settings.router_model
+            system_prompt = self._render_prompt(agents, history, query, last_route_to)
         agent = SimpleAgent(
             name=ROUTER_AGENT_NAME,
-            llm=self.llm,
+            # 场景可覆盖路由模型：不同模型共用一个进程级客户端缓存
+            llm=self.llm if model == settings.router_model else get_llm(model),
             system_prompt=system_prompt,
             tool_registry=None,
         )
@@ -296,19 +330,34 @@ class RouterAgent:
             # 路由原始输出必须留存：只能靠它区分“模型判错”还是“解析失败”
             fallback_hit = bool(primary.get("is_fallback")) or primary["reason"] == FALLBACK_REASON
             raw_text, raw_truncated = clip_payload(raw)
+            span_extra = {}
+            if profile is not None:
+                # 场景身份与配置指纹一起入链路：同一 prompt_hash 的兜底率才有可比性
+                span_extra = {
+                    "scene_code": profile.scene_code,
+                    "candidate_count": len(valid_names),
+                    "prompt_hash": profile.prompt_hash,
+                    "router_mode": profile.mode,
+                }
             collector.add(
                 SPAN_ROUTER,
-                settings.router_model,
+                model,
                 started_ms=started_ms,
                 status="error" if fallback_hit else "ok",
-                model=settings.router_model,
+                model=model,
                 candidate_agents=len(valid_names),
                 intent_count=len(intents),
                 fallback=fallback_hit or None,
                 raw=raw_text,
                 raw_truncated=raw_truncated or None,
+                **span_extra,
             )
-            collector.add_unique("llm_models", settings.router_model)
+            collector.add_unique("llm_models", model)
+            # 拍平字段：路由耗时 / 配置指纹 / 兜底标记，后台统计直接聚合这些列
+            collector.router_ms = collector.now_ms() - started_ms
+            collector.router_fallback = collector.router_fallback or fallback_hit
+            if profile is not None:
+                collector.prompt_hash = profile.prompt_hash
 
         return {
             "intents": intents,
@@ -317,6 +366,10 @@ class RouterAgent:
             "reason": primary["reason"],
             # 本轮生效的兜底 Agent（由清单派生）：供调度层在意图 Agent 不可用时回落
             "fallback_agent": fallback_agent,
+            # 场景档案信息透传给调度层与后台试运行
+            "mode": profile.mode if profile is not None else "global",
+            "fallback_text": profile.fallback_text if profile is not None else None,
+            "prompt_hash": profile.prompt_hash if profile is not None else None,
         }
 
 
@@ -336,11 +389,16 @@ def _clue_level(keywords: list[str], examples: list[str]) -> str:
 
 
 def _candidate_brief(agent: dict) -> dict:
-    """单个候选 Agent 的路由视角摘要：完整线索 + 实际注入提示词的部分（受条数上限截断）。"""
+    """单个候选 Agent 的路由视角摘要：完整线索 + 实际注入提示词的部分（受条数上限截断）。
+
+    保留 id：场景配置的 fallback_agent_id 要靠它在候选池内匹配；
+    提示词渲染只读 name/description/routing_*，多余字段不会进入提示词。
+    """
     name = str(agent.get("name") or "")
     keywords = [str(k).strip() for k in (agent.get("routing_keywords") or []) if str(k).strip()]
     examples = [str(e).strip() for e in (agent.get("routing_examples") or []) if str(e).strip()]
     return {
+        "id": str(agent.get("id") or ""),
         "name": name,
         "description": agent.get("description") or name,
         "source": "code" if name in AGENT_REGISTRY else "dynamic",
@@ -384,6 +442,10 @@ def describe_router_agent() -> dict:
         "examples_limit": ROUTING_EXAMPLES_LIMIT,
         "system_prompt_template": ROUTER_SYSTEM_PROMPT,
         "placeholders": [
+            {
+                "name": "{scene_rules}",
+                "desc": "本场景的候选边界与补充规则（全局视图下为“不限定场景”）",
+            },
             {
                 "name": "{agent_list}",
                 "desc": "生效 Agent 清单（名称 + 适用范围 + 关键词 + 典型问法），每轮按库中现状实时渲染",

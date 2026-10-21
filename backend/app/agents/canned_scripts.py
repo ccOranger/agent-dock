@@ -269,21 +269,21 @@ def rule_from_row(row) -> ScriptRule:
 _warned_read_failure = False
 
 
-async def load_rules() -> list[ScriptRule]:
-    """读取启用中的话术规则；异常交由 match_canned_script 处理。"""
+async def load_rules(scene_id: str | None = None) -> list[ScriptRule]:
+    """读取启用中的话术规则（全局 + 本场景，同 key 场景覆盖全局）。"""
     from app.models.repositories import CannedScriptRepo
 
-    rows = await CannedScriptRepo.list_enabled()
+    rows = await CannedScriptRepo.list_enabled(scene_id)
     rules = [rule_from_row(r) for r in rows]
     # 正文为空等于没配（后台新建未填文案时不该把客户引到一句空回复上）
     return [r for r in rules if r.text.strip() and (r.patterns or r.keywords)]
 
 
-async def match_canned_script(query: str) -> CannedScript | None:
+async def match_canned_script(query: str, scene_id: str | None = None) -> CannedScript | None:
     """一轮消息的固定话术判定：只看 DB；读不到就当没配，本轮正常走路由。"""
     global _warned_read_failure
     try:
-        rules = await load_rules()
+        rules = await load_rules(scene_id)
     except Exception as exc:  # noqa: BLE001
         # 表未建/DB 抖动都不能影响对话；不能回落代码规则，否则后台停用的话术会“停了但还在回”。
         # 热路径每轮都进这里，只告警一次避免刷屏，排查靠 runbook 的固定话术条目。

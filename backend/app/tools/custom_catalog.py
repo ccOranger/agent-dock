@@ -1,20 +1,45 @@
-"""自定义工具目录：场景包声明的 BaseTool 可发现清单。
+"""自定义工具目录：代码托管 BaseTool 的可发现清单。
 
 设计要点（见「自定义工具管理功能」方案）：
-- 工具实现来自场景包（packs/<name>/tools），本模块只做内核侧索引——把 packs.loader
-  按 manifest 装载的工具集中列出，暴露 name/description/parameters（parameters 即
-  JSON Schema），供后台扫描展示、勾选登记到 tools 表（type=custom），再由动态 Agent
-  按名绑定。
-- 不再硬编码 import：新增工具时在所属场景包的 manifest.yaml 的 tools 段登记即可。
+- 工具实现在 app/tools/custom/ 下，本模块集中登记并暴露 name/description/parameters
+  （parameters 即 JSON Schema），供后台扫描展示、勾选登记到 tools 表（type=custom），
+  再由动态 Agent 按名绑定。
+- 新增工具：实现 BaseTool 子类，并在 _TOOL_CLASSES 中补一行。
 - 所有工具均为无参构造（会话上下文 user_id/session_id 由 orchestrator 执行时按参数
   声明自动注入），故 build() 直接 cls() 实例化。
 """
-from app.packs.loader import get_custom_tools
 from app.tools.custom.base import BaseTool
+from app.tools.custom.it_asset_tool import QueryItAssetTool
+from app.tools.custom.it_ticket_tool import CreateItTicketTool, EscalateItTool, UpdateItTicketTool
+from app.tools.custom.logistics_tool import QueryLogisticsTool
+from app.tools.custom.order_tool import ListOrdersTool, ModifyOrderTool, QueryOrderTool
+from app.tools.custom.refund_tool import QueryRefundTool, SubmitRefundTool
+from app.tools.custom.ticket_tool import CreateTicketTool, EscalateTool, UpdateTicketTool
 
-# name -> 工具类（键即类属性 name，全局唯一，与 tools.name / MCP 名共用唯一约束）
-# 先拷贝一层，避免调用方改动影响 loader 的进程缓存
-CATALOG: dict[str, type[BaseTool]] = dict(get_custom_tools())
+# 代码托管的全部自定义工具：name 由类属性声明，全局唯一
+_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
+    QueryOrderTool,
+    ListOrdersTool,
+    ModifyOrderTool,
+    QueryLogisticsTool,
+    SubmitRefundTool,
+    QueryRefundTool,
+    CreateTicketTool,
+    UpdateTicketTool,
+    EscalateTool,
+    CreateItTicketTool,
+    UpdateItTicketTool,
+    EscalateItTool,
+    QueryItAssetTool,
+)
+
+_tool_names = [cls.name for cls in _TOOL_CLASSES]
+_duplicates = sorted({n for n in _tool_names if _tool_names.count(n) > 1})
+if _duplicates:
+    raise RuntimeError(f"自定义工具名称重复: {_duplicates}")
+
+# name -> 工具类（与 tools.name / MCP 名共用唯一约束）
+CATALOG: dict[str, type[BaseTool]] = {cls.name: cls for cls in _TOOL_CLASSES}
 
 
 def exists(name: str) -> bool:

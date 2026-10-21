@@ -6,9 +6,10 @@ from fastapi.testclient import TestClient
 
 from app.agents import registry
 from app.agents.business.dynamic_agent import DynamicBusinessAgent
+from app.agents.business.knowledge_agent import KnowledgeAgent
 from app.api.v1 import admin as adm
 from app.models.repositories import AgentRepo
-from app.packs.customer_service.agents.knowledge_agent import KnowledgeAgent
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME
 
 
 def _dyn_meta(name="dyn1", **kw):
@@ -121,8 +122,13 @@ async def test_list_dynamic_agents_carries_routing_clues(monkeypatch):
 
 
 def test_code_agents_declare_routing_clues():
-    """三个代码 Agent 已声明路由线索（提示词不再硬编码具名优先规则，靠它们补足判别依据）。"""
+    """业务代码 Agent 必须声明路由线索（提示词不再硬编码具名优先规则）。
+
+    default_assistant 是默认场景的内核 Agent，固定直连、不参与路由，故不要求线索。
+    """
     for item in registry.list_agents():
+        if item["name"] == DEFAULT_ASSISTANT_NAME:
+            continue
         assert item["routing_keywords"], f"{item['name']} 缺 routing_keywords"
         assert item["routing_examples"], f"{item['name']} 缺 routing_examples"
 

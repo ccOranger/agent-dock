@@ -15,6 +15,7 @@ import pytest
 
 from app.agents import canned_scripts as cs
 from app.agents.base_business_agent import BaseBusinessAgent
+from app.agents.business.knowledge_agent import KnowledgeAgent
 from app.agents.canned_scripts import (
     CAPABILITY_TEXT,
     IDENTITY_TEXT,
@@ -27,10 +28,9 @@ from app.agents.canned_scripts import (
     rule_from_row,
 )
 from app.agents.orchestrator import Orchestrator
+from app.agents.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
 from app.core.tracing import OUTCOME_ANSWERED, SPAN_CANNED, TraceCollector
 from app.models.repositories import CannedScriptRepo
-from app.packs.customer_service.agents.knowledge_agent import KnowledgeAgent
-from app.packs.customer_service.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
 
 # 业务提示词开头片段（用于断言格式约束是后置追加、没顶掉原有提示词）
 KNOWLEDGE_HEAD = KNOWLEDGE_SYSTEM_PROMPT.strip()[:12]
@@ -174,7 +174,7 @@ def _row(
 
 
 async def _patch_enabled(monkeypatch, rows):
-    async def fake_list_enabled():
+    async def fake_list_enabled(scene_id=None):
         return [_FakeRow(r) for r in rows]
 
     monkeypatch.setattr(CannedScriptRepo, "list_enabled", fake_list_enabled)
@@ -216,7 +216,7 @@ async def test_empty_table_means_no_canned_scripts(monkeypatch):
 
 
 async def test_db_failure_skips_canned_without_breaking_chat(monkeypatch):
-    async def boom():
+    async def boom(scene_id=None):
         raise RuntimeError("表不存在")
 
     monkeypatch.setattr(CannedScriptRepo, "list_enabled", boom)

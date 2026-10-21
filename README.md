@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/ccOranger/smart-cs/actions/workflows/ci.yml/badge.svg)](https://github.com/ccOranger/smart-cs/actions/workflows/ci.yml)
 
-> **可私有化部署的对话式 Agent 运营平台。** 把多意图路由、知识库、工具调用、跨轮记忆和全链路追踪装进一个管理台；客服/售后是首个场景包，不是产品边界。
+> **可私有化部署的对话式 Agent 运营平台。** 一套代码、一个聊天入口、多业务场景：后台建场景、绑 Agent 与知识库，再用一行 script 嵌入第三方页面；客服/售后只是首个内置业务，不是产品边界。
 
 仓库代号仍为 `smart-cs`：Compose 项目名、Python 包名与目录结构保持不变，产品对外名称统一为 **AgentDock**。
 
-> 当前为 v0.1 早期版本，接口、表结构与场景包契约仍可能调整；升级前请先备份。
+> 当前为 v0.1 早期版本，接口与表结构仍可能调整；升级前请先备份。
 
 ## 它解决什么问题
 
@@ -16,6 +16,8 @@ AgentDock 把这些做成平台能力，而不是某个业务里的临时代码�
 
 | 能力 | 说明 | 关键开关 |
 |---|---|---|
+| **业务场景** | 一个 `/chat/stream` 用 `scene_code` 区分场景；每个场景有独立 Agent 池、路由档案、话术、知识库范围、会话与记忆；无码请求落默认场景 | 运营台「业务场景」 |
+| **嵌入 / API 接入** | 一行 script 气泡组件（iframe 隔离宿主样式）；公开配置 + 访客签发；客户 Token / API key / 发布标识 / 已发布匿名四种鉴权 | 场景「接入」、`/public/scenes/*` |
 | **多意图路由** | 一条消息拆成多个意图，按主次串行应答；追问自动续接上一轮 Agent；"不贴合任何 Agent"时可先由兜底 Agent 应答 | `ROUTER_MAX_INTENTS` / `ROUTER_CONFIDENCE_THRESHOLD` / `ROUTER_FALLBACK_ANSWER` |
 | **混合 Agent 注册** | 代码托管 Agent 与后台动态 Agent 同时注册；新增/停用实时进入路由候选，无需改路由代码 | 运营台「Agent 管理」 |
 | **路由线索** | 每个 Agent 声明触发关键词与典型问法，路由提示词去具名化，不偏向任何内置 Agent | `routing_keywords` / `routing_examples` |
@@ -26,19 +28,20 @@ AgentDock 把这些做成平台能力，而不是某个业务里的临时代码�
 | **全链路追踪** | 每轮对话的路由、LLM、工具、RAG、记忆调用都有 spans 与耗时；可采样、可设保留期 | `TRACE_*` |
 | **固定话术** | 高频确定性问题在路由与大模型之前逐字命中，后台可测命中、可停用 | 运营台「固定话术」 |
 | **双端身份** | 后台人员与客户分表、分登录入口、Token 隔离；客户可自助注册 | `/auth/staff/*`、`/auth/customer/*` |
-| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、场景包、记忆、仪表盘 | `http://<host>:8080/admin/` |
-| **场景包** | 客服/售后与 IT Helpdesk 两个内置包；manifest 声明 Agent/工具/知识库，运营台可整体启停 | 运营台「场景包」 |
+| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘 | `http://<host>:8080/admin/` |
 
 ## 架构
 
 ```mermaid
 flowchart LR
     C[客户对话端] --> N[Nginx / Caddy]
+    W[第三方页面 / 嵌入组件] --> N
     A[运营管理台] --> N
     N -->|/api| API[FastAPI]
-    API --> R[RouterAgent]
-    R --> O[Orchestrator]
-    O --> B[业务 Agent]
+    API --> S{场景解析 scene_code}
+    S -->|默认场景| D[default_assistant 直连]
+    S -->|业务场景| R[场景路由档案]
+    R --> O[Orchestrator] --> B[场景内业务 Agent]
     B --> PG[(PostgreSQL)]
     B --> Q[(Qdrant)]
     B --> RD[(Redis)]
@@ -48,10 +51,11 @@ flowchart LR
 
 一轮消息的处理顺序：
 
-1. 固定话术命中则直接逐字下发（不进入路由，也不调用大模型）；
-2. `RouterAgent` 输出按主次排序的意图数组，低置信主意图整轮转人工；
-3. `Orchestrator` 串行调度各业务 Agent：上下文工程 → 记忆召回 → RAG 检索 → 工具调用 → 流式应答；
-4. 每个环节写入 `request_traces.spans`，SSE 的 `done` 事件带上 `trace_id`，可在运营台直达本轮链路。
+1. 先解析 `scene_code`：缺省落默认场景（直连），未知/停用返回 3003/3004；
+2. 固定话术命中则直接逐字下发（不进入路由，也不调用大模型）；
+3. 场景内 1 个 Agent 直连，2 个及以上由 `RouterAgent` 输出按主次排序的意图数组；低置信主意图整轮转人工；
+4. `Orchestrator` 串行调度各业务 Agent：上下文工程 → 记忆召回 → RAG 检索 → 工具调用 → 流式应答；
+5. 每个环节写入 `request_traces.spans`，SSE 的 `done` 事件带上 `trace_id`，可在运营台直达本轮链路。
 
 ## 快速开始（Docker Compose）
 
@@ -104,27 +108,35 @@ docker compose logs backend | grep -i "密码"     # Windows: docker compose log
 
 更细的步骤与常见报错见 [快速开始](docs/quickstart.md)。
 
-## 场景包
+## 接入一个新业务（不改代码）
 
-平台内核只认 manifest 的通用字段，业务资产放在 `backend/app/packs/<pack>/`：
+1. 运营台「知识库」建库并上传文档；
+2. 「Agent 管理」建动态 Agent：写 `system_prompt`、路由关键词/典型问法，按需绑定 MCP 或自定义工具；
+3. 「业务场景」新建场景，绑定 Agent（顺序即候选顺序）、归属知识库；
+4. 点该行「接入」：设置气泡标题/欢迎语/主题色与允许来源，打开「开放匿名」，复制嵌入代码。
 
-```
-backend/app/packs/
-  customer_service/   # 客服/售后：3 Agent、9 工具、3 知识库
-  it_helpdesk/        # IT 服务台：3 Agent、4 工具、3 知识库
-    manifest.yaml     # name / display_name / version / enabled / features / agents / tools / knowledge.namespaces
-    agents/           # 代码 Agent（继承 BaseBusinessAgent）
-    prompts/          # 业务提示词
-    tools/            # 领域工具（订单、物流、退款、工单 / 资产查询、IT 工单）
-    seeds/            # 演示数据与知识库文档（占位）
-    ui/               # 场景文案
+```html
+<script src="https://your-host/widget.js" data-scene="your_scene"></script>
 ```
 
-约束：内核不 import 包内模块，由 `packs/loader.py` 反向注册；包可以依赖平台能力，平台不依赖包。
-运营台「场景包」页可查看包内 Agent/工具/知识库并整体启停（复用 `agents.enabled`）；
-`features: [tickets]` 控制工单导航显隐。IT 包默认启用，可与客服包同时存在或单独启用。
+没有 `scene_code` 的请求落默认场景（`default_assistant` 直连）。只用 API 对接时走
+`POST /api/v1/chat/stream`，场景配置与访客签发走 `/api/v1/public/scenes/{code}`，详见 [API 速查](docs/api.md)。
 
-新增场景包与包启停细节见 [场景包开发指南](docs/packs.md)，领域边界见 [领域解耦清单](docs/domain-decoupling.md)。
+场景的设计取舍、隔离边界与里程碑见 [多场景开发文档](docs/multi-scene-development.md)。
+
+## 扩展业务能力
+
+业务 Agent 与自定义工具都是普通代码资产，目录如下：
+
+```
+backend/app/agents/business/   # 代码 Agent（继承 BaseBusinessAgent）
+backend/app/agents/prompts/    # 业务提示词
+backend/app/tools/custom/      # 自定义工具（继承 BaseTool）
+```
+
+新增后分别在登记表补一行——`app/agents/registry.py` 的 `_CODE_AGENTS`、
+`app/tools/custom_catalog.py` 的 `_TOOL_CLASSES`——重启后端生效。随后可在后台「业务场景」
+把 Agent 绑定到场景；动态 Agent 可直接勾选已登记的自定义工具。运行时隔离与多业务接入由「业务场景」负责。
 
 ## 生产部署
 
@@ -160,7 +172,8 @@ cd backend
 uv venv --python 3.12
 uv pip install -r requirements-dev.txt --python .venv/Scripts/python.exe
 cp .env.example .env             # 本地库/Redis/Qdrant 连接串
-python ../scripts/seed_data.py   # 建表 + 种子（幂等）
+python ../scripts/init_db.py     # 建表（幂等）
+python ../scripts/seed_data.py   # 种子（幂等；全新库可用 ../scripts/rebuild_and_seed.py）
 .venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 # 前端（仓库根，npm workspaces）
@@ -174,7 +187,7 @@ npm run dev:admin                # http://localhost:5174
 ## 目录结构
 
 ```
-backend/          FastAPI + HelloAgents（app/{api,core,agents,packs,tools,models,services}）
+backend/          FastAPI + HelloAgents（app/{api,core,agents,tools,models,services}）
 frontend/         客户对话端（Vue 3）
 admin-frontend/   运营管理台（Vue 3）
 packages/shared/  npm workspaces 共享包 @cs/shared（http / auth / SSE / 类型）
@@ -192,7 +205,7 @@ docs/             快速开始、配置、部署、FAQ、运维手册、规范�
 | [部署指南](docs/deployment.md) | Compose、生产叠加、HTTPS、备份恢复 |
 | [常见问题](docs/faq.md) | 模型接入、Qdrant、MCP、Windows 编码、端口冲突 |
 | [运维手册](docs/runbook.md) | 服务清单、排障、数据维护、安全 |
-| [场景包开发](docs/packs.md) | manifest 契约、新增包步骤、包启停、IT Helpdesk 演示与截图清单 |
+| [多场景开发](docs/multi-scene-development.md) | 场景/路由档案/隔离/公开接入/嵌入组件的设计与落地记录 |
 | [API 速查](docs/api.md) | 接口、SSE 事件与错误码 |
 | [技术文章](docs/articles/01-multi-intent-routing.md) | 多意图路由与提示词去具名化 |
 | [开发规范](docs/spec.md) | Spec v2.0，与实现同步 |
@@ -202,11 +215,9 @@ docs/             快速开始、配置、部署、FAQ、运维手册、规范�
 
 | 阶段 | 状态 | 内容 |
 |---|---|---|
-| M0–M2 | 已完成 | 工程基线、场景包解耦、前端单仓化、一键部署与初始化向导 |
-| M3 | 进行中 | 命名、README、运维文档、演示物料、技术文章 |
-| M4 | 进行中 | IT Helpdesk 场景包：验证“同一内核、不同场景”，含包启停与运营台导航显隐 |
-| M5 | 计划中 | v0.1 正式发布（Release Notes、镜像、社区） |
-| 发布后 | 按反馈 | 聊天挂件化、RBAC/SSO、版本化迁移、评测与回归 |
+| M0–M4 | 已完成 | 工程基线、业务代码分层、前端单仓化、一键部署、IT Helpdesk |
+| 多场景 M0–M7 | 已完成 | 场景与路由档案、五类隔离、公开接入与限流、嵌入组件、重建验证 |
+| v0.2 | 进行中 | 发布物料、版本化迁移、RBAC/SSO、评测与回归集 |
 
 ## 明确不做（12 个月内）
 
@@ -214,13 +225,13 @@ docs/             快速开始、配置、部署、FAQ、运维手册、规范�
 - 计费系统与自助订阅；
 - 多租户 SaaS 隔离（当前单实例单租户，仅预留 `tenant_id`）；
 - 移动端 App、自研模型/向量库/工单全流程；
-- 为单个客户 fork 代码（只接受配置与场景包定制）。
+- 为单个客户 fork 代码（只接受配置、场景与 Agent/工具定制）。
 
 ## 贡献与安全
 
 - [贡献指南](CONTRIBUTING.md)
 - [安全策略](SECURITY.md)
-- 场景包与领域边界见 [领域解耦清单](docs/domain-decoupling.md)，产品定位见 [定位文档](docs/positioning.md)
+- 产品定位见 [定位文档](docs/positioning.md)
 
 ## 许可证
 

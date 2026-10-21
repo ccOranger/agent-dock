@@ -4,6 +4,9 @@ import vue from '@vitejs/plugin-vue'
 
 // 管理后台：独立端口 5174，与客户前端(5173)分离，共用同一后端。
 // 生产镜像由 Nginx 挂在 /admin/ 下（构建时 VITE_BASE=/admin/），开发模式保持根路径。
+// 本地联调可指向其他后端端口（如 VITE_API_TARGET=http://localhost:8001）
+const apiTarget = process.env.VITE_API_TARGET || 'http://localhost:8000'
+
 export default defineConfig({
   base: process.env.VITE_BASE || '/',
   plugins: [vue()],
@@ -18,13 +21,13 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: apiTarget,
         changeOrigin: true,
       },
       // Prometheus 指标端点（后端 main.py 根路径 /metrics，无需鉴权），
       // Dashboard 通过相对链接 /metrics 访问，必须显式代理，否则被 Vite SPA 回退吞掉。
       '/metrics': {
-        target: 'http://localhost:8000',
+        target: apiTarget,
         changeOrigin: true,
       },
     },

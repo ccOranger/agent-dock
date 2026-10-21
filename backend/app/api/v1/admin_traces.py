@@ -32,6 +32,7 @@ async def list_traces(
     page_size: int = Query(20, ge=1, le=100),
     session_id: str | None = None,
     user_id: str | None = None,
+    scene_code: str | None = Query(None, description="按业务场景过滤（如 default / mall_order）"),
     agent_name: str | None = None,
     tool_name: str | None = None,
     mcp_server: str | None = None,
@@ -42,10 +43,11 @@ async def list_traces(
     date_to: str | None = None,
     user=Depends(require_staff),
 ):
-    """链路列表（不带 spans 明细）：支持按客户/会话/Agent/工具/MCP/结局/耗时/时间过滤。"""
+    """链路列表（不带 spans 明细）：支持按场景/客户/会话/Agent/工具/MCP/结局/耗时/时间过滤。"""
     items, total = await TraceRepo.list_filtered(
         session_id=session_id,
         user_id=user_id,
+        scene_code=scene_code,
         agent_name=agent_name,
         tool_name=tool_name,
         mcp_server=mcp_server,

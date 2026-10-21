@@ -19,6 +19,7 @@ from app.schemas.api import (
     MCPServerUpdate,
 )
 from app.schemas.common import ApiResponse
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME
 from app.tools import custom_catalog
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -42,10 +43,12 @@ async def agents(user=Depends(require_admin)):
                 "stale": False,
                 "enabled": meta.enabled if meta else True,
                 "display_name": (meta.display_name if meta and meta.display_name else item["name"]),
+                "scene_id": None,
             }
         )
     # 2) 动态 Agent + 已失效的孤儿代码行（定义均来自 DB）
     for name, meta in db_rows.items():
+        scene_id = str(meta.scene_id) if getattr(meta, "scene_id", None) else None
         if meta.source == "dynamic":
             result.append(
                 {
@@ -66,6 +69,7 @@ async def agents(user=Depends(require_admin)):
                     "search_all_knowledge_bases": meta.search_all_knowledge_bases,
                     "registered_tools": _dynamic_registered_tools(meta),
                     "sort_order": meta.sort_order,
+                    "scene_id": scene_id,
                 }
             )
         elif meta.source == "code" and name not in registry_names:
@@ -83,6 +87,7 @@ async def agents(user=Depends(require_admin)):
                     "enabled": meta.enabled,
                     "display_name": meta.display_name or meta.name,
                     "system_prompt": meta.system_prompt,
+                    "scene_id": scene_id,
                 }
             )
     return ApiResponse(data=result)
@@ -91,6 +96,7 @@ async def agents(user=Depends(require_admin)):
 @router.get("/agents/{name}", response_model=ApiResponse[dict])
 async def agent_detail(name: str, user=Depends(require_admin)):
     meta = await AgentRepo.get_by_name(name)
+    scene_id = str(meta.scene_id) if meta is not None and getattr(meta, "scene_id", None) else None
     if meta is not None and meta.source == "dynamic":
         return ApiResponse(
             data={
@@ -109,12 +115,19 @@ async def agent_detail(name: str, user=Depends(require_admin)):
                 "rag_namespaces": list(meta.rag_namespaces or []),
                 "search_all_knowledge_bases": meta.search_all_knowledge_bases,
                 "registered_tools": _dynamic_registered_tools(meta),
+                "scene_id": scene_id,
             }
         )
     for item in list_agents():
         if item["name"] == name:
             return ApiResponse(
-                data={**item, "source": "code", "stale": False, "enabled": meta.enabled if meta else True}
+                data={
+                    **item,
+                    "source": "code",
+                    "stale": False,
+                    "enabled": meta.enabled if meta else True,
+                    "scene_id": None,
+                }
             )
     # 代码已下线的孤儿 source=code 行：以 DB 镜像回显，标记已失效
     if meta is not None and meta.source == "code":
@@ -133,6 +146,7 @@ async def agent_detail(name: str, user=Depends(require_admin)):
                 "system_prompt": meta.system_prompt,
                 "rag_namespaces": list(meta.rag_namespaces or []),
                 "search_all_knowledge_bases": meta.search_all_knowledge_bases,
+                "scene_id": scene_id,
             }
         )
     raise NotFound("Agent 不存在")
@@ -218,6 +232,9 @@ async def toggle_agent(name: str, body: AgentToggleRequest, user=Depends(require
     meta = await AgentRepo.get_by_name(name)
     if meta is None:
         raise NotFound("Agent 未登记")
+    # 默认场景只绑定这一个兜底 Agent：停用它等于把无 scene_code 的请求全部打挂
+    if name == DEFAULT_ASSISTANT_NAME and not body.enabled:
+        raise ParamError("默认场景的兜底助手不可停用")
     await AgentRepo.set_enabled(name, body.enabled)
     return ApiResponse()
 

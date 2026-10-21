@@ -4,6 +4,21 @@
       <div class="card-header">
         <b>固定话术</b>
         <div class="header-ops">
+          <el-select
+            v-model="sceneFilter"
+            placeholder="全部场景"
+            clearable
+            style="width: 150px"
+            @change="load"
+          >
+            <el-option label="全部场景" value="" />
+            <el-option
+              v-for="scene in scenes"
+              :key="scene.code"
+              :label="scene.display_name"
+              :value="scene.code"
+            />
+          </el-select>
           <el-button size="small" @click="load">刷新</el-button>
           <el-button type="primary" size="small" @click="openCreate">新增话术</el-button>
         </div>
@@ -73,6 +88,12 @@
         </template>
       </el-table-column>
       <el-table-column prop="priority" label="优先级" width="80" sortable />
+      <el-table-column label="归属" width="120">
+        <template #default="{ row }">
+          <el-tag v-if="row.scene_id" size="small" type="success">{{ sceneName(row.scene_id) }}</el-tag>
+          <el-tag v-else size="small" type="info">全局</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="标识" width="150">
         <template #default="{ row }">
           <span>{{ row.key }}</span>
@@ -127,6 +148,20 @@
     <el-form :model="form" label-width="110px">
       <el-form-item label="标识" required>
         <el-input v-model="form.key" :disabled="editing" placeholder="唯一标识，小写字母/数字/下划线，如 business_hours" />
+      </el-form-item>
+      <el-form-item label="归属场景">
+        <el-select v-model="form.scene_code" :disabled="editing" clearable placeholder="全局" style="width: 100%">
+          <el-option label="全局（所有场景共用）" value="" />
+          <el-option
+            v-for="scene in scenes"
+            :key="scene.code"
+            :label="scene.display_name"
+            :value="scene.code"
+          />
+        </el-select>
+        <div class="rule-tip">
+          全局话术（如探听拒答）对所有场景生效；场景话术只在绑定场景内生效，且同标识会覆盖全局行。归属创建后不可修改。
+        </div>
       </el-form-item>
       <el-form-item label="名称">
         <el-input v-model="form.title" placeholder="可选，后台展示用，如 营业时间" />
@@ -218,13 +253,22 @@ import {
   apiCreateCannedScript,
   apiDeleteCannedScript,
   apiListCannedScripts,
+  apiSceneOptions,
   apiToggleCannedScript,
   apiUpdateCannedScript,
 } from '@/api'
-import type { CannedMatchResult, CannedScript, CannedScriptCategory, CannedScriptPayload } from '@/types'
+import type {
+  CannedMatchResult,
+  CannedScript,
+  CannedScriptCategory,
+  CannedScriptPayload,
+  SceneOption,
+} from '@/types'
 import { CANNED_CATEGORY_LABELS } from '@/types'
 
 const scripts = ref<CannedScript[]>([])
+const scenes = ref<SceneOption[]>([])
+const sceneFilter = ref('')
 const loading = ref(false)
 const dialogVisible = ref(false)
 const editing = ref(false)
@@ -239,11 +283,15 @@ const categoryOptions = (Object.keys(CANNED_CATEGORY_LABELS) as CannedScriptCate
   label: CANNED_CATEGORY_LABELS[value],
 }))
 
-// 表单里 title 用空串表示“未填”，提交时再转成 null，避免可空字段到处判空
-type ScriptForm = Omit<CannedScriptPayload, 'title'> & { title: string }
+// 表单里 title 用空串表示“未填”，scene_code 用空串表示“全局”，提交时再转成 null
+type ScriptForm = Omit<CannedScriptPayload, 'title' | 'scene_code'> & {
+  title: string
+  scene_code: string
+}
 
 const form = reactive<ScriptForm>({
   key: '',
+  scene_code: '',
   title: '',
   category: 'business',
   patterns: [],
@@ -259,6 +307,17 @@ function categoryLabel(category?: CannedScriptCategory | null) {
 
 const enabledCount = computed(() => scripts.value.filter((s) => s.enabled).length)
 
+const sceneById = computed(() => new Map(scenes.value.map((s) => [s.id, s])))
+
+function sceneName(sceneId?: string | null) {
+  if (!sceneId) return '全局'
+  return sceneById.value.get(sceneId)?.display_name || '未知场景'
+}
+
+function sceneCodeOf(row: CannedScript) {
+  return row.scene_id ? sceneById.value.get(row.scene_id)?.code || null : null
+}
+
 function oneLine(text: string) {
   return (text || '').replace(/\s+/g, ' ').trim().slice(0, 60)
 }
@@ -266,7 +325,7 @@ function oneLine(text: string) {
 async function load() {
   loading.value = true
   try {
-    scripts.value = await apiListCannedScripts()
+    scripts.value = await apiListCannedScripts(sceneFilter.value || undefined)
   } finally {
     loading.value = false
   }
@@ -280,7 +339,7 @@ async function runMatch() {
   }
   matching.value = true
   try {
-    matchResult.value = await apiCannedScriptMatch(query)
+    matchResult.value = await apiCannedScriptMatch(query, sceneFilter.value || null)
   } catch (e: any) {
     ElMessage.error(e?.message || '命中测试失败')
   } finally {
@@ -290,6 +349,7 @@ async function runMatch() {
 
 function resetForm() {
   form.key = ''
+  form.scene_code = sceneFilter.value || ''
   form.title = ''
   form.category = 'business'
   form.patterns = []
@@ -308,6 +368,7 @@ function openCreate() {
 function openEdit(row: CannedScript) {
   editing.value = true
   form.key = row.key
+  form.scene_code = sceneCodeOf(row) || ''
   form.title = row.title || ''
   form.category = row.category
   form.patterns = [...row.patterns]
@@ -331,6 +392,7 @@ async function submit() {
   try {
     const payload: CannedScriptPayload = {
       key: form.key.trim(),
+      scene_code: form.scene_code || null,
       title: form.title.trim() || null,
       category: form.category,
       patterns: form.patterns,
@@ -340,7 +402,7 @@ async function submit() {
       enabled: form.enabled,
     }
     if (editing.value) {
-      await apiUpdateCannedScript(form.key, payload)
+      await apiUpdateCannedScript(form.key, payload, form.scene_code || null)
     } else {
       await apiCreateCannedScript(payload)
     }
@@ -356,7 +418,7 @@ async function submit() {
 
 async function onToggle(row: CannedScript) {
   try {
-    await apiToggleCannedScript(row.key, row.enabled)
+    await apiToggleCannedScript(row.key, row.enabled, sceneCodeOf(row))
     ElMessage.success(`${row.title || row.key} 已${row.enabled ? '启用' : '停用'}`)
   } catch (e: any) {
     ElMessage.error(e?.message || '操作失败')
@@ -371,7 +433,7 @@ async function remove(row: CannedScript) {
       '删除话术',
       { type: 'warning' },
     )
-    await apiDeleteCannedScript(row.key)
+    await apiDeleteCannedScript(row.key, sceneCodeOf(row))
     ElMessage.success('已删除')
     await load()
   } catch (e: any) {
@@ -379,7 +441,10 @@ async function remove(row: CannedScript) {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  scenes.value = await apiSceneOptions()
+  await load()
+})
 </script>
 
 <style scoped>

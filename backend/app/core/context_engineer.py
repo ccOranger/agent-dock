@@ -315,6 +315,8 @@ class ContextEngineer:
             )
             await MemoryRepo.upsert_mirror(
                 user_id=row.user_id,
+                # 访客镜像行的归属列是 visitor_id，user_id 为空；直接透传两列避免写成 NULL 丢隔离
+                visitor_id=getattr(row, "visitor_id", None),
                 memory_uid=row.memory_uid,
                 type_="episodic",
                 content=row.content,

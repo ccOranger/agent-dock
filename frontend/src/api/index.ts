@@ -26,24 +26,39 @@ export const apiRegister = (username: string, password: string) =>
 export const apiMe = () => unwrap(http.get<never, { data: { data: User } }>('/auth/me'))
 
 // ===== Sessions =====
-export const apiListSessions = (page = 1, pageSize = 20) =>
+// 会话按 (场景, 客户) 隔离：在场景内打开聊天/历史时必须带上 scene_code，
+// 缺省只能看到默认场景的会话（跨场景一律 404）。
+export const apiListSessions = (page = 1, pageSize = 20, sceneCode?: string | null) =>
   unwrap(
     http.get<never, { data: { data: { items: SessionInfo[]; total: number } } }>('/sessions', {
-      params: { page, page_size: pageSize },
+      params: { page, page_size: pageSize, ...(sceneCode ? { scene_code: sceneCode } : {}) },
     }),
   )
 
-export const apiSessionMessages = (sessionId: string, page = 1, pageSize = 50) =>
+export const apiSessionMessages = (
+  sessionId: string,
+  page = 1,
+  pageSize = 50,
+  sceneCode?: string | null,
+) =>
   unwrap(
     http.get<never, { data: { data: { items: Message[] } } }>(`/sessions/${sessionId}/messages`, {
-      params: { page, page_size: pageSize },
+      params: { page, page_size: pageSize, ...(sceneCode ? { scene_code: sceneCode } : {}) },
     }),
   )
 
-export const apiDeleteSession = (sessionId: string) => http.delete(`/sessions/${sessionId}`)
+export const apiDeleteSession = (sessionId: string, sceneCode?: string | null) =>
+  http.delete(`/sessions/${sessionId}`, {
+    params: sceneCode ? { scene_code: sceneCode } : {},
+  })
 
 // 结束会话：后端触发该会话 working 记忆全量晋升为长期记忆（spec 8.6）
-export const apiCloseSession = (sessionId: string) => http.patch(`/sessions/${sessionId}`, { status: 'closed' })
+export const apiCloseSession = (sessionId: string, sceneCode?: string | null) =>
+  http.patch(
+    `/sessions/${sessionId}`,
+    { status: 'closed' },
+    { params: sceneCode ? { scene_code: sceneCode } : {} },
+  )
 
 // ===== Memory =====
 export const apiMyMemories = (type?: string) =>

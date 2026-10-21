@@ -3,11 +3,12 @@
     <el-container>
       <el-header class="header">
         <span class="title">AgentDock</span>
+        <el-tag v-if="sceneCode" size="small" type="info">场景 {{ sceneCode }}</el-tag>
         <AgentBadge v-if="store.currentAgent" :agent="store.currentAgent" />
         <div class="spacer" />
         <el-button size="small" @click="onClose" :disabled="!store.sessionId || store.streaming">结束会话</el-button>
         <el-button size="small" @click="onNew">新建会话</el-button>
-        <el-button size="small" @click="router.push('/history')">历史</el-button>
+        <el-button size="small" @click="goHistory">历史</el-button>
         <el-button size="small" @click="goAdmin" v-if="isAdminOrAgent()">管理后台</el-button>
         <el-button size="small" type="danger" plain @click="onLogout">退出</el-button>
       </el-header>
@@ -40,8 +41,8 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiCloseSession } from '@/api'
 import { streamChat } from '@/api/chat'
@@ -53,6 +54,12 @@ import AgentBadge from '@/components/AgentBadge.vue'
 const store = useChatStore()
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+// 聊天入口只有这一个：URL 带 ?scene=xxx 就落到该场景，不带走默认场景
+const sceneCode = computed(() => {
+  const raw = route.query.scene
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+})
 const input = ref('')
 const listRef = ref<HTMLElement>()
 const handoverReason = ref('')
@@ -127,7 +134,7 @@ function send() {
     if (controller !== ctrl) return
     controller = null
     store.finishStreaming()
-  })
+  }, sceneCode.value)
   controller = ctrl
 }
 
@@ -155,10 +162,15 @@ async function onClose() {
   } catch {
     return // 用户取消
   }
-  await apiCloseSession(store.sessionId)
+  await apiCloseSession(store.sessionId, sceneCode.value)
   store.reset()
   handoverReason.value = ''
   ElMessage.success('会话已结束，短期记忆已归档')
+}
+
+function goHistory() {
+  // 历史页继承场景参数，否则会落到默认场景看不到本场景会话
+  router.push(sceneCode.value ? { path: '/history', query: { scene: sceneCode.value } } : '/history')
 }
 
 function onLogout() {

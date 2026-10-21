@@ -19,6 +19,7 @@ import asyncpg  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME, DEFAULT_SCENE_ID  # noqa: E402
 
 # 复用 seed_data.py 的种子定义，避免重复维护
 sys.path.insert(0, os.path.dirname(__file__))
@@ -32,25 +33,33 @@ from seed_data import (  # noqa: E402
     ADMIN_PASSWORD,
     ADMIN_PASSWORD_GENERATED,
     ADMIN_USERNAME,
+    CANNED_TITLES,
     DEMO_MODE,
     SEED_AGENTS,
 )
 
-# 需要删除的表（含遗留单表 users）；先删子表再删父表由 CASCADE 兜底
+from app.agents.canned_scripts import SEED_RULES  # noqa: E402
+
+# 需要删除的表（含遗留单表 users）；先删子表再删父表，CASCADE 兜底依赖
 DROP_TABLES = [
     "request_traces",
     "tickets",
     "audit_logs",
     "messages",
-    "sessions",
     "memories",
+    "sessions",
     "documents",
     "knowledge_bases",
     "tools",
+    "canned_scripts",
+    "scene_agents",
     "agents",
+    "visitors",
+    "scenes",
     "customer_users",
     "staff_users",
     "users",
+    "schema_meta",
 ]
 
 
@@ -112,6 +121,23 @@ def build_sql() -> str:
             f"{lit(a['enabled'])}, {lit(a['sort_order'])}, 'dynamic', {lit(a['system_prompt'])}, "
             f"{lit(a['mcp_tool_names'])});"
         )
+    # 默认场景只绑定默认助手；放在 Agent 插入之后，子查询才能取到 id
+    parts.append(
+        "INSERT INTO scene_agents (scene_id, agent_id, enabled, sort_order) "
+        f"SELECT {lit(DEFAULT_SCENE_ID)}, id, TRUE, 0 FROM agents "
+        f"WHERE name = {lit(DEFAULT_ASSISTANT_NAME)} AND scene_id IS NULL "
+        "ON CONFLICT (scene_id, agent_id) DO NOTHING;"
+    )
+    # 固定话术：全局行（scene_id NULL）。重建后与 seed_data.py 的种子保持一致。
+    for rule in SEED_RULES:
+        parts.append(
+            "INSERT INTO canned_scripts "
+            "(scene_id, key, title, category, patterns, keywords, reply_text, priority, enabled, is_builtin) "
+            "VALUES (NULL, "
+            f"{lit(rule.key)}, {lit(CANNED_TITLES.get(rule.key, rule.key))}, {lit(rule.category)}, "
+            f"{lit(sorted(rule.patterns))}, {lit(list(rule.keywords))}, {lit(rule.text)}, "
+            f"{lit(rule.priority)}, TRUE, TRUE);"
+        )
     for d in ACTIVE_DOCUMENTS:
         parts.append(
             "INSERT INTO documents (title, source, content_type, status, rag_namespace, chunk_count, kind) VALUES "
@@ -161,12 +187,17 @@ async def main() -> None:
                 "(select count(*) from tools) tools, "
                 "(select count(*) from documents) docs, "
                 "(select count(*) from tickets) tickets, "
+                "(select count(*) from scenes) scenes, "
+                "(select count(*) from scene_agents) scene_agents, "
+                "(select count(*) from visitors) visitors, "
                 "(select count(*) from request_traces) traces"
             )
             print(
                 f"   行数 -> staff={row['staff']} customer={row['cust']} "
                 f"agents={row['agents']} tools={row['tools']} "
-                f"documents={row['docs']} tickets={row['tickets']} traces={row['traces']}"
+                f"documents={row['docs']} tickets={row['tickets']} "
+                f"scenes={row['scenes']} scene_agents={row['scene_agents']} "
+                f"visitors={row['visitors']} traces={row['traces']}"
             )
         finally:
             await vconn.close()

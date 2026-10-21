@@ -21,12 +21,79 @@ POST   /api/v1/auth/refresh             # 刷新 Token（body: refresh_token）
 GET    /api/v1/auth/me                  # 当前用户（任意已登录角色）
 ```
 
+## Public（无需登录，嵌入 / API 对接）
+
+（[多场景开发文档](multi-scene-development.md) M5）
+
+```
+GET    /api/v1/public/scenes/{code}           # 公开场景配置：展示配置/是否允许匿名/鉴权方式；不含 Agent、提示词、知识库
+POST   /api/v1/public/scenes/{code}/visitors  # 签发匿名访客（仅已发布场景；返回 visitor_id）
+```
+
+- 场景未发布（`publish_key` 为空）时，公开配置仍可读，但 `allow_anonymous=false`，签发访客返回 403；
+- `visitor_id` 是给宿主页面存 localStorage 的稳定标识（对应 `visitors.external_key`），聊天时原样传入即可复用同一访客的会话与记忆；
+- `publish_key` 是公开标识（会出现在嵌入页源码里），不是密钥；服务端接入 key 只能用 `X-API-Key`，后台轮换后明文只回显一次。
+
+```bash
+# 1. 读取公开配置
+curl http://localhost:8000/api/v1/public/scenes/mcd_order
+
+# 2. 签发访客（返回 {"visitor_id":"v_xxx","scene_code":"mcd_order"}）
+curl -X POST http://localhost:8000/api/v1/public/scenes/mcd_order/visitors
+
+# 3. 匿名嵌入聊天（SSE；scene_code 同时放在 query，供 CORS 中间件识别场景来源）
+curl -N -X POST "http://localhost:8000/api/v1/chat/stream?scene_code=mcd_order" \
+  -H "Content-Type: application/json" \
+  -H "X-Scene-Code: mcd_order" \
+  -H "X-Publish-Key: pk_xxx" \
+  -d '{"scene_code":"mcd_order","visitor_id":"v_xxx","message":"我的订单到哪了"}'
+
+# 4. 服务端 API key 对接（不需要 scene_code 时落到 default 场景）
+curl -N -X POST http://localhost:8000/api/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk_xxx" \
+  -d '{"scene_code":"mcd_order","message":"你好"}'
+```
+
+前端嵌入只用一行 script（气泡 + iframe 隔离，主题/标题/欢迎语来自后台「接入」配置）：
+
+```html
+<script src="https://your-host/widget.js" data-scene="mcd_order"></script>
+```
+
+组件只向宿主暴露 `window.AgentDockWidget.open()` / `close()` / `toggle()`；宿主页可监听 `cs:widget:done` 等 postMessage 事件。开发环境演示页：`http://localhost:5173/embed-demo.html`。
+
 ## Chat（核心）
 
 ```
-POST   /api/v1/chat/stream              # SSE 流式对话（current_customer）
+POST   /api/v1/chat/stream              # SSE 流式对话
 POST   /api/v1/chat/message             # 非流式备用，返回 {data, trace_id}
 ```
+
+请求体（`ChatRequest`）：
+
+```json
+{
+  "scene_code": "mcd_order",
+  "session_id": null,
+  "visitor_id": "v_xxx",
+  "message": "我的订单到哪了"
+}
+```
+
+`scene_code` 缺省 = 默认场景（`default`，单 Agent 直连，不路由）；未知 3003、停用 3004、无可用 Agent 3005，不会静默回落其它场景。
+
+**鉴权顺序**（登录客户 / 服务端 key / 嵌入发布标识 / 已发布匿名，四者取一）：
+
+1. `Authorization: Bearer <customer token>` → 客户身份（`user:<id>`）；带了但无效仍报 401，不降级为匿名；
+2. `X-API-Key: sk_xxx` → 按场景 `api_key_hash` 做 sha256 比对；
+3. `X-Publish-Key: pk_xxx` → 公开标识，主动传错按 401 处理；
+4. 场景已发布（`publish_key` 非空）→ 匿名访客放行（`visitor:<id>`）；
+5. 都没有 → 401/2001。
+
+**限流**：Redis 分钟频次 / 日配额 / 并发流三档（默认 30 次/分、2000 次/日、3 条并发），按 `scene + user/visitor/ip` 分桶；超限 4029/429，Redis 故障时放行（fail-open）。SSE 在流结束（含异常/断连）时释放并发槽位。
+
+**跨域**：嵌入页需在请求 URL 带 `?scene_code=` 或请求头带 `X-Scene-Code`（中间件不读 body）；Origin 必须在全局 `ALLOWED_ORIGINS` 或该场景 `allowed_origins` 中，未授权 preflight 返回 403/2003。
 
 > 入口对 `message` 做 `detect_injection`，命中抛 `4003 UnsafeInput`。响应头带 `X-Trace-Id`，与落库链路对齐（[U04](updates/04-request-tracing.md)）。
 
@@ -95,16 +162,41 @@ DELETE /api/v1/admin/agents/{name}          # 删除（在册代码 Agent 不可
 PATCH  /api/v1/admin/agents/{name}/toggle   # 启用/禁用（body: enabled；禁用后路由与解析真正不命中）
 ```
 
-## Admin · Packs（场景包列表与整体启停）
+## Admin · Scenes（场景与嵌入配置，require_admin 写 / require_staff 读）
 
-（[U17](updates/17-it-helpdesk-pack.md)、[场景包开发指南](packs.md)）
+（[多场景开发文档](multi-scene-development.md) M2–M5）
 
 ```
-GET    /api/v1/admin/packs            # 全部场景包（含 manifest 停用项）：features/agents/tools/knowledge_namespaces（require_staff）
-PATCH  /api/v1/admin/packs/{name}     # 整体启停（body: enabled；批量写包内代码 Agent，require_admin）
+GET    /api/v1/admin/scenes                         # 列表（含状态、Agent 数、路由模式、publish_key）
+GET    /api/v1/admin/scenes/options                 # 启用中的场景下拉（聊天入口/资源归属回显）
+POST   /api/v1/admin/scenes                         # 新建（code 全局唯一；默认场景标识保留）
+GET    /api/v1/admin/scenes/{id}                    # 详情（含 widget_config/allowed_origins/api_key_set）
+PATCH  /api/v1/admin/scenes/{id}                    # 编辑（默认场景只允许改展示名/描述）
+PUT    /api/v1/admin/scenes/{id}/agents             # 绑定 Agent（全量替换，顺序即路由候选顺序）
+GET    /api/v1/admin/scenes/{id}/agents             # 可绑定 Agent + 当前绑定状态
+GET    /api/v1/admin/scenes/{id}/knowledge-bases    # 知识库归属弹窗（被其它场景占用的不可选）
+PUT    /api/v1/admin/scenes/{id}/knowledge-bases    # 全量替换归属；默认场景只读
+PUT    /api/v1/admin/scenes/{id}/widget             # 嵌入配置/允许来源/发布开关
+POST   /api/v1/admin/scenes/{id}/rotate-key         # 轮换服务端 API key（明文仅本次响应）
+DELETE /api/v1/admin/scenes/{id}                    # 删除（默认场景不可删；有关联会话等→3002）
 ```
 
-语义：包启用 = `manifest.enabled` 且包内至少一个代码 Agent 启用；`manifest_enabled=false` 的包开启返回 409/3002；未知包返回 404/3001；停用不会卸载工具或删除知识库向量。
+`PUT /widget` 请求体（未传字段保持原值）：
+
+```json
+{
+  "widget_config": {"title": "订单助手", "welcome": "您好", "theme_color": "#2b5aa0", "position": "right", "placeholder": "请输入您的问题", "show_branding": true},
+  "allowed_origins": ["https://mall.example.com"],
+  "allow_anonymous": true
+}
+```
+
+- `widget_config` 归一化后全量替换：只保留已知键，文本限长，颜色只接受 `#RGB/#RRGGBB`，位置只接受 `left/right`；
+- `allowed_origins` 只保留 `scheme://host[:port]`（粘贴带路径的页面地址会自动截断），非法来源 400/1001；
+- `allow_anonymous=true` 时若场景尚未发布则生成 `pk_...`；已有 `publish_key` 保持不变；`false` 时清空（已嵌入页面立即失效）；
+- 保存后立即失效 CORS 来源缓存，无需等待 TTL。
+
+`POST /rotate-key` 返回 `{"api_key": "sk_...", "api_key_set": true}`。库里只存 sha256；再次轮换后旧 key 立即失效。场景详情只回显 `api_key_set`，不返回哈希或明文。
 
 ## Admin · Router（路由分发器，只读，require_admin）
 
@@ -231,6 +323,9 @@ GET    /metrics                             # Prometheus 全局抓取端点
 | 2004 | 404 | AccountNotRegistered | 账号不存在，请先注册（客户登录引导） |
 | 3001 | 404 | NotFound | 资源不存在 |
 | 3002 | 409 | Conflict | 资源冲突（重名/仍被引用） |
+| 3003 | 404 | SceneNotFound | 场景不存在（scene_code 错误） |
+| 3004 | 404 | SceneDisabled | 场景已停用/归档 |
+| 3005 | 409 | SceneNotConfigured | 场景未配置可用 Agent |
 | 4001 | 400 | ToolParamError | 工具参数校验失败 |
 | 4003 | 400 | UnsafeInput | 输入含不安全内容 |
 | 4029 | 429 | RateLimited | 请求过于频繁 |

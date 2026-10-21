@@ -11,6 +11,14 @@
           <el-option label="转人工" value="handover" />
           <el-option label="异常" value="error" />
         </el-select>
+        <el-select v-model="filters.scene_code" placeholder="场景" clearable style="width: 150px">
+          <el-option
+            v-for="scene in scenes"
+            :key="scene.code"
+            :label="scene.display_name"
+            :value="scene.code"
+          />
+        </el-select>
         <el-select v-model="filters.agent_name" placeholder="业务 Agent" clearable filterable style="width: 170px">
           <el-option v-for="a in agents" :key="a.name" :label="a.display_name || a.name" :value="a.name" />
         </el-select>
@@ -46,6 +54,13 @@
       <el-table :data="rows" v-loading="loading" style="margin-top: 12px" @row-click="openDetail">
         <el-table-column prop="created_at" label="时间" width="160">
           <template #default="{ row }">{{ fmt(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="场景" width="130">
+          <template #default="{ row }">
+            <el-tag size="small" type="info">{{ row.scene_code || '默认' }}</el-tag>
+            <el-tag v-if="row.router_skipped" size="small" class="chip">直连</el-tag>
+            <el-tag v-else-if="row.router_fallback" size="small" type="warning" class="chip">兜底</el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="outcome" label="结局" width="90">
           <template #default="{ row }">
@@ -125,8 +140,8 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { apiListAgents, apiListTraces, apiTraceDetail } from '@/api'
-import type { AgentInfo, RequestTraceDetail, RequestTraceSummary } from '@/types'
+import { apiListAgents, apiListTraces, apiSceneOptions, apiTraceDetail } from '@/api'
+import type { AgentInfo, RequestTraceDetail, RequestTraceSummary, SceneOption } from '@/types'
 import TraceTimeline from '@/components/TraceTimeline.vue'
 
 const route = useRoute()
@@ -138,9 +153,11 @@ const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
 const agents = ref<AgentInfo[]>([])
+const scenes = ref<SceneOption[]>([])
 
 const filters = ref<{
   outcome?: string
+  scene_code?: string
   agent_name?: string
   tool_name?: string
   mcp_server?: string
@@ -255,6 +272,11 @@ onMounted(() => {
     .then((list) => (agents.value = list))
     .catch(() => {
       /* Agent 下拉仅 admin 可用，agent 角色忽略 */
+    })
+  apiSceneOptions()
+    .then((list) => (scenes.value = list))
+    .catch(() => {
+      /* 场景下拉失败不影响按会话/Agent 归因 */
     })
 })
 </script>

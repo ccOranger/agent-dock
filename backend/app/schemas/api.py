@@ -44,7 +44,13 @@ class RefreshRequest(BaseModel):
 
 # ===== Chat =====
 class ChatRequest(BaseModel):
+    # 多场景：缺省走默认场景；错码/停用由服务层返回 3003/3004
+    scene_code: str | None = Field(default=None, max_length=32)
     session_id: str | None = None
+    # 匿名访客 ID：首次由服务端签发；已登录用户忽略
+    visitor_id: str | None = Field(default=None, max_length=36)
+    # 客户端重试去重键（P1）
+    client_msg_id: str | None = Field(default=None, max_length=64)
     message: str = Field(min_length=1, max_length=4000)
     stream: bool = True
 
@@ -56,6 +62,8 @@ class ChatMessageRequest(ChatRequest):
 # ===== Sessions =====
 class SessionCreate(BaseModel):
     title: str = "新对话"
+    # 缺省落到默认场景；会话列表/详情/删除均按 (场景, 客户) 隔离
+    scene_code: str | None = Field(default=None, max_length=32)
 
 
 class SessionUpdate(BaseModel):
@@ -105,12 +113,6 @@ class DocumentOut(BaseModel):
 
 # ===== Admin =====
 class AgentToggleRequest(BaseModel):
-    enabled: bool
-
-
-class PackToggleRequest(BaseModel):
-    """场景包启停（批量开关包内全部代码 Agent，不新增独立设置表）。"""
-
     enabled: bool
 
 
@@ -197,6 +199,8 @@ class CannedScriptCreate(BaseModel):
     """新增一条固定话术。种子三条只能改文案/启停，不可删除（见后台接口）。"""
 
     key: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    # 归属场景：不传=全局话术（如 probing），传了在本场景内覆盖同 key 全局行
+    scene_code: str | None = Field(default=None, max_length=32)
     title: str | None = Field(default=None, max_length=128)
     category: Literal["identity", "capability", "probing", "business"] = "business"
     # 问法主干：归一化后整句全等才命中（不会误吞带后半句的业务问法）
@@ -227,6 +231,7 @@ class CannedScriptMatchRequest(BaseModel):
     """命中测试：不写库，只告知这句客户原话会落到哪条话术（或未命中）。"""
 
     query: str = Field(min_length=1, max_length=500)
+    scene_code: str | None = Field(default=None, max_length=32)
 
 
 # ===== 管理后台：咨询信息 =====
@@ -253,6 +258,8 @@ class KnowledgeBaseCreate(BaseModel):
     namespace: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_]+$")
     display_name: str = Field(min_length=1, max_length=128)
     description: str | None = None
+    # 归属场景：不传=平台共享；传了只有该场景的 search_all 能自动覆盖到
+    scene_code: str | None = Field(default=None, max_length=32)
 
 
 class KnowledgeBaseUpdate(BaseModel):

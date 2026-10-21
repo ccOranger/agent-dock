@@ -4,7 +4,6 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import generate_latest
 
@@ -13,8 +12,12 @@ from app.core.bootstrap import bootstrap, init_hello_agents, validate_agents_syn
 from app.core.config import settings, validate_runtime_config
 from app.core.constants import API_PREFIX
 from app.core.context_engineer import drain_background_tasks
+from app.core.cors import SceneCORSMiddleware
 from app.core.logging import new_trace_id, setup_logging
+from app.core.ratelimit import close_redis
+from app.core.schema import assert_schema_version
 from app.core.selfcheck import run_startup_selfcheck
+from app.services.scene_service import ensure_default_scene
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +34,21 @@ for _stream in (sys.stdout, sys.stderr):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_runtime_config()
+    await assert_schema_version()
     await run_startup_selfcheck()
     init_hello_agents()
     await validate_agents_sync()
+    # 默认场景兜底：初始化脚本已种；这里处理被误删导致的“无码请求无落点”
+    await ensure_default_scene()
     yield
     # 先排空后台记忆归档再关资源：否则热重启/滚动发布时正在归档的轮次会被取消丢弃
     try:
         await drain_background_tasks()
     finally:
-        bootstrap.shutdown()
+        try:
+            await close_redis()
+        finally:
+            bootstrap.shutdown()
 
 
 setup_logging(settings.log_level)
@@ -51,13 +60,7 @@ app = FastAPI(
     docs_url="/docs",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(SceneCORSMiddleware)
 
 
 @app.middleware("http")

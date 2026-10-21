@@ -1,7 +1,7 @@
 """初始化向导：`python -m app.setup`（在 backend 目录执行）。
 
 面向首次部署（裸机或自定义环境）：
-1. 建表（与 seed_data 同源，幂等）
+1. 初始化 schema（复用 scripts/init_db.py，保持 DDL 单一来源，幂等）
 2. 创建管理员（已存在则保留，--reset-password 可重置）
 3. 生成随机 JWT_SECRET 并写回 --env-file（以该文件为唯一判定源；已配置强密钥则不动）
 4. 测试模型连通性（可选 --skip-llm-check）
@@ -19,11 +19,12 @@ import getpass
 import os
 import re
 import secrets
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from app.core.config import is_weak_jwt_secret
+from app.core.config import is_weak_jwt_secret, settings
 from app.core.selfcheck import check_model
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
@@ -124,16 +125,39 @@ def resolve_admin(args: argparse.Namespace) -> tuple[str, str, str]:
     return username, password, display_name
 
 
+def _run_init_db() -> None:
+    """调用 scripts/init_db.py：与容器入口共用同一份 DDL，不在 setup 里另建一套表。"""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "init_db.py"
+    backend_dir = script.parent.parent / "backend"
+    env = {**os.environ, "DATABASE_URL": settings.database_url}
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(backend_dir),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.returncode != 0:
+        raise RuntimeError(
+            "初始化 schema 失败，请检查 DATABASE_URL 与数据库连通性：\n"
+            f"{result.stderr.strip()}"
+        )
+
+
 async def ensure_admin(username: str, password: str, display_name: str, reset: bool) -> str:
-    """建表并创建管理员，返回可读结果。"""
+    """初始化 schema 并创建管理员，返回可读结果。"""
     from sqlalchemy import select
 
     from app.core.database import engine
     from app.core.security import hash_password
-    from app.models.entities import Base, StaffUser
+    from app.models.entities import StaffUser
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # subprocess 是同步阻塞调用，放到线程里避免阻塞 setup 里的事件循环
+    await asyncio.to_thread(_run_init_db)
 
     from sqlalchemy.ext.asyncio import AsyncSession
 

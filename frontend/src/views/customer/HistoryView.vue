@@ -3,8 +3,11 @@
     <el-card>
       <template #header>
         <div class="head">
-          <b>历史会话</b>
-          <el-button size="small" @click="router.push('/chat')">返回对话</el-button>
+          <div class="head-left">
+            <b>历史会话</b>
+            <el-tag v-if="sceneCode" size="small" type="info">场景 {{ sceneCode }}</el-tag>
+          </div>
+          <el-button size="small" @click="backToChat">返回对话</el-button>
         </div>
       </template>
       <el-table :data="sessions" v-loading="loading">
@@ -43,8 +46,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiCloseSession, apiDeleteSession, apiListSessions, apiSessionMessages } from '@/api'
@@ -52,6 +55,12 @@ import type { Message, SessionInfo } from '@/types'
 import MessageBubble from '@/components/MessageBubble.vue'
 
 const router = useRouter()
+const route = useRoute()
+// 历史页继承聊天入口的场景参数：不带 scene 时只看默认场景的会话
+const sceneCode = computed(() => {
+  const raw = route.query.scene
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+})
 const sessions = ref<SessionInfo[]>([])
 const messages = ref<Message[]>([])
 const total = ref(0)
@@ -62,7 +71,7 @@ const dialogVisible = ref(false)
 async function load() {
   loading.value = true
   try {
-    const data = await apiListSessions(page.value, 20)
+    const data = await apiListSessions(page.value, 20, sceneCode.value)
     sessions.value = data.items
     total.value = data.total
   } finally {
@@ -71,14 +80,14 @@ async function load() {
 }
 
 async function viewMessages(id: string) {
-  const data = await apiSessionMessages(id, 1, 100)
+  const data = await apiSessionMessages(id, 1, 100, sceneCode.value)
   messages.value = data.items
   dialogVisible.value = true
 }
 
 async function remove(id: string) {
   await ElMessageBox.confirm('确认删除该会话？', '提示', { type: 'warning' })
-  await apiDeleteSession(id)
+  await apiDeleteSession(id, sceneCode.value)
   load()
 }
 
@@ -86,9 +95,13 @@ const STATUS_LABELS: Record<string, string> = { active: '进行中', closed: '�
 
 async function close(id: string) {
   await ElMessageBox.confirm('确认结束该会话？短期记忆将归档为长期记忆。', '提示', { type: 'warning' })
-  await apiCloseSession(id)
+  await apiCloseSession(id, sceneCode.value)
   ElMessage.success('会话已结束')
   load()
+}
+
+function backToChat() {
+  router.push(sceneCode.value ? { path: '/chat', query: { scene: sceneCode.value } } : '/chat')
 }
 
 onMounted(load)
@@ -101,6 +114,11 @@ onMounted(load)
 .head {
   display: flex;
   justify-content: space-between;
+}
+.head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .msgs {
   max-height: 60vh;

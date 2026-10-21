@@ -1,8 +1,7 @@
 """
 AgentRegistry：业务 Agent 类注册表
-业务 Agent 由场景包 manifest（packs/<name>/manifest.yaml）声明，这里只消费
-packs.loader 的装载结果，内核不直接 import 任何包内 Agent 类。
-新增业务 Agent：在所属场景包的 manifest.yaml 的 agents 段登记即可。
+业务 Agent 实现在 app/agents/business/ 下，这里显式登记；
+新增业务 Agent：实现 BaseBusinessAgent 子类，并在 _CODE_AGENTS 中补一行。
 """
 import ast
 import inspect
@@ -10,13 +9,43 @@ import sys
 import textwrap
 
 from app.agents.base_business_agent import BaseBusinessAgent
+from app.agents.business.complaint_agent import ComplaintAgent
+from app.agents.business.default_agent import DefaultAssistantAgent
+from app.agents.business.it_asset_agent import ITAssetAgent
+from app.agents.business.it_incident_agent import ITIncidentAgent
+from app.agents.business.it_knowledge_agent import ITKnowledgeAgent
+from app.agents.business.knowledge_agent import KnowledgeAgent
+from app.agents.business.order_agent import OrderAgent
 from app.core.config import settings
-from app.packs.loader import get_code_agents
 from app.tools import custom_catalog
 from app.tools.custom.base import BaseTool
 
-# name -> Agent 类：场景包装载结果（拷贝），保持调用方的只读使用习惯
-AGENT_REGISTRY: dict[str, type[BaseBusinessAgent]] = dict(get_code_agents())
+# 代码托管业务 Agent：name 由类属性声明，全局唯一
+_CODE_AGENTS: tuple[type[BaseBusinessAgent], ...] = (
+    KnowledgeAgent,
+    OrderAgent,
+    ComplaintAgent,
+    ITKnowledgeAgent,
+    ITIncidentAgent,
+    ITAssetAgent,
+)
+
+_agent_names = [cls.name for cls in _CODE_AGENTS]
+_duplicates = sorted({n for n in _agent_names if _agent_names.count(n) > 1})
+if _duplicates:
+    raise RuntimeError(f"业务 Agent 名称重复: {_duplicates}")
+
+# name -> Agent 类
+AGENT_REGISTRY: dict[str, type[BaseBusinessAgent]] = {cls.name: cls for cls in _CODE_AGENTS}
+
+# 内核 Agent：默认场景唯一成员，不属于任何业务线。
+# 业务 Agent 不得占用该名字，否则默认场景会被偷换，启动时直接报错。
+_KERNEL_AGENTS = (DefaultAssistantAgent,)
+for _cls in _KERNEL_AGENTS:
+    registered = AGENT_REGISTRY.get(_cls.name)
+    if registered is not None and registered is not _cls:
+        raise RuntimeError(f"内核 Agent 名称被占用: {_cls.name}")
+    AGENT_REGISTRY[_cls.name] = _cls
 
 
 def get_agent_class(name: str) -> type[BaseBusinessAgent] | None:

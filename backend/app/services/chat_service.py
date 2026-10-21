@@ -7,7 +7,9 @@ from app.core.database import SessionLocal
 from app.core.exceptions import UnsafeInput
 from app.core.security import detect_injection, sanitize_output
 from app.core.tracing import OUTCOME_ERROR, TraceCollector, new_request_trace_id
-from app.models.repositories import MessageRepo, SessionRepo, TraceRepo
+from app.models.repositories import MessageRepo, SessionRepo, TraceRepo, VisitorRepo
+from app.schemas.scene import Actor, ActorType, SceneContext
+from app.services.scene_service import resolve_scene
 from app.utils.sse import sse_event
 
 logger = logging.getLogger(__name__)
@@ -44,13 +46,22 @@ class ChatService:
 
     async def stream(
         self,
-        user_id: str,
+        user_id: str | None,
         session_id: str | None,
         message: str,
         trace_id: str | None = None,
+        scene_code: str | None = None,
+        visitor_id: str | None = None,
+        scene: SceneContext | None = None,
     ) -> AsyncIterator[str]:
+        # 场景在会话之前解析：错码/停用/未配置直接失败，不产生空会话；
+        # 路由层已预校验时直接复用快照，避免一轮请求重复查两次场景。
+        scene = scene or await resolve_scene(scene_code)
+        actor = await self._resolve_actor(scene, user_id, visitor_id)
         async with SessionLocal() as db:
-            session = await SessionRepo.get_or_create(user_id, session_id, db=db)
+            session = await SessionRepo.get_or_create_for_actor(
+                actor, scene.scene_id, session_id, db=db
+            )
             # 新建会话默认标题是占位值"新对话"，历史列表里区分度差；
             # 用户手动重命名过（不再是占位值）的会话不覆盖。
             if session.title == DEFAULT_SESSION_TITLE:
@@ -64,12 +75,16 @@ class ChatService:
             # 采集本轮经过的 Agent / MCP / 工具 / RAG / 记忆，流结束后一次写入 request_traces
             collector = TraceCollector(
                 trace_id=trace_id or new_request_trace_id(),
-                user_id=str(session.user_id),
+                user_id=str(session.user_id) if session.user_id else None,
                 session_id=str(session.id),
+                scene_code=scene.code,
+                visitor_id=str(session.visitor_id) if session.visitor_id else None,
             )
             collector.user_message_id = str(user_msg.id)
 
-            yield sse_event("session", {"session_id": str(session.id)})
+            yield sse_event(
+                "session", {"session_id": str(session.id), "scene_code": scene.code}
+            )
 
             history = await MessageRepo.list_recent(session.id, limit=HISTORY_FETCH_LIMIT, db=db)
             # 结束只读事务归还连接：LLM 流式生成期间不占用池内连接，
@@ -80,7 +95,7 @@ class ChatService:
             routed_to = None
             try:
                 async for event in self.orchestrator.dispatch(
-                    user_id=str(session.user_id),
+                    user_id=self._agent_subject(actor),
                     session_id=str(session.id),
                     query=message,
                     history=history,
@@ -88,6 +103,7 @@ class ChatService:
                     # 上一轮承接的 Agent：供路由判定追问续接
                     last_route_to=session.last_route_to,
                     collector=collector,
+                    scene=scene,
                 ):
                     etype = event.get("type", "text")
                     data = event.get("data", event)
@@ -127,16 +143,23 @@ class ChatService:
 
     async def reply(
         self,
-        user_id: str,
+        user_id: str | None,
         session_id: str | None,
         message: str,
         trace_id: str | None = None,
+        scene_code: str | None = None,
+        visitor_id: str | None = None,
+        scene: SceneContext | None = None,
     ) -> dict:
         """非流式备用接口：聚合完整回复"""
         if detect_injection(message):
             raise UnsafeInput()
+        scene = scene or await resolve_scene(scene_code)
+        actor = await self._resolve_actor(scene, user_id, visitor_id)
         async with SessionLocal() as db:
-            session = await SessionRepo.get_or_create(user_id, session_id, db=db)
+            session = await SessionRepo.get_or_create_for_actor(
+                actor, scene.scene_id, session_id, db=db
+            )
             if session.title == DEFAULT_SESSION_TITLE:
                 derived = derive_session_title(message)
                 if derived:
@@ -150,8 +173,10 @@ class ChatService:
 
             collector = TraceCollector(
                 trace_id=trace_id or new_request_trace_id(),
-                user_id=str(session.user_id),
+                user_id=str(session.user_id) if session.user_id else None,
                 session_id=str(session.id),
+                scene_code=scene.code,
+                visitor_id=str(session.visitor_id) if session.visitor_id else None,
             )
             collector.user_message_id = str(user_msg.id)
 
@@ -159,13 +184,14 @@ class ChatService:
             routed_to = None
             try:
                 async for event in self.orchestrator.dispatch(
-                    user_id=str(session.user_id),
+                    user_id=self._agent_subject(actor),
                     session_id=str(session.id),
                     query=message,
                     history=history,
                     user_message_id=str(user_msg.id),
                     last_route_to=session.last_route_to,
                     collector=collector,
+                    scene=scene,
                 ):
                     etype = event.get("type", "text")
                     data = event.get("data", event)
@@ -196,4 +222,20 @@ class ChatService:
             "content": content,
             "routed_to": routed_to,
             "trace_id": collector.trace_id,
+            "scene_code": scene.code,
         }
+
+    @staticmethod
+    async def _resolve_actor(
+        scene: SceneContext, user_id: str | None, visitor_id: str | None
+    ) -> Actor:
+        """登录客户优先；否则按外部访客标识（或新建匿名访客）签发 visitor actor。"""
+        if user_id:
+            return Actor(ActorType.USER, str(user_id))
+        visitor = await VisitorRepo.get_or_create(scene.scene_id, external_key=visitor_id)
+        return Actor(ActorType.VISITOR, str(visitor.id))
+
+    @staticmethod
+    def _agent_subject(actor: Actor) -> str:
+        """传给 Agent/记忆层的隔离主体：客户沿用纯 UUID，访客用 visitor:<id> 避免撞库。"""
+        return actor.id if actor.type is ActorType.USER else actor.key

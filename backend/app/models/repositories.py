@@ -19,10 +19,13 @@ from app.models.entities import (
     Memory,
     Message,
     RequestTrace,
+    Scene,
+    SceneAgent,
     Session,
     StaffUser,
     Ticket,
     ToolMeta,
+    Visitor,
 )
 
 
@@ -86,6 +89,262 @@ class CustomerRepo:
             return user
 
 
+class SceneRepo:
+    """场景仓储：CRUD 与 Agent 绑定。默认场景的只读保护由 API 层执行。"""
+
+    @staticmethod
+    async def get_by_code(code: str) -> Scene | None:
+        async with SessionLocal() as db:
+            return (
+                await db.execute(select(Scene).where(Scene.code == code))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def get(scene_id: uuid.UUID | str) -> Scene | None:
+        async with SessionLocal() as db:
+            return await db.get(Scene, uuid.UUID(str(scene_id)))
+
+    @staticmethod
+    async def get_default() -> Scene | None:
+        async with SessionLocal() as db:
+            return (
+                await db.execute(select(Scene).where(Scene.is_default.is_(True)))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def list_all() -> list[Scene]:
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(Scene).order_by(Scene.is_default.desc(), Scene.created_at)
+                )
+            ).scalars().all()
+            return list(rows)
+
+    @staticmethod
+    async def list_with_agent_counts() -> list[dict]:
+        """后台列表：带启用中的绑定 Agent 数，避免逐行查询造成 N+1。"""
+        enabled_agents = func.count(SceneAgent.agent_id).filter(SceneAgent.enabled.is_(True))
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(Scene, enabled_agents.label("agent_count"))
+                    .outerjoin(SceneAgent, SceneAgent.scene_id == Scene.id)
+                    .group_by(Scene.id)
+                    .order_by(Scene.is_default.desc(), Scene.created_at)
+                )
+            ).all()
+            return [SceneRepo.to_dict(scene, count) for scene, count in rows]
+
+    @staticmethod
+    async def get_bound_agent_ids(scene_id: uuid.UUID | str) -> list[str]:
+        """后台编辑用：含已停用的绑定，按候选顺序返回。"""
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(SceneAgent.agent_id)
+                    .where(SceneAgent.scene_id == uuid.UUID(str(scene_id)))
+                    .order_by(SceneAgent.sort_order)
+                )
+            ).scalars().all()
+            return [str(x) for x in rows]
+
+    @staticmethod
+    def to_dict(scene: Scene, agent_count: int = 0) -> dict:
+        return {
+            "id": str(scene.id),
+            "code": scene.code,
+            "display_name": scene.display_name,
+            "description": scene.description,
+            "status": scene.status,
+            "is_default": bool(scene.is_default),
+            "router_mode": scene.router_mode,
+            "router_model": scene.router_model,
+            "router_confidence_threshold": scene.router_confidence_threshold,
+            "router_max_intents": scene.router_max_intents,
+            "fallback_agent_id": str(scene.fallback_agent_id) if scene.fallback_agent_id else None,
+            "fallback_text": scene.fallback_text,
+            "extra_router_prompt": scene.extra_router_prompt,
+            "publish_key": scene.publish_key,
+            "allowed_origins": list(scene.allowed_origins or []),
+            "widget_config": dict(getattr(scene, "widget_config", None) or {}),
+            # 只回显是否配置过服务端 key，哈希本身不出后台接口
+            "api_key_set": bool(getattr(scene, "api_key_hash", None)),
+            "agent_count": int(agent_count or 0),
+            "created_at": scene.created_at.isoformat() if scene.created_at else None,
+            "updated_at": scene.updated_at.isoformat() if scene.updated_at else None,
+        }
+
+    @staticmethod
+    async def list_bound_agents(scene_id: uuid.UUID | str) -> list[dict]:
+        """本场景启用中的 Agent（含全局代码 Agent），sort_order 小者优先。
+
+        返回字段直接作为路由档案的候选输入：routing_* 决定它在路由提示词里
+        能拿到多少表达机会，后台看到的候选与运行时注入的候选完全同源。
+        """
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(AgentMeta, SceneAgent)
+                    .join(SceneAgent, SceneAgent.agent_id == AgentMeta.id)
+                    .where(
+                        SceneAgent.scene_id == uuid.UUID(str(scene_id)),
+                        SceneAgent.enabled.is_(True),
+                        AgentMeta.enabled.is_(True),
+                    )
+                    .order_by(SceneAgent.sort_order, AgentMeta.created_at)
+                )
+            ).all()
+            return [
+                {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "display_name": agent.display_name or agent.name,
+                    "description": agent.description,
+                    "source": agent.source,
+                    "scene_id": str(agent.scene_id) if agent.scene_id else None,
+                    "routing_keywords": list(agent.routing_keywords or []),
+                    "routing_examples": list(agent.routing_examples or []),
+                    "sort_order": link.sort_order,
+                }
+                for agent, link in rows
+            ]
+
+    @staticmethod
+    async def list_agents_for_admin(scene_id: uuid.UUID | str) -> list[dict]:
+        """后台绑定弹窗用：可绑定 Agent = 全局 Agent + 本场景专属 Agent。
+
+        其它场景专属的 Agent 不展示，避免把 A 场景的 Agent 绑到 B 场景造成跨场景读取。
+        """
+        sid = uuid.UUID(str(scene_id))
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(AgentMeta, SceneAgent)
+                    .outerjoin(
+                        SceneAgent,
+                        (SceneAgent.agent_id == AgentMeta.id) & (SceneAgent.scene_id == sid),
+                    )
+                    .where(
+                        (AgentMeta.scene_id.is_(None)) | (AgentMeta.scene_id == sid)
+                    )
+                    .order_by(AgentMeta.source, AgentMeta.sort_order, AgentMeta.created_at)
+                )
+            ).all()
+            return [
+                {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "display_name": agent.display_name or agent.name,
+                    "source": agent.source,
+                    "enabled": agent.enabled,
+                    "bound": link is not None,
+                    "scene_enabled": bool(link.enabled) if link else False,
+                    "sort_order": link.sort_order if link else 10_000,
+                }
+                for agent, link in rows
+            ]
+
+    @staticmethod
+    async def create(code: str, display_name: str, description: str | None = None, **fields) -> Scene:
+        async with SessionLocal() as db:
+            row = Scene(code=code, display_name=display_name, description=description, **fields)
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def update(scene_id: uuid.UUID | str, **fields) -> Scene | None:
+        async with SessionLocal() as db:
+            row = await db.get(Scene, uuid.UUID(str(scene_id)))
+            if row is None:
+                return None
+            for key, value in fields.items():
+                if hasattr(row, key):
+                    setattr(row, key, value)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def delete(scene_id: uuid.UUID | str) -> bool:
+        async with SessionLocal() as db:
+            row = await db.get(Scene, uuid.UUID(str(scene_id)))
+            if row is None:
+                return False
+            await db.delete(row)
+            await db.commit()
+            return True
+
+    @staticmethod
+    async def set_agents(
+        scene_id: uuid.UUID | str,
+        agent_ids: list[str],
+        db: AsyncSession | None = None,
+    ) -> None:
+        """全量替换绑定：顺序即路由候选顺序；被移除的绑定直接删除。"""
+        sid = uuid.UUID(str(scene_id))
+        # 保序去重，避免同一 Agent 重复插入触发主键冲突
+        wanted = list(dict.fromkeys(agent_ids))
+        own = db is None
+        async with _session(db) as s:
+            existing = {
+                link.agent_id: link
+                for link in (
+                    await s.execute(select(SceneAgent).where(SceneAgent.scene_id == sid))
+                ).scalars()
+            }
+            keep = {uuid.UUID(str(aid)) for aid in wanted}
+            for agent_id, link in existing.items():
+                if agent_id not in keep:
+                    await s.delete(link)
+            for order, raw_id in enumerate(wanted):
+                agent_id = uuid.UUID(str(raw_id))
+                link = existing.get(agent_id)
+                if link is None:
+                    s.add(
+                        SceneAgent(
+                            scene_id=sid, agent_id=agent_id, enabled=True, sort_order=order
+                        )
+                    )
+                else:
+                    link.enabled = True
+                    link.sort_order = order
+            # 外部传 db 时事务由调用方提交；自开 session 必须在这里落盘，
+            # 否则退出上下文直接回滚（绑定看起来保存成功但库里没有）
+            if own:
+                await s.commit()
+
+
+class VisitorRepo:
+    """匿名访客：同一场景内按 external_key 复用；无 key 时每次新建。"""
+
+    @staticmethod
+    async def get_or_create(scene_id: uuid.UUID | str, external_key: str | None = None) -> Visitor:
+        sid = uuid.UUID(str(scene_id))
+        if not external_key:
+            async with SessionLocal() as db:
+                row = Visitor(scene_id=sid, last_seen_at=func.now())
+                db.add(row)
+                await db.commit()
+                await db.refresh(row)
+                return row
+        async with SessionLocal() as db:
+            stmt = (
+                pg_insert(Visitor)
+                .values(scene_id=sid, external_key=external_key, last_seen_at=func.now())
+                .on_conflict_do_update(
+                    index_elements=["scene_id", "external_key"],
+                    set_={"last_seen_at": func.now()},
+                )
+                .returning(Visitor)
+            )
+            row = (await db.execute(stmt)).scalar_one()
+            await db.commit()
+            return row
+
+
 class SessionRepo:
     @staticmethod
     async def get_or_create(
@@ -108,9 +367,53 @@ class SessionRepo:
             return sess
 
     @staticmethod
-    async def create(user_id: uuid.UUID | str, title: str = "新对话") -> Session:
+    async def get_or_create_for_actor(
+        actor,
+        scene_id: uuid.UUID | str,
+        session_id: uuid.UUID | str | None,
+        db: AsyncSession | None = None,
+    ) -> Session:
+        """按 actor + 场景取会话；归属不匹配时视为无效 session_id，另起新会话。
+
+        不匹配不报错是有意为之：既不泄露“该 session 存在但不属于你”，
+        也与原实现「session 不属于当前用户就新建」保持一致。
+        """
+        own = db is None
+        async with _session(db) as s:
+            if session_id:
+                sess = await s.get(Session, uuid.UUID(str(session_id)))
+                if sess is not None and SessionRepo._belongs(sess, actor, scene_id):
+                    return sess
+            values: dict = {"scene_id": uuid.UUID(str(scene_id))}
+            if actor.is_visitor:
+                values["visitor_id"] = uuid.UUID(str(actor.id))
+            else:
+                values["user_id"] = uuid.UUID(str(actor.id))
+            sess = Session(**values)
+            s.add(sess)
+            await s.flush()
+            if own:
+                await s.commit()
+                await s.refresh(sess)
+            return sess
+
+    @staticmethod
+    def _belongs(sess: Session, actor, scene_id: uuid.UUID | str) -> bool:
+        if str(sess.scene_id) != str(scene_id):
+            return False
+        if actor.is_visitor:
+            return sess.visitor_id is not None and str(sess.visitor_id) == str(actor.id)
+        return sess.user_id is not None and str(sess.user_id) == str(actor.id)
+
+    @staticmethod
+    async def create(
+        user_id: uuid.UUID | str, title: str = "新对话", scene_id: uuid.UUID | str | None = None
+    ) -> Session:
         async with SessionLocal() as db:
-            sess = Session(user_id=uuid.UUID(str(user_id)), title=title)
+            values: dict = {"user_id": uuid.UUID(str(user_id)), "title": title}
+            if scene_id:
+                values["scene_id"] = uuid.UUID(str(scene_id))
+            sess = Session(**values)
             db.add(sess)
             await db.commit()
             await db.refresh(sess)
@@ -122,17 +425,24 @@ class SessionRepo:
             return await s.get(Session, uuid.UUID(str(session_id)))
 
     @staticmethod
-    async def list_by_user(user_id: uuid.UUID | str, page: int = 1, page_size: int = 20) -> tuple[list[Session], int]:
+    async def list_by_user(
+        user_id: uuid.UUID | str,
+        page: int = 1,
+        page_size: int = 20,
+        scene_id: uuid.UUID | str | None = None,
+    ) -> tuple[list[Session], int]:
+        """客户的会话列表；给定 scene_id 时只返回该场景下的会话（场景隔离）。"""
         async with SessionLocal() as db:
+            cond = [Session.user_id == uuid.UUID(str(user_id))]
+            if scene_id:
+                cond.append(Session.scene_id == uuid.UUID(str(scene_id)))
             total = (
-                await db.execute(
-                    select(func.count()).select_from(Session).where(Session.user_id == uuid.UUID(str(user_id)))
-                )
+                await db.execute(select(func.count()).select_from(Session).where(*cond))
             ).scalar_one()
             rows = (
                 await db.execute(
                     select(Session)
-                    .where(Session.user_id == uuid.UUID(str(user_id)))
+                    .where(*cond)
                     .order_by(Session.created_at.desc())
                     .offset((page - 1) * page_size)
                     .limit(page_size)
@@ -141,13 +451,15 @@ class SessionRepo:
             return list(rows), total
 
     @staticmethod
-    def _apply_filters(stmt, user_id, status, last_route_to, date_from, date_to):
+    def _apply_filters(stmt, user_id, status, last_route_to, date_from, date_to, scene_id=None):
         if user_id:
             stmt = stmt.where(Session.user_id == uuid.UUID(str(user_id)))
         if status:
             stmt = stmt.where(Session.status == status)
         if last_route_to:
             stmt = stmt.where(Session.last_route_to == last_route_to)
+        if scene_id:
+            stmt = stmt.where(Session.scene_id == uuid.UUID(str(scene_id)))
         if date_from:
             stmt = stmt.where(Session.created_at >= date_from)
         if date_to:
@@ -161,6 +473,7 @@ class SessionRepo:
         last_route_to: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        scene_id: uuid.UUID | str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
@@ -179,10 +492,10 @@ class SessionRepo:
             )
             count_base = select(func.count()).select_from(Session)
             base = SessionRepo._apply_filters(
-                base, user_id, status, last_route_to, date_from, date_to
+                base, user_id, status, last_route_to, date_from, date_to, scene_id
             )
             count_base = SessionRepo._apply_filters(
-                count_base, user_id, status, last_route_to, date_from, date_to
+                count_base, user_id, status, last_route_to, date_from, date_to, scene_id
             )
             total = (await db.execute(count_base)).scalar_one()
             rows = (
@@ -199,6 +512,7 @@ class SessionRepo:
                     "title": s.title,
                     "status": s.status,
                     "last_route_to": s.last_route_to,
+                    "scene_id": str(s.scene_id),
                     "user_id": str(s.user_id),
                     "username": username,
                     "display_name": display_name,
@@ -217,6 +531,7 @@ class SessionRepo:
         last_route_to: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        scene_id: uuid.UUID | str | None = None,
         max_rows: int = 10000,
     ) -> list[dict]:
         """导出用：返回满足过滤条件的会话（含首条客户问句摘要）。"""
@@ -225,7 +540,7 @@ class SessionRepo:
                 Session, CustomerUser.username, CustomerUser.display_name
             ).join(CustomerUser, CustomerUser.id == Session.user_id)
             stmt = SessionRepo._apply_filters(
-                stmt, user_id, status, last_route_to, date_from, date_to
+                stmt, user_id, status, last_route_to, date_from, date_to, scene_id
             )
             stmt = stmt.order_by(Session.created_at.desc()).limit(max_rows)
             rows = (await db.execute(stmt)).all()
@@ -245,6 +560,7 @@ class SessionRepo:
                         "session_id": str(s.id),
                         "customer": display_name or username,
                         "username": username,
+                        "scene_id": str(s.scene_id),
                         "title": s.title,
                         "status": s.status,
                         "last_route_to": s.last_route_to or "",
@@ -351,25 +667,42 @@ class MessageRepo:
 
 class MemoryRepo:
     @staticmethod
+    def _actor_cond(subject: uuid.UUID | str) -> list:
+        """把隔离主体转成过滤条件：``visitor:<uuid>`` 走 visitor_id，其余走 user_id。"""
+        text = str(subject)
+        if text.startswith("visitor:"):
+            return [Memory.visitor_id == uuid.UUID(text[8:])]
+        return [Memory.user_id == uuid.UUID(text)]
+
+    @staticmethod
     async def upsert_mirror(
-        user_id: uuid.UUID | str,
-        memory_uid: str,
-        type_: str,
-        content: str,
+        user_id: uuid.UUID | str | None = None,
+        memory_uid: str = "",
+        type_: str = "working",
+        content: str = "",
         importance: float = 0.5,
         session_id: uuid.UUID | str | None = None,
         source_message_id: uuid.UUID | str | None = None,
         metadata: dict | None = None,
         db: AsyncSession | None = None,
+        visitor_id: uuid.UUID | str | None = None,
     ) -> Memory:
-        """原子 upsert：依赖 (user_id, memory_uid) 唯一约束，避免先查后插的并发重复。"""
+        """原子 upsert：依赖 (user_id, visitor_id, memory_uid) 唯一约束，避免先查后插的并发重复。
+
+        user_id 与 visitor_id 二选一（DB 侧 CHECK 约束）；直接传字符串 ``visitor:<uuid>``
+        到 user_id 也会被自动拆解，兼容记忆层沿用的 actor 主体格式。
+        """
         own = db is None
+        if visitor_id is None and user_id is not None and str(user_id).startswith("visitor:"):
+            visitor_id, user_id = str(user_id)[8:], None
         async with _session(db) as s:
-            uid = uuid.UUID(str(user_id))
+            uid = uuid.UUID(str(user_id)) if user_id else None
+            vid = uuid.UUID(str(visitor_id)) if visitor_id else None
             src_mid = uuid.UUID(str(source_message_id)) if source_message_id else None
             insert_values = {
                 Memory.__table__.c.id: uuid.uuid4(),
                 Memory.__table__.c.user_id: uid,
+                Memory.__table__.c.visitor_id: vid,
                 Memory.__table__.c.memory_uid: memory_uid,
                 Memory.__table__.c.type: type_,
                 Memory.__table__.c.content: content,
@@ -398,7 +731,7 @@ class MemoryRepo:
                 pg_insert(Memory)
                 .values(insert_values)
                 .on_conflict_do_update(
-                    index_elements=["user_id", "memory_uid"],
+                    index_elements=["user_id", "visitor_id", "memory_uid"],
                     set_=conflict_set,
                 )
                 .returning(Memory)
@@ -412,13 +745,14 @@ class MemoryRepo:
     async def touch_access(user_id: uuid.UUID | str, prefixes: list[str]) -> list[Memory]:
         """按内容前缀命中镜像记忆行，递增 access_count / 刷新 last_accessed_at。
 
+        user_id 接受 ``user:<uuid>`` / ``visitor:<uuid>`` 两种隔离主体，
         召回结果是截断后的内容前缀，故用等值 OR 前缀匹配；同前缀多行会被连带计数（概率极低）。
         返回本次被更新的行，晋升判定（type/access_count）由调用方完成。
         """
         touched: list[Memory] = []
         seen: set[str] = set()
+        actor_cond = MemoryRepo._actor_cond(user_id)
         async with SessionLocal() as db:
-            uid = uuid.UUID(str(user_id))
             for prefix in prefixes:
                 if not prefix or prefix in seen:
                     continue
@@ -430,7 +764,7 @@ class MemoryRepo:
                     await db.execute(
                         update(Memory)
                         .where(
-                            Memory.user_id == uid,
+                            *actor_cond,
                             or_(Memory.content == prefix, Memory.content.like(escaped + "%")),
                         )
                         .values(
@@ -450,14 +784,16 @@ class MemoryRepo:
     ) -> list[Memory]:
         """会话结束时把该会话未晋升的 working 行全量晋升为 episodic（spec 8.6）。
 
+        user_id 接受 ``user:<uuid>`` / ``visitor:<uuid>`` 两种隔离主体。
         返回被晋升的行，供调用方补写 hello_agents 长期层。
         """
+        actor_cond = MemoryRepo._actor_cond(user_id)
         async with SessionLocal() as db:
             rows = (
                 await db.execute(
                     update(Memory)
                     .where(
-                        Memory.user_id == uuid.UUID(str(user_id)),
+                        *actor_cond,
                         Memory.session_id == uuid.UUID(str(session_id)),
                         Memory.type == "working",
                     )
@@ -598,15 +934,42 @@ class KnowledgeBaseRepo:
             return await db.get(KnowledgeBase, namespace)
 
     @staticmethod
-    async def create(namespace: str, display_name: str, description: str | None = None) -> KnowledgeBase:
+    async def create(
+        namespace: str,
+        display_name: str,
+        description: str | None = None,
+        scene_id: uuid.UUID | str | None = None,
+    ) -> KnowledgeBase:
+        """scene_id 为空表示平台共享库；非空表示该场景自有库（仅本场景检索）。"""
         async with SessionLocal() as db:
             row = KnowledgeBase(
-                namespace=namespace, display_name=display_name, description=description
+                namespace=namespace,
+                display_name=display_name,
+                description=description,
+                scene_id=uuid.UUID(str(scene_id)) if scene_id else None,
             )
             db.add(row)
             await db.commit()
             await db.refresh(row)
             return row
+
+    @staticmethod
+    async def set_scene_namespaces(scene_id: uuid.UUID | str, namespaces: list[str]) -> None:
+        """全量替换场景归属：列表内归属本场景，列表外原属本场景的解绑为平台共享。"""
+        sid = uuid.UUID(str(scene_id))
+        async with SessionLocal() as db:
+            await db.execute(
+                update(KnowledgeBase)
+                .where(KnowledgeBase.scene_id == sid, KnowledgeBase.namespace.notin_(namespaces))
+                .values(scene_id=None, updated_at=datetime.now())
+            )
+            if namespaces:
+                await db.execute(
+                    update(KnowledgeBase)
+                    .where(KnowledgeBase.namespace.in_(namespaces))
+                    .values(scene_id=sid, updated_at=datetime.now())
+                )
+            await db.commit()
 
     @staticmethod
     async def update(namespace: str, **fields) -> KnowledgeBase | None:
@@ -632,34 +995,64 @@ class KnowledgeBaseRepo:
 
 
 class CannedScriptRepo:
-    """高频固定话术仓储（热路径每轮读一次，只走 enabled+priority 的窄查询）。"""
+    """高频固定话术仓储（热路径每轮读一次，只走 enabled+priority 的窄查询）。
+
+    场景化：``scene_id`` 为空表示全局话术（如 probing 探听拒答），非空表示场景覆盖。
+    运行时同一 key 场景行覆盖全局行；后台管理始终能分别看到两行。
+    """
 
     @staticmethod
-    async def list_enabled() -> list[CannedScript]:
+    def _merge_scene_overrides(rows: list[CannedScript]) -> list[CannedScript]:
+        """同 key 场景行覆盖全局行，再按优先级排序（与运行时判定顺序一致）。"""
+        by_key: dict[str, CannedScript] = {}
+        for row in rows:
+            prev = by_key.get(row.key)
+            if prev is None or (prev.scene_id is None and row.scene_id is not None):
+                by_key[row.key] = row
+        return sorted(by_key.values(), key=lambda r: (r.priority, r.key))
+
+    @staticmethod
+    async def list_enabled(scene_id: uuid.UUID | str | None = None) -> list[CannedScript]:
+        """本场景生效的话术：全局 + 本场景（同 key 场景行覆盖全局，含停用态）。
+
+        先合并再过滤 enabled：场景行被停用时，不会静默回落到同 key 全局行——
+        否则运营在场景里关掉一条话术，实际行为却是变成了全局文案。
+        """
+        async with SessionLocal() as db:
+            if scene_id:
+                cond = or_(
+                    CannedScript.scene_id.is_(None),
+                    CannedScript.scene_id == uuid.UUID(str(scene_id)),
+                )
+            else:
+                cond = CannedScript.scene_id.is_(None)
+            rows = (
+                (await db.execute(select(CannedScript).where(cond))).scalars().all()
+            )
+            merged = CannedScriptRepo._merge_scene_overrides(list(rows))
+            return [r for r in merged if r.enabled]
+
+    @staticmethod
+    async def list_all() -> list[CannedScript]:
+        """后台全量（全局 + 全部场景），不做覆盖合并：运营需要能看到每个场景的覆盖行。"""
         async with SessionLocal() as db:
             rows = (
                 await db.execute(
-                    select(CannedScript)
-                    .where(CannedScript.enabled == True)  # noqa: E712
-                    .order_by(CannedScript.priority, CannedScript.created_at)
+                    select(CannedScript).order_by(CannedScript.priority, CannedScript.created_at)
                 )
             ).scalars().all()
             return list(rows)
 
     @staticmethod
-    async def list_all() -> list[CannedScript]:
+    async def get_by_key(key: str, scene_id: uuid.UUID | str | None = None) -> CannedScript | None:
+        """按 (场景, key) 精确取行：scene_id 为空表示全局行，不回落场景覆盖。"""
         async with SessionLocal() as db:
-            rows = (
-                await db.execute(select(CannedScript).order_by(CannedScript.priority, CannedScript.created_at))
-            ).scalars().all()
-            return list(rows)
-
-    @staticmethod
-    async def get_by_key(key: str) -> CannedScript | None:
-        async with SessionLocal() as db:
-            return (
-                await db.execute(select(CannedScript).where(CannedScript.key == key))
-            ).scalar_one_or_none()
+            stmt = select(CannedScript).where(CannedScript.key == key)
+            if scene_id:
+                stmt = stmt.where(CannedScript.scene_id == uuid.UUID(str(scene_id)))
+            else:
+                stmt = stmt.where(CannedScript.scene_id.is_(None))
+            return (await db.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
     async def create(**fields) -> CannedScript:
@@ -671,11 +1064,14 @@ class CannedScriptRepo:
             return row
 
     @staticmethod
-    async def update(key: str, **fields) -> CannedScript | None:
+    async def update(key: str, scene_id: uuid.UUID | str | None = None, **fields) -> CannedScript | None:
         async with SessionLocal() as db:
-            row = (
-                await db.execute(select(CannedScript).where(CannedScript.key == key))
-            ).scalar_one_or_none()
+            stmt = select(CannedScript).where(CannedScript.key == key)
+            if scene_id:
+                stmt = stmt.where(CannedScript.scene_id == uuid.UUID(str(scene_id)))
+            else:
+                stmt = stmt.where(CannedScript.scene_id.is_(None))
+            row = (await db.execute(stmt)).scalar_one_or_none()
             if not row:
                 return None
             for k, v in fields.items():
@@ -687,26 +1083,21 @@ class CannedScriptRepo:
             return row
 
     @staticmethod
-    async def set_enabled(key: str, enabled: bool) -> CannedScript | None:
-        async with SessionLocal() as db:
-            row = (
-                await db.execute(select(CannedScript).where(CannedScript.key == key))
-            ).scalar_one_or_none()
-            if not row:
-                return None
-            row.enabled = enabled
-            row.updated_at = datetime.now()
-            await db.commit()
-            await db.refresh(row)
-            return row
+    async def set_enabled(
+        key: str, enabled: bool, scene_id: uuid.UUID | str | None = None
+    ) -> CannedScript | None:
+        return await CannedScriptRepo.update(key, scene_id, enabled=enabled)
 
     @staticmethod
-    async def delete(key: str) -> bool:
+    async def delete(key: str, scene_id: uuid.UUID | str | None = None) -> bool:
         """物理删除（调用方需先挡住 is_builtin，种子话术只允许停用不允许删）。"""
         async with SessionLocal() as db:
-            row = (
-                await db.execute(select(CannedScript).where(CannedScript.key == key))
-            ).scalar_one_or_none()
+            stmt = select(CannedScript).where(CannedScript.key == key)
+            if scene_id:
+                stmt = stmt.where(CannedScript.scene_id == uuid.UUID(str(scene_id)))
+            else:
+                stmt = stmt.where(CannedScript.scene_id.is_(None))
+            row = (await db.execute(stmt)).scalar_one_or_none()
             if not row:
                 return False
             await db.delete(row)
@@ -717,6 +1108,7 @@ class CannedScriptRepo:
     def to_dict(row: CannedScript) -> dict:
         return {
             "id": str(row.id),
+            "scene_id": str(row.scene_id) if row.scene_id else None,
             "key": row.key,
             "title": row.title,
             "category": row.category,
@@ -764,30 +1156,31 @@ class AgentRepo:
 
     @staticmethod
     async def get_by_name(name: str) -> AgentMeta | None:
+        """按名取一条 Agent 元信息；重名时全局 Agent 优先（场景内同名由 M3 路由档案区分）。"""
         async with SessionLocal() as db:
-            return (await db.execute(select(AgentMeta).where(AgentMeta.name == name))).scalar_one_or_none()
+            stmt = (
+                select(AgentMeta)
+                .where(AgentMeta.name == name)
+                .order_by(AgentMeta.scene_id.is_(None).desc(), AgentMeta.created_at)
+                .limit(1)
+            )
+            return (await db.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
     async def set_enabled(name: str, enabled: bool) -> None:
         async with SessionLocal() as db:
-            row = (await db.execute(select(AgentMeta).where(AgentMeta.name == name))).scalar_one_or_none()
+            # 同名 Agent 可能分属不同场景：后台按 name 操作时命中的是全局那条
+            row = (
+                await db.execute(
+                    select(AgentMeta)
+                    .where(AgentMeta.name == name)
+                    .order_by(AgentMeta.scene_id.is_(None).desc(), AgentMeta.created_at)
+                    .limit(1)
+                )
+            ).scalars().first()
             if row:
                 row.enabled = enabled
                 await db.commit()
-
-    @staticmethod
-    async def set_enabled_many(names: list[str], enabled: bool) -> int:
-        """批量设置已存在的 Agent 行（供场景包整体启停），返回受影响行数。"""
-        if not names:
-            return 0
-        async with SessionLocal() as db:
-            rows = (
-                (await db.execute(select(AgentMeta).where(AgentMeta.name.in_(names)))).scalars().all()
-            )
-            for row in rows:
-                row.enabled = enabled
-            await db.commit()
-            return len(rows)
 
     @staticmethod
     async def create_dynamic(**fields) -> AgentMeta:
@@ -1173,9 +1566,15 @@ class TraceRepo:
                     trace_id=str(row.get("trace_id") or "")[:64],
                     session_id=_trace_uuid(row.get("session_id")),
                     user_id=_trace_uuid(row.get("user_id")),
+                    scene_code=str(row.get("scene_code") or "default")[:32],
+                    visitor_id=_trace_uuid(row.get("visitor_id")),
                     user_message_id=_trace_uuid(row.get("user_message_id")),
                     assistant_message_id=_trace_uuid(row.get("assistant_message_id")),
                     intent_count=row.get("intent_count") or 0,
+                    router_skipped=bool(row.get("router_skipped")),
+                    router_fallback=bool(row.get("router_fallback")),
+                    router_ms=row.get("router_ms"),
+                    prompt_hash=(str(row["prompt_hash"])[:64] if row.get("prompt_hash") else None),
                     agent_names=row.get("agent_names") or [],
                     agent_sources=row.get("agent_sources") or [],
                     llm_models=row.get("llm_models") or [],
@@ -1207,6 +1606,11 @@ class TraceRepo:
             "trace_id": t.trace_id,
             "session_id": str(t.session_id) if t.session_id else None,
             "user_id": str(t.user_id) if t.user_id else None,
+            "scene_code": t.scene_code,
+            "router_skipped": t.router_skipped,
+            "router_fallback": t.router_fallback,
+            "router_ms": t.router_ms,
+            "prompt_hash": t.prompt_hash,
             "user_message_id": str(t.user_message_id) if t.user_message_id else None,
             "assistant_message_id": str(t.assistant_message_id) if t.assistant_message_id else None,
             "intent_count": t.intent_count,
@@ -1238,6 +1642,7 @@ class TraceRepo:
         *,
         session_id,
         user_id,
+        scene_code,
         agent_name,
         tool_name,
         mcp_server,
@@ -1251,6 +1656,8 @@ class TraceRepo:
             stmt = stmt.where(RequestTrace.session_id == uuid.UUID(str(session_id)))
         if user_id:
             stmt = stmt.where(RequestTrace.user_id == uuid.UUID(str(user_id)))
+        if scene_code:
+            stmt = stmt.where(RequestTrace.scene_code == str(scene_code))
         # 数组列用 @> 包含判定（GIN 索引可命中）
         if agent_name:
             stmt = stmt.where(RequestTrace.agent_names.contains([agent_name]))
@@ -1277,6 +1684,7 @@ class TraceRepo:
         *,
         session_id=None,
         user_id=None,
+        scene_code=None,
         agent_name=None,
         tool_name=None,
         mcp_server=None,
@@ -1291,6 +1699,7 @@ class TraceRepo:
         kw = {
             "session_id": session_id,
             "user_id": user_id,
+            "scene_code": scene_code,
             "agent_name": agent_name,
             "tool_name": tool_name,
             "mcp_server": mcp_server,
@@ -1398,6 +1807,51 @@ class TraceRepo:
             for name in names or []:
                 counter[name] = counter.get(name, 0) + 1
         return [{"name": k, "count": c} for k, c in sorted(counter.items(), key=lambda x: -x[1])]
+
+    @staticmethod
+    async def router_stats(scene_code: str | None = None, hours: int = 24) -> dict:
+        """近 N 小时的路由质量聚合（可按场景过滤）。
+
+        只统计已完成并且写入了链路的请求：客户端中途断连的轮次不写入，
+        因此分母是“真正走完的请求”，比率不会被半截请求拉低。
+        """
+        window = max(1, int(hours))
+        since = datetime.now(UTC) - timedelta(hours=window)
+        stmt = select(
+            func.count().label("requests"),
+            func.count().filter(RequestTrace.router_skipped.is_(True)).label("router_skipped"),
+            func.count().filter(RequestTrace.router_fallback.is_(True)).label("router_fallback"),
+            func.count().filter(RequestTrace.outcome == "handover").label("handover"),
+            func.avg(RequestTrace.router_ms).label("avg_router_ms"),
+            func.avg(RequestTrace.total_latency_ms).label("avg_total_ms"),
+        ).where(RequestTrace.created_at >= since)
+        if scene_code:
+            stmt = stmt.where(RequestTrace.scene_code == scene_code)
+        async with SessionLocal() as db:
+            row = (await db.execute(stmt)).one()
+
+        total = int(row.requests or 0)
+
+        def _rate(count) -> float:
+            return round(int(count or 0) / total, 4) if total else 0.0
+
+        return {
+            "scene_code": scene_code,
+            "hours": window,
+            "requests": total,
+            "router_skipped": int(row.router_skipped or 0),
+            "router_fallback": int(row.router_fallback or 0),
+            "handover": int(row.handover or 0),
+            "skip_rate": _rate(row.router_skipped),
+            "fallback_rate": _rate(row.router_fallback),
+            "handover_rate": _rate(row.handover),
+            "avg_router_ms": (
+                round(float(row.avg_router_ms), 1) if row.avg_router_ms is not None else None
+            ),
+            "avg_total_latency_ms": (
+                round(float(row.avg_total_ms), 1) if row.avg_total_ms is not None else None
+            ),
+        }
 
     @staticmethod
     async def delete_older_than(days: int) -> int:

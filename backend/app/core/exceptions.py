@@ -55,6 +55,24 @@ class Conflict(BizError):
     __doc__ = "资源冲突"
 
 
+class SceneNotFound(BizError):
+    code = 3003
+    http_status = status.HTTP_404_NOT_FOUND
+    __doc__ = "场景不存在"
+
+
+class SceneDisabled(BizError):
+    code = 3004
+    http_status = status.HTTP_404_NOT_FOUND
+    __doc__ = "场景已停用"
+
+
+class SceneNotConfigured(BizError):
+    code = 3005
+    http_status = status.HTTP_409_CONFLICT
+    __doc__ = "场景未配置可用 Agent"
+
+
 class ToolParamError(BizError):
     code = 4001
     http_status = status.HTTP_400_BAD_REQUEST

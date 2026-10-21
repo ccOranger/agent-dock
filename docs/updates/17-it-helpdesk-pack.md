@@ -1,8 +1,11 @@
-# U17 · IT Helpdesk 场景包与包启停
+# U17 · IT Helpdesk 场景包与包启停（历史）
 
 > 目标：用第二个场景包验证“同一内核、不同场景”——内核不新增业务概念，只补通用能力
 > （`features` 声明、包资产归属、包级启停），IT 业务全部落在 `packs/it_helpdesk/`。
-> 关联：[场景包开发指南](../packs.md)、[开发清单 M4](../development-checklist.md)、[领域解耦清单](../domain-decoupling.md)。
+> 关联：[开发清单 M4](../development-checklist.md)。
+>
+> **后续变更**：场景包机制已移除，文中 manifest、包启停与 `app/packs` 路径均为历史记录；
+> IT 能力现位于 `app/agents/business/it_*.py`、`app/agents/prompts/it_*.py`、`app/tools/custom/it_*.py`。
 
 ## 1. 背景与问题
 

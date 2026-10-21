@@ -18,6 +18,18 @@
         </template>
       </el-table-column>
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
+      <el-table-column label="归属场景" width="140">
+        <template #default="{ row }">
+          <el-tooltip
+            v-if="row.scene_id"
+            placement="top"
+            content="动态 Agent 只在创建它的场景内可被绑定；代码 Agent 为全局可用"
+          >
+            <el-tag size="small" type="success">{{ sceneName(row.scene_id) }}</el-tag>
+          </el-tooltip>
+          <span v-else class="muted">全局</span>
+        </template>
+      </el-table-column>
       <el-table-column width="200">
         <template #header>
           知识库
@@ -239,6 +251,10 @@
         <el-descriptions-item label="启用">
           <el-tag :type="detail.enabled ? 'success' : 'danger'" size="small">{{ detail.enabled ? '启用' : '禁用' }}</el-tag>
         </el-descriptions-item>
+        <el-descriptions-item label="归属场景">
+          <el-tag v-if="detail.scene_id" size="small" type="success">{{ sceneName(detail.scene_id) }}</el-tag>
+          <span v-else class="muted">全局（所有场景可绑定）</span>
+        </el-descriptions-item>
         <el-descriptions-item label="模型">{{ detail.model || '—' }}</el-descriptions-item>
         <el-descriptions-item label="知识库">
           <el-tag v-if="detail.search_all_knowledge_bases" size="small" style="margin-right: 4px">全部库</el-tag>
@@ -299,16 +315,23 @@ import {
   apiListBases,
   apiListCustomTools,
   apiListMcpServers,
+  apiListScenes,
   apiToggleAgent,
   apiUpdateAgent,
 } from '@/api'
-import type { AgentInfo, CustomToolSpec, DynamicAgentPayload, KnowledgeBase, MCPServer } from '@/types'
+import type { AgentInfo, CustomToolSpec, DynamicAgentPayload, KnowledgeBase, MCPServer, Scene } from '@/types'
 
 const agents = ref<AgentInfo[]>([])
 const mcpServers = ref<MCPServer[]>([])
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const customTools = ref<CustomToolSpec[]>([])
+const scenes = ref<Scene[]>([])
 const loading = ref(false)
+
+/** 场景 id → 展示名：列表与详情共用，避免逐行查询 */
+function sceneName(sceneId: string): string {
+  return scenes.value.find((s) => s.id === sceneId)?.display_name || '未知场景'
+}
 
 // 仅已登记的自定义工具可作为绑定候选（未登记表示代码有但未开放给 Agent）
 const registeredCustomTools = computed(() => customTools.value.filter((t) => t.registered))
@@ -341,16 +364,18 @@ const form = reactive<DynamicAgentPayload>(emptyForm())
 async function load() {
   loading.value = true
   try {
-    const [a, m, k, ct] = await Promise.all([
+    const [a, m, k, ct, sc] = await Promise.all([
       apiListAgents(),
       apiListMcpServers(),
       apiListBases(),
       apiListCustomTools(),
+      apiListScenes(),
     ])
     agents.value = a
     mcpServers.value = m
     knowledgeBases.value = k
     customTools.value = ct
+    scenes.value = sc
   } finally {
     loading.value = false
   }

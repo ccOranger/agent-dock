@@ -168,7 +168,7 @@ docker compose stop backend web
 | 你改了什么 | 用哪条命令 | 说明 |
 |------|---------|------|
 | 只重启后端进程（不改代码/清状态） | `docker compose restart backend` | 镜像不变 |
-| 后端代码 / manifest / 新增场景包 | `docker compose up -d --build backend` | 代码编译进镜像，**`restart` 不生效**；改包需重启才重载（lru_cache） |
+| 后端代码 / 新增 Agent 或工具 | `docker compose up -d --build backend` | 代码编译进镜像，**`restart` 不生效**；注册表在进程启动时构建，改动需重启 |
 | 前端页面（`.vue`） | `docker compose up -d --build web` | `web.Dockerfile` 多阶段 `npm run build` 成 dist 再进镜像；起完需**硬刷新** `Ctrl+F5`（index.html 可能缓存） |
 | `.env` / compose 文件（环境变量/端口） | `docker compose up -d` | 会 diff 出变化服务重建；`restart` **读不到新 `.env`** |
 | 重启整套（含数据库） | `docker compose restart` | 数据在命名卷，不删 |
@@ -184,7 +184,7 @@ docker compose stop backend web
 
 1. PostgreSQL / Redis / Qdrant（如需 semantic 再加 Neo4j）就绪。
 2. 建库：本机 `bash scripts/init_db.sh`；云库推荐直接跑 `python scripts/rebuild_and_seed.py`（单往返 simple query，规避连接池代理断连）。
-3. 后端：确认 `backend/.env`（见 §8）→ 在 `backend` 目录 `python ..\scripts\seed_data.py`（建表 + 灌种子，幂等）→ `uvicorn app.main:app`。
+3. 后端：确认 `backend/.env`（见 §8）→ 在 `backend` 目录 `python ..\scripts\init_db.py` 建表、`python ..\scripts\seed_data.py` 灌种子（均幂等；全新库可直接 `rebuild_and_seed.py`）→ `uvicorn app.main:app`。
 4. 前端：仓库根 `npm install`（一次装好两个前端与 `packages/shared`）→ `npm run dev:chat`（5173）/ `npm run dev:admin`（5174）。
 
 启动日志应看到 HelloAgents 初始化（工具 → 注册 → Agent）与 Agent 自动登记；`app/main.py` 会把 stdout/stderr 切到 UTF-8。
@@ -232,14 +232,15 @@ docker compose stop backend web
 - **开发阶段 schema 重置**（本项目 schema 频繁变动，如 `users` 拆为 `staff_users`/`customer_users`、工单迁到 `tickets`）：改 ORM 后无需手写增量迁移，直接全量重建（⚠️ 清空业务数据，仅限开发）：
   ```powershell
   cd backend; .\.venv\Scripts\python.exe ..\scripts\rebuild_and_seed.py
-  # DROP 旧表（含遗留 users）→ create_all 建表 → 灌种子；单往返 simple query 适配云库代理
+  # DROP 旧表（含遗留 users）→ init_db.sql 建表 → 灌种子；单往返 simple query 适配云库代理
+  # 生产初始化设 SEED_DEMO=false（随机管理员密码只打印一次）；演示环境设 SEED_DEMO=true
   ```
 - **脚本清单**（`scripts/`）：
   | 脚本 | 作用 |
   |------|------|
   | `init_db.sql` | 全量 schema（已去除 `uuid-ossp`/`pgvector` 依赖，UUID 用内置 `gen_random_uuid()`） |
   | `init_db.sh` | 本机一键建库 |
-  | `seed_data.py` | 种子定义：建表 + 初始人员/客户/Agent/工具/示例文档/MCP 配置（含 IT 演示数据，幂等，可对旧数据 upsert） |
+  | `seed_data.py` | 种子定义：初始人员/客户/Agent/工具/示例文档/MCP 配置（不建表；幂等，可对旧数据 upsert） |
   | `seed_it_kb.py` | 可选：把 IT 示例 FAQ 写入 Qdrant（需 embedding 可用；已存在同名跳过，单条失败继续） |
   | `rebuild_and_seed.py` | 开发阶段全量重建 + 灌种子（云库友好） |
   | `seed_memory_via_chat.py` | 模拟对话造记忆测试数据 |
@@ -255,7 +256,7 @@ docker compose stop backend web
 `mcp_logistics` / `mcp_refund` 已实现为**本地 FastMCP 服务**（`backend/mcp_servers/*.py`），以 **stdio 子进程**方式由 `MCPTool` 拉起，**不需要任何端口或外部域名**（[U05](updates/05-stdio-mcp-demo.md)）：
 
 - 服务脚本：`backend/mcp_servers/logistics_server.py`、`refund_server.py`
-- 固定数据源（单一真相）：`backend/app/packs/customer_service/tools/mock_data.py`；进程内自定义工具（`query_order`/`query_logistics`/`submit_refund` 等）与 MCP 服务共用同一份
+- 固定数据源（单一真相）：`backend/app/tools/custom/mock_data.py`；进程内自定义工具（`query_order`/`query_logistics`/`submit_refund` 等）与 MCP 服务共用同一份
 - 配置落库：`tools` 表 `config = {transport: stdio, command: <venv python>, args: [<脚本绝对路径>], timeout_seconds: 20}`（`seed_data.py` 写入并 upsert 覆盖旧数据）
 - 跨环境路径解析：`command`/`args` 由加载器解析为绝对路径，工作目录无关。
 
@@ -302,6 +303,6 @@ cd d:\project\smart-cs\backend; $env:PYTHONIOENCODING="utf-8"
 - 反向代理需关闭 SSE 缓冲（Nginx：`proxy_buffering off;`）并设 `proxy_read_timeout ≥ 300s`；仓库自带 `docker/nginx.conf` 已配置，样本可直接参考。
 - 代理链采信：仅当直连对端命中 `TRUSTED_PROXIES`（逗号分隔 IP/CIDR）时才采信 `X-Forwarded-For`；compose 默认只采信 Nginx 容器静态 IP `172.28.0.10/32`（固定子网 `172.28.0.0/24`），backend 端口只绑 `127.0.0.1`，无法从外部直连伪造。从旧版本升级时，若 `.env` 仍写着 `TRUSTED_PROXIES=172.16.0.0/12`，请删掉该行或改为 `172.28.0.10/32`（env 优先于 compose 默认值）。生产叠加的 Caddy 位于边缘，默认会丢弃客户端传入的 `X-Forwarded-For`、按真实对端 IP 覆写（已实测），伪造值不会传到 backend；若在 Caddy 前再加云 LB，需按实际链路重新配置采信。
 - 上传限制：`UPLOAD_MAX_SIZE_MB=20`（后端）与 Nginx `client_max_body_size 25m` 配套；调大时两处同步。
-- CORS：`ALLOWED_ORIGINS` 默认放行 5173/5174（含 127.0.0.1 变体），生产改为实际域名白名单；单镜像部署下前后端同源，无需额外放行 8080。
-- 限流：单用户对话 20/min、上传 10/h、登录 10/min/IP。
+- CORS：`ALLOWED_ORIGINS` 默认放行 5173/5174（含 127.0.0.1 变体），生产改为实际域名白名单；嵌入场景还会叠加各自 `scenes.allowed_origins`（后台保存立即生效）。单镜像部署下前后端同源，无需额外放行 8080。
+- 限流：登录失败按 IP 20 次/5 分钟、账号 5 次/5 分钟（进程内）；公开聊天按 `scene + user/visitor/ip` 30 次/分钟、2000 次/日、并发 3 条（Redis，故障时放行）；上传 10/h。
 - 人员/客户分表：后台接口一律 `require_staff`（agent/admin），写操作多为 `require_admin`；客户接口仅能访问本人会话/记忆。

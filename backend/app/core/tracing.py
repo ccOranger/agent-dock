@@ -16,6 +16,8 @@ from app.core.config import settings
 
 # ===== span 类型（后台按类型分组着色）=====
 SPAN_ROUTER = "router.llm"
+# 场景直连：没有 LLM 调用，但仍记一条 span，后台才能解释“这轮为什么没走路由”
+SPAN_ROUTE = "route.decision"
 SPAN_INTENT = "route.intent"
 SPAN_MEMORY = "context.memory"
 SPAN_RAG = "context.rag"
@@ -67,11 +69,15 @@ class TraceCollector:
         trace_id: str,
         user_id: str | None = None,
         session_id: str | None = None,
+        scene_code: str | None = None,
+        visitor_id: str | None = None,
         enabled: bool = True,
     ):
         self.trace_id = trace_id
         self.user_id = user_id
         self.session_id = session_id
+        self.scene_code = scene_code
+        self.visitor_id = visitor_id
         self.enabled = bool(enabled and settings.trace_enabled)
 
         self._t0 = time.monotonic()
@@ -89,6 +95,11 @@ class TraceCollector:
         # ---- 计数与结论 ----
         self.intent_count = 0
         self.confidence: float | None = None
+        # 路由旁路标记：直连/单 Agent 场景跳过路由 LLM 时置位，M3 起写入 router_ms/prompt_hash
+        self.router_skipped = False
+        self.router_fallback = False
+        self.router_ms: int | None = None
+        self.prompt_hash: str | None = None
         self.memory_hit_count = 0
         self.rag_chunk_count = 0
         self.tool_call_count = 0
@@ -277,9 +288,15 @@ class TraceCollector:
             "trace_id": self.trace_id,
             "session_id": self.session_id,
             "user_id": self.user_id,
+            "scene_code": self.scene_code or "default",
+            "visitor_id": self.visitor_id,
             "user_message_id": self.user_message_id,
             "assistant_message_id": self.assistant_message_id,
             "intent_count": self.intent_count,
+            "router_skipped": self.router_skipped,
+            "router_fallback": self.router_fallback,
+            "router_ms": self.router_ms,
+            "prompt_hash": self.prompt_hash,
             "agent_names": list(self.agent_names),
             "agent_sources": list(self.agent_sources),
             "llm_models": list(self.llm_models),

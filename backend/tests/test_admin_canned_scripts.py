@@ -22,6 +22,7 @@ def _row_obj(
     priority=20,
     enabled=True,
     is_builtin=False,
+    scene_id=None,
 ):
     return SimpleNamespace(
         id=f"id-{key}",
@@ -34,6 +35,7 @@ def _row_obj(
         priority=priority,
         enabled=enabled,
         is_builtin=is_builtin,
+        scene_id=scene_id,
         created_at=None,
         updated_at=None,
     )
@@ -92,7 +94,7 @@ def test_create_cleans_patterns_and_keywords(admin_client, monkeypatch):
     _mute_audit(monkeypatch)
     captured: dict = {}
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return None
 
     async def fake_create(**fields):
@@ -135,7 +137,7 @@ def test_create_rejects_empty_rule(admin_client, monkeypatch):
     """问法与关键词都空的话术永远不会命中，不该让它进库占列表位置"""
     _mute_audit(monkeypatch)
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return None
 
     monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
@@ -149,7 +151,7 @@ def test_create_rejects_single_char_keyword(admin_client, monkeypatch):
     """单字关键词等于把整类句子都吞掉，必须卡在写入前"""
     _mute_audit(monkeypatch)
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return None
 
     monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
@@ -164,7 +166,7 @@ def test_create_rejects_pattern_that_normalizes_away(admin_client, monkeypatch):
     """"你好"这类纯礼貌语归一化后为空，入库即等于空规则（rule_from_row 会丢弃）"""
     _mute_audit(monkeypatch)
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return None
 
     monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
@@ -178,7 +180,7 @@ def test_create_rejects_pattern_that_normalizes_away(admin_client, monkeypatch):
 def test_create_conflict_on_duplicate_key(admin_client, monkeypatch):
     _mute_audit(monkeypatch)
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return _row_obj(key=key)
 
     monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
@@ -204,10 +206,10 @@ def test_update_keeps_untouched_side_of_rule(admin_client, monkeypatch):
     _mute_audit(monkeypatch)
     captured: dict = {}
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return _row_obj(key="business_hours", category="business", patterns=["营业时间"], priority=15)
 
-    async def fake_update(key, **fields):
+    async def fake_update(key, scene_id=None, **fields):
         captured.update(fields)
         return _row_obj(
             key="business_hours",
@@ -227,7 +229,7 @@ def test_update_keeps_untouched_side_of_rule(admin_client, monkeypatch):
 def test_update_clearing_both_sides_is_rejected(admin_client, monkeypatch):
     _mute_audit(monkeypatch)
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return _row_obj(key="business_hours", category="business", patterns=["营业时间"], priority=15)
 
     monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
@@ -238,7 +240,7 @@ def test_update_clearing_both_sides_is_rejected(admin_client, monkeypatch):
 def test_update_missing_script_returns_404(admin_client, monkeypatch):
     _mute_audit(monkeypatch)
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return None
 
     monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
@@ -253,10 +255,10 @@ def test_update_seed_script_with_full_keyword_list(admin_client, monkeypatch):
     keywords = [f"关键词{i}" for i in range(32)]
     captured: dict = {}
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return _row_obj(key="probing", category="probing", keywords=keywords, priority=10, is_builtin=True)
 
-    async def fake_update(key, **fields):
+    async def fake_update(key, scene_id=None, **fields):
         captured.update(fields)
         return _row_obj(
             key="probing", category="probing", keywords=fields["keywords"], priority=10, is_builtin=True
@@ -292,7 +294,7 @@ def test_update_rejects_over_limit_rule_lists(admin_client):
 def test_seed_script_can_be_toggled(admin_client, monkeypatch):
     _mute_audit(monkeypatch)
 
-    async def fake_set_enabled(key, enabled):
+    async def fake_set_enabled(key, enabled, scene_id=None):
         return _row_obj(key=key, enabled=enabled, is_builtin=True)
 
     monkeypatch.setattr(CannedScriptRepo, "set_enabled", fake_set_enabled)
@@ -305,7 +307,7 @@ def test_seed_script_cannot_be_deleted(admin_client, monkeypatch):
     """运行时只认这张表：删掉探听拒答就等于把"系统提示词"重新交回模型自由发挥，所以只允许停用"""
     _mute_audit(monkeypatch)
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return _row_obj(key=key, is_builtin=True)
 
     async def fake_delete(key):  # pragma: no cover - 不应被调用
@@ -321,10 +323,10 @@ def test_custom_script_can_be_deleted(admin_client, monkeypatch):
     _mute_audit(monkeypatch)
     deleted: list[str] = []
 
-    async def fake_get_by_key(key):
+    async def fake_get_by_key(key, scene_id=None):
         return _row_obj(key=key, category="business")
 
-    async def fake_delete(key):
+    async def fake_delete(key, scene_id=None):
         deleted.append(key)
         return True
 
@@ -336,7 +338,7 @@ def test_custom_script_can_be_deleted(admin_client, monkeypatch):
 
 # ===== 命中测试：与运行时共用同一套规则 =====
 def test_match_reports_db_hit(admin_client, monkeypatch):
-    async def fake_list_enabled():
+    async def fake_list_enabled(scene_id=None):
         return [
             _row_obj(key="business_hours", category="business", patterns=["营业时间"], priority=15),
             _row_obj(key="probing", category="probing", keywords=["提示词"], priority=10),
@@ -352,7 +354,7 @@ def test_match_reports_db_hit(admin_client, monkeypatch):
 
 
 def test_match_probing_outranks_other_categories(admin_client, monkeypatch):
-    async def fake_list_enabled():
+    async def fake_list_enabled(scene_id=None):
         return [
             _row_obj(key="identity", patterns=["你是谁"]),
             _row_obj(key="probing", category="probing", keywords=["提示词"], priority=10),
@@ -366,7 +368,7 @@ def test_match_probing_outranks_other_categories(admin_client, monkeypatch):
 
 
 def test_match_no_hit_means_this_round_goes_to_router(admin_client, monkeypatch):
-    async def fake_list_enabled():
+    async def fake_list_enabled(scene_id=None):
         return [_row_obj(key="business_hours", category="business", patterns=["营业时间"], priority=15)]
 
     monkeypatch.setattr(CannedScriptRepo, "list_enabled", fake_list_enabled)
@@ -379,7 +381,7 @@ def test_match_no_hit_means_this_round_goes_to_router(admin_client, monkeypatch)
 def test_match_on_empty_table_reports_no_hit(admin_client, monkeypatch):
     """表空/全部停用时命中测试也不能报命中：后台看到的就与运行时一致，不存在隐形的代码规则"""
 
-    async def fake_list_enabled():
+    async def fake_list_enabled(scene_id=None):
         return []
 
     monkeypatch.setattr(CannedScriptRepo, "list_enabled", fake_list_enabled)

@@ -21,7 +21,20 @@ import type {
   RequestTraceSummary,
   RouterAgentInfo,
   RouterPromptPreview,
-  ScenePack,
+  RouterSceneDetail,
+  RouterScenePrompt,
+  RouterSceneStats,
+  RouterSceneSummary,
+  RouterSceneTestResult,
+  Scene,
+  SceneAgentOption,
+  SceneBoundAgent,
+  SceneCreatePayload,
+  SceneKnowledgeBaseOption,
+  SceneOption,
+  SceneRotateKeyResult,
+  SceneUpdatePayload,
+  SceneWidgetPayload,
   SearchResult,
   TicketDetail,
   TicketSummary,
@@ -42,6 +55,7 @@ export interface InquiryFilters {
   user_id?: string
   status?: string
   last_route_to?: string
+  scene_code?: string
   date_from?: string
   date_to?: string
   page?: number
@@ -98,6 +112,7 @@ export const apiAddTicketNote = (ticketNo: string, content: string) =>
 export interface TraceFilters {
   session_id?: string
   user_id?: string
+  scene_code?: string
   agent_name?: string
   tool_name?: string
   mcp_server?: string
@@ -130,8 +145,12 @@ export const apiTraceUsage = (field: TraceUsageField = 'tool_names', days = 7) =
 export const apiListBases = () =>
   unwrap(http.get<never, { data: { data: KnowledgeBase[] } }>('/knowledge/bases'))
 
-export const apiCreateBase = (body: { namespace: string; display_name: string; description?: string }) =>
-  unwrap(http.post<never, { data: { data: KnowledgeBase } }>('/knowledge/bases', body))
+export const apiCreateBase = (body: {
+  namespace: string
+  display_name: string
+  description?: string
+  scene_code?: string | null
+}) => unwrap(http.post<never, { data: { data: KnowledgeBase } }>('/knowledge/bases', body))
 
 export const apiUpdateBase = (
   namespace: string,
@@ -215,12 +234,63 @@ export const apiUpdateAgent = (name: string, body: Partial<DynamicAgentPayload>)
 
 export const apiDeleteAgent = (name: string) => http.delete(`/admin/agents/${name}`)
 
-// ===== Admin：场景包 =====
-export const apiListPacks = () =>
-  unwrap(http.get<never, { data: { data: ScenePack[] } }>('/admin/packs'))
+// ===== Admin：场景 =====
+export const apiListScenes = () =>
+  unwrap(http.get<never, { data: { data: Scene[] } }>('/admin/scenes'))
 
-export const apiTogglePack = (name: string, enabled: boolean) =>
-  unwrap(http.patch<never, { data: { data: ScenePack } }>(`/admin/packs/${name}`, { enabled }))
+/** 聊天入口/下拉用：只返回启用中的场景 */
+export const apiSceneOptions = () =>
+  unwrap(http.get<never, { data: { data: SceneOption[] } }>('/admin/scenes/options'))
+
+export const apiGetScene = (id: string) =>
+  unwrap(http.get<never, { data: { data: Scene } }>(`/admin/scenes/${id}`))
+
+export const apiCreateScene = (body: SceneCreatePayload) =>
+  unwrap(http.post<never, { data: { data: Scene } }>('/admin/scenes', body))
+
+export const apiUpdateScene = (id: string, body: SceneUpdatePayload) =>
+  unwrap(http.patch<never, { data: { data: Scene } }>(`/admin/scenes/${id}`, body))
+
+export const apiDeleteScene = (id: string) => http.delete(`/admin/scenes/${id}`)
+
+/** 全量替换绑定；顺序即路由候选顺序 */
+export const apiSetSceneAgents = (id: string, agentIds: string[]) =>
+  unwrap(http.put<never, { data: { data: SceneBoundAgent[] } }>(`/admin/scenes/${id}/agents`, {
+    agent_ids: agentIds,
+  }))
+
+/** 绑定弹窗：可绑定 Agent（全局 + 本场景专属）及当前绑定状态 */
+export const apiSceneAgentOptions = (id: string) =>
+  unwrap(http.get<never, { data: { data: SceneAgentOption[] } }>(`/admin/scenes/${id}/agents`))
+
+/** 绑定弹窗：可绑定知识库（全局 + 本场景归属）及当前状态 */
+export const apiSceneKnowledgeBaseOptions = (id: string) =>
+  unwrap(
+    http.get<never, { data: { data: SceneKnowledgeBaseOption[] } }>(
+      `/admin/scenes/${id}/knowledge-bases`,
+    ),
+  )
+
+/** 全量替换知识库归属；列表外原属本场景的库解绑为平台共享 */
+export const apiSetSceneKnowledgeBases = (id: string, namespaces: string[]) =>
+  unwrap(
+    http.put<never, { data: { data: SceneKnowledgeBaseOption[] } }>(
+      `/admin/scenes/${id}/knowledge-bases`,
+      { namespaces },
+    ),
+  )
+
+/** 嵌入与公开接入：允许来源、匿名开关；开启匿名时后端自动生成 publish_key */
+export const apiUpdateSceneWidget = (id: string, body: SceneWidgetPayload) =>
+  unwrap(http.put<never, { data: { data: Scene } }>(`/admin/scenes/${id}/widget`, body))
+
+/** 轮换服务端 API key：旧 key 立即失效，明文只返回这一次 */
+export const apiRotateSceneKey = (id: string) =>
+  unwrap(
+    http.post<never, { data: { data: SceneRotateKeyResult } }>(
+      `/admin/scenes/${id}/rotate-key`,
+    ),
+  )
 
 // ===== Admin：路由分发器（只读，无任何写接口）=====
 export const apiGetRouterInfo = () =>
@@ -228,6 +298,36 @@ export const apiGetRouterInfo = () =>
 
 export const apiGetRouterPrompt = () =>
   unwrap(http.get<never, { data: { data: RouterPromptPreview } }>('/admin/router/prompt'))
+
+// ===== Admin：场景路由档案（M3，派生视图）=====
+/** 全局模板、占位符与 env 默认值 */
+export const apiGetRouterTemplate = () =>
+  unwrap(http.get<never, { data: { data: RouterAgentInfo } }>('/admin/router/template'))
+
+/** 场景路由摘要列表：只给结论与警告，不渲染提示词 */
+export const apiListRouterScenes = () =>
+  unwrap(http.get<never, { data: { data: RouterSceneSummary[] } }>('/admin/router/scenes'))
+
+export const apiGetRouterScene = (code: string) =>
+  unwrap(http.get<never, { data: { data: RouterSceneDetail } }>(`/admin/router/scenes/${code}`))
+
+export const apiGetRouterScenePrompt = (code: string) =>
+  unwrap(http.get<never, { data: { data: RouterScenePrompt } }>(`/admin/router/scenes/${code}/prompt`))
+
+/** 试运行：llm 模式会消耗一次路由模型调用；不写会话/链路 */
+export const apiTestRouterScene = (code: string, message: string) =>
+  unwrap(
+    http.post<never, { data: { data: RouterSceneTestResult } }>(`/admin/router/scenes/${code}/test`, {
+      message,
+    }),
+  )
+
+export const apiGetRouterSceneStats = (code: string, hours = 24) =>
+  unwrap(
+    http.get<never, { data: { data: RouterSceneStats } }>(`/admin/router/scenes/${code}/stats`, {
+      params: { hours },
+    }),
+  )
 
 // ===== Admin：MCP 服务 =====
 export const apiListMcpServers = () =>
@@ -265,23 +365,49 @@ export const apiToggleCustomTool = (name: string, enabled: boolean) =>
 export const apiDeleteCustomTool = (name: string) => http.delete(`/admin/custom-tools/${name}`)
 
 // ===== Admin：高频固定话术 =====
-export const apiListCannedScripts = () =>
-  unwrap(http.get<never, { data: { data: CannedScript[] } }>('/admin/canned-scripts'))
+/** 不传 sceneCode 返回全量；传了只返回该场景生效的全局行 + 场景覆盖行 */
+export const apiListCannedScripts = (sceneCode?: string) =>
+  unwrap(
+    http.get<never, { data: { data: CannedScript[] } }>('/admin/canned-scripts', {
+      params: sceneCode ? { scene_code: sceneCode } : {},
+    }),
+  )
 
 export const apiCreateCannedScript = (body: CannedScriptPayload) =>
   unwrap(http.post<never, { data: { data: CannedScript } }>('/admin/canned-scripts', body))
 
-export const apiUpdateCannedScript = (key: string, body: Partial<CannedScriptPayload>) =>
-  unwrap(http.put<never, { data: { data: CannedScript } }>(`/admin/canned-scripts/${key}`, body))
+export const apiUpdateCannedScript = (
+  key: string,
+  body: Partial<CannedScriptPayload>,
+  sceneCode?: string | null,
+) =>
+  unwrap(
+    http.put<never, { data: { data: CannedScript } }>(`/admin/canned-scripts/${key}`, body, {
+      params: sceneCode ? { scene_code: sceneCode } : {},
+    }),
+  )
 
-export const apiToggleCannedScript = (key: string, enabled: boolean) =>
-  http.patch(`/admin/canned-scripts/${key}/toggle`, { enabled })
+export const apiToggleCannedScript = (key: string, enabled: boolean, sceneCode?: string | null) =>
+  http.patch(
+    `/admin/canned-scripts/${key}/toggle`,
+    { enabled },
+    { params: sceneCode ? { scene_code: sceneCode } : {} },
+  )
 
-export const apiDeleteCannedScript = (key: string) => http.delete(`/admin/canned-scripts/${key}`)
+export const apiDeleteCannedScript = (key: string, sceneCode?: string | null) =>
+  http.delete(`/admin/canned-scripts/${key}`, {
+    params: sceneCode ? { scene_code: sceneCode } : {},
+  })
 
 // 命中测试：用真实问法验证规则，不写库、不产生会话消息
-export const apiCannedScriptMatch = (query: string) =>
-  unwrap(http.post<never, { data: { data: CannedMatchResult } }>('/admin/canned-scripts/match', { query }))
+// 传 sceneCode 时按运行时的「全局 + 场景覆盖」合并规则测试
+export const apiCannedScriptMatch = (query: string, sceneCode?: string | null) =>
+  unwrap(
+    http.post<never, { data: { data: CannedMatchResult } }>('/admin/canned-scripts/match', {
+      query,
+      ...(sceneCode ? { scene_code: sceneCode } : {}),
+    }),
+  )
 
 // ===== Admin：Memory =====
 export const apiMyMemories = (type?: string) =>

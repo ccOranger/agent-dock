@@ -1,12 +1,16 @@
-"""种子数据：初始用户 + MCP 工具配置示例
+"""种子数据：初始用户 + MCP 工具 + 默认场景 + 固定话术
+
+只写种子，不建表：换库请先执行 scripts/init_db.py（或 rebuild_and_seed.py）。
 
 用法（在 backend 目录，配好 .env 后）：
+    python ../scripts/init_db.py
     python ../scripts/seed_data.py
 """
 import asyncio
 import os
 import secrets
 import sys
+import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 os.environ.setdefault("PYTHONPATH", "backend")
@@ -17,13 +21,20 @@ from app.core.database import engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.models.entities import (  # noqa: E402
     AgentMeta,
-    Base,
     CannedScript,
     CustomerUser,
     Document,
+    Scene,
+    SceneAgent,
     StaffUser,
     Ticket,
     ToolMeta,
+)
+from app.schemas.scene import (  # noqa: E402
+    DEFAULT_ASSISTANT_NAME,
+    DEFAULT_SCENE_CODE,
+    DEFAULT_SCENE_ID,
+    DEFAULT_SCENE_NAME,
 )
 
 # ===== 种子模式 =====
@@ -114,6 +125,14 @@ DEMO_TOOLS = [
 
 # 默认业务 Agent（与 app/agents/registry.py 中的 AGENT_REGISTRY 对齐，source=code）
 SEED_AGENTS = [
+    # 默认场景绑定的内核级 Agent：中立问答，只读默认知识库
+    {
+        "name": DEFAULT_ASSISTANT_NAME,
+        "display_name": "默认助手",
+        "description": "平台默认问答助手：只依据默认知识库回答，不承诺订单/退款等业务能力",
+        "enabled": True,
+        "sort_order": 0,
+    },
     {
         "name": "knowledge_qa",
         "display_name": "知识问答",
@@ -135,7 +154,7 @@ SEED_AGENTS = [
         "enabled": True,
         "sort_order": 3,
     },
-    # IT Helpdesk 场景包（packs/it_helpdesk/manifest.yaml 声明，默认启用）
+    # IT 服务台示例知识库（默认启用）
     {
         "name": "it_knowledge",
         "display_name": "IT 知识问答",
@@ -198,7 +217,7 @@ DEMO_DOCUMENTS = [
         "rag_namespace": "cs_after_sales",
         "chunk_count": 6,
     },
-    # IT Helpdesk 场景包知识（与 manifest 的 it_default/it_network/it_assets 对齐）
+    # IT 服务台示例知识（与 IT Agent 的 it_default/it_network/it_assets 命名空间对齐）
     {
         "title": "IT 服务台自助指南",
         "source": "docs/it_helpdesk_guide.md",
@@ -235,7 +254,7 @@ DEMO_TICKETS = [
         "title": "财务部 5F 无法连接 Wi-Fi",
         "content": "财务部 5F 整层笔记本无法连接 Wi-Fi，有线网络正常，开始时间 09:20，影响约 12 人。",
         "updates": [],
-        "metadata_": {"pack": "it_helpdesk"},
+        "metadata_": {"source": "it_helpdesk"},
     },
     {
         "ticket_no": "TK-IT0002",
@@ -247,7 +266,7 @@ DEMO_TICKETS = [
         "updates": [
             {"content": "已远程确认电源与内存状态，建议送修检测主板。", "at": "2026-10-19T10:30:00+08:00"}
         ],
-        "metadata_": {"pack": "it_helpdesk"},
+        "metadata_": {"source": "it_helpdesk"},
     },
     {
         "ticket_no": "TK-IT0003",
@@ -259,7 +278,7 @@ DEMO_TICKETS = [
         "updates": [
             {"content": "升级 IT 人工：账号被盗需立即冻结并重置密码。", "at": "2026-10-19T14:05:00+08:00"}
         ],
-        "metadata_": {"pack": "it_helpdesk"},
+        "metadata_": {"source": "it_helpdesk"},
     },
     {
         "ticket_no": "TK-IT0004",
@@ -271,7 +290,7 @@ DEMO_TICKETS = [
         "updates": [
             {"content": "已指导用户重新登录企业账号并完成激活。", "at": "2026-10-18T16:40:00+08:00"}
         ],
-        "metadata_": {"pack": "it_helpdesk"},
+        "metadata_": {"source": "it_helpdesk"},
     },
 ]
 
@@ -298,18 +317,24 @@ ACTIVE_TICKETS = DEMO_TICKETS if DEMO_MODE else []
 async def main() -> None:
     from sqlalchemy import select
 
-    # 可选：--rebuild 先删除全部表（用于人员/客户分表后的全量重建，会清空数据）
-    rebuild = "--rebuild" in sys.argv
-    async with engine.begin() as conn:
-        if rebuild:
-            await conn.run_sync(Base.metadata.drop_all)
-            # 清理遗留的单表 users（分表后不再使用）
-            from sqlalchemy import text
-
-            await conn.execute(text("DROP TABLE IF EXISTS users CASCADE"))
-        await conn.run_sync(Base.metadata.create_all)
+    if "--rebuild" in sys.argv:
+        raise SystemExit("seed_data.py 不再建表/删表；全量重建请使用 scripts/rebuild_and_seed.py")
 
     async with AsyncSession(engine) as db:
+        # 默认场景：init_db.sql 已写入；这里兜底老库/只跑 seed 的环境
+        scene = await db.get(Scene, uuid.UUID(DEFAULT_SCENE_ID))
+        if scene is None:
+            scene = Scene(
+                id=uuid.UUID(DEFAULT_SCENE_ID),
+                code=DEFAULT_SCENE_CODE,
+                display_name=DEFAULT_SCENE_NAME,
+                description="无 scene_code 时的默认落点；单 Agent 直连，只读",
+                is_default=True,
+                router_mode="direct",
+            )
+            db.add(scene)
+            await db.flush()
+
         created_staff: list[str] = []
         for u in ACTIVE_STAFF:
             row = (
@@ -352,16 +377,24 @@ async def main() -> None:
                 row.config = t["config"]
         for a in SEED_AGENTS:
             row = (
-                await db.execute(select(AgentMeta).where(AgentMeta.name == a["name"]))
+                await db.execute(
+                    select(AgentMeta).where(
+                        AgentMeta.name == a["name"], AgentMeta.scene_id.is_(None)
+                    )
+                )
             ).scalar_one_or_none()
             if row is None:
-                db.add(AgentMeta(source="code", **a))
+                db.add(AgentMeta(source="code", scene_id=None, **a))
         for a in ACTIVE_DYNAMIC_AGENTS:
             row = (
-                await db.execute(select(AgentMeta).where(AgentMeta.name == a["name"]))
+                await db.execute(
+                    select(AgentMeta).where(
+                        AgentMeta.name == a["name"], AgentMeta.scene_id.is_(None)
+                    )
+                )
             ).scalar_one_or_none()
             if row is None:
-                db.add(AgentMeta(source="dynamic", **a))
+                db.add(AgentMeta(source="dynamic", scene_id=None, **a))
         for d in ACTIVE_DOCUMENTS:
             row = (
                 await db.execute(
@@ -383,11 +416,16 @@ async def main() -> None:
 
         for rule in SEED_RULES:
             row = (
-                await db.execute(select(CannedScript).where(CannedScript.key == rule.key))
+                await db.execute(
+                    select(CannedScript).where(
+                        CannedScript.key == rule.key, CannedScript.scene_id.is_(None)
+                    )
+                )
             ).scalar_one_or_none()
             if row is None:
                 db.add(
                     CannedScript(
+                        scene_id=None,
                         key=rule.key,
                         title=CANNED_TITLES.get(rule.key, rule.key),
                         category=rule.category,
@@ -401,6 +439,26 @@ async def main() -> None:
                 )
             elif not row.is_builtin:
                 row.is_builtin = True
+
+        # 默认场景只绑定默认助手；绑定关系幂等，已存在则保留后台的启停状态
+        default_agent = (
+            await db.execute(
+                select(AgentMeta).where(
+                    AgentMeta.name == DEFAULT_ASSISTANT_NAME, AgentMeta.scene_id.is_(None)
+                )
+            )
+        ).scalar_one_or_none()
+        if default_agent is not None:
+            link = await db.get(SceneAgent, (scene.id, default_agent.id))
+            if link is None:
+                db.add(
+                    SceneAgent(
+                        scene_id=scene.id,
+                        agent_id=default_agent.id,
+                        enabled=True,
+                        sort_order=0,
+                    )
+                )
         await db.commit()
     demo_tag = "（演示模式）" if DEMO_MODE else ""
     print(
@@ -408,6 +466,7 @@ async def main() -> None:
         f"{len(ACTIVE_CUSTOMERS)} 客户 + {len(ACTIVE_TOOLS)} 工具 + "
         f"{len(SEED_AGENTS)} 代码 Agent + {len(ACTIVE_DYNAMIC_AGENTS)} 动态 Agent + "
         f"{len(ACTIVE_DOCUMENTS)} 示例文档 + {len(ACTIVE_TICKETS)} 示例工单 + {len(SEED_RULES)} 条固定话术"
+        f" + 默认场景 {DEFAULT_SCENE_CODE}（直连）"
     )
     if DEMO_MODE:
         print("   演示账号：admin/Admin@123、service01/Agent@123、alice/Alice@123")

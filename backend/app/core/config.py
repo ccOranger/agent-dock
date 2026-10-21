@@ -108,6 +108,15 @@ class Settings(BaseSettings):
     # true = 交给兜底 Agent 先应答，false = 仍按低置信走转人工
     router_fallback_answer: bool = True
 
+    # ===== 多场景 / 公开接入 =====
+    # 公开聊天限流（按 scene + IP/visitor）；0 表示关闭
+    public_chat_rate_limit_per_minute: int = 30
+    public_chat_daily_quota: int = 2000
+    # 同一主体同时未结束的流式对话上限；0 表示不限制
+    public_chat_max_concurrent: int = 3
+    # 场景 allowed_origins 的进程内缓存秒数，避免每次请求都回库
+    scene_origin_cache_ttl: int = 60
+
     # ===== 链路追踪（request_traces）=====
     trace_enabled: bool = True
     # 工具入参/返回是否入库（含客户数据）：只存截断后的文本，关闭则仅存工具名与耗时
