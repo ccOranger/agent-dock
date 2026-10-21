@@ -30,6 +30,11 @@ export interface StreamSSEOptions {
   headers?: Record<string, string>
   /** 网络异常时的错误码，默认 5001 */
   errorCode?: number
+  /**
+   * 流结束兜底回调：正常 EOF / 网络异常 / 主动中断都会触发。
+   * 供调用方复位自身状态（如 streaming 标记），避免未收到终止事件时状态永久卡住。
+   */
+  onClose?: () => void
 }
 
 /**
@@ -37,7 +42,7 @@ export interface StreamSSEOptions {
  * 调用方只提供 URL、鉴权 token 与事件处理表，读取/分帧逻辑只维护这一份。
  */
 export function streamSSE(options: StreamSSEOptions): AbortController {
-  const { url, body, handlers, token, headers, errorCode = 5001 } = options
+  const { url, body, handlers, token, headers, errorCode = 5001, onClose } = options
   const controller = new AbortController()
   fetch(url, {
     method: 'POST',
@@ -72,6 +77,11 @@ export function streamSSE(options: StreamSSEOptions): AbortController {
     })
     .catch((e) => {
       if (e.name !== 'AbortError') handlers.error?.({ code: errorCode, message: String(e) })
+    })
+    .finally(() => {
+      // 兜底：无论流因何结束（done / 服务端断开 / 代理超时 / 主动中断）都通知调用方，
+      // 保证没有终止事件时外部也能收尾，不会出现输入框永久禁用的状态
+      onClose?.()
     })
   return controller
 }

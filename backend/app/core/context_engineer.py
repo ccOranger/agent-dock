@@ -13,6 +13,7 @@ import time
 from app.core.config import settings
 from app.core.tracing import SPAN_MEMORY, SPAN_PERSIST, SPAN_RAG
 from app.tools.memory_factory import get_memory_tool
+from app.utils.async_io import run_in_pool
 from app.utils.text import compute_importance, estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -108,8 +109,11 @@ class ContextEngineer:
         started_ms = collector.now_ms() if collector else 0
         try:
             tool = get_memory_tool(user_id)
-            result = await asyncio.to_thread(
-                tool.run, {"action": "search", "query": query, "limit": 5}
+            # 硬超时 + 专用线程池：记忆检索底层也是 Qdrant/embedding，挂起时降级为空，
+            # 不能让“preparing”阶段无限等待，也不能占满事件循环默认线程池
+            result = await asyncio.wait_for(
+                run_in_pool(tool.run, {"action": "search", "query": query, "limit": 5}),
+                timeout=settings.rag_timeout,
             )
             items = self._flatten(result) if result else []
             if collector:
@@ -299,7 +303,7 @@ class ContextEngineer:
 
         tool = get_memory_tool(user_id)
         for row in rows:
-            await asyncio.to_thread(
+            await run_in_pool(
                 tool.run,
                 {
                     "action": "add",
@@ -357,7 +361,7 @@ class ContextEngineer:
             importance = compute_importance(query, metadata, signals)
             tool = get_memory_tool(user_id)
             # spec 8.1：每轮都写 working 层（进程内、带 TTL，参与召回最高优先），不再因未达阈而丢弃
-            await asyncio.to_thread(
+            await run_in_pool(
                 tool.run,
                 {
                     "action": "add",
@@ -378,7 +382,7 @@ class ContextEngineer:
             )
             mirror_type = "working"
             if promote:
-                await asyncio.to_thread(
+                await run_in_pool(
                     tool.run,
                     {
                         "action": "add",

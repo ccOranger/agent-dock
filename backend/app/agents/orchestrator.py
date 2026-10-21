@@ -12,6 +12,8 @@ import inspect
 import logging
 import threading
 from collections.abc import AsyncIterator, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any
 
 from hello_agents import Message
@@ -65,6 +67,19 @@ def _safe_prefix_len(text: str) -> int | None:
 # 自定义工具默认执行超时（秒）；BaseTool 子类可用 timeout 类属性覆盖
 _DEFAULT_TOOL_TIMEOUT = 30
 
+# 同步工具（MCP 包装工具）执行线程池。其调用链（MCPWrappedTool.run → MCPTool.run 的
+# future.result() → MCPClient.call_tool）全程没有超时，服务端不响应时会永久阻塞；
+# 工作线程无法被安全取消，只能限制并发并在超时后丢弃该线程，避免线程/子进程随请求累积。
+_SYNC_TOOL_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool-sync")
+
+# 流式桥接空闲超时（秒）：队列超过该时长没有任何事件即判定生产侧卡死。
+# 正常最坏静默为「工具硬超时 30s + 单次 LLM 调用库默认超时 60s」，120s 留有余量。
+_STREAM_IDLE_TIMEOUT = 120
+
+# 流式桥接队列上限：消费端（客户端连接）已断开但生产侧未察觉时，最多积压这么多事件，
+# 超过即丢弃积压并立即下发终止哨兵，避免无界队列持续吃内存
+_STREAM_QUEUE_MAXSIZE = 256
+
 
 def _execute_tool(
     agent: SimpleAgent,
@@ -107,10 +122,24 @@ def _execute_tool(
             else:
                 timeout = getattr(tool, "timeout", None) or _DEFAULT_TOOL_TIMEOUT
                 future = asyncio.run_coroutine_threadsafe(tool.run(**args), loop)
-                result = future.result(timeout)
+                try:
+                    result = future.result(timeout)
+                except FutureTimeout:
+                    # cancel() 线程安全：取消会调度回主循环，阻止工具在超时后继续
+                    # 执行/写库（否则模型拿到“失败”后重试可能重复建单）
+                    future.cancel()
+                    raise TimeoutError(f"工具 {tool_name} 执行超时（{timeout}s），已取消") from None
         else:
-            # 同步工具（如 MCPWrappedTool）：按 hello_agents 约定接收参数字典
-            result = tool.run(args)
+            # 同步工具（如 MCPWrappedTool）：按 hello_agents 约定接收参数字典。
+            # MCP 调用链内部没有任何超时，这里用有界线程池做硬超时兜底：超时即放弃
+            # 等待，返回失败结果让模型继续本轮的后续生成，保证 SSE 一定能走到 done。
+            timeout = getattr(tool, "timeout", None) or _DEFAULT_TOOL_TIMEOUT
+            future = _SYNC_TOOL_POOL.submit(tool.run, args)
+            try:
+                result = future.result(timeout)
+            except FutureTimeout:
+                future.cancel()  # 运行中的线程实际无法取消，仅取消排队任务并放弃等待
+                raise TimeoutError(f"工具 {tool_name} 执行超时（{timeout}s），已放弃等待") from None
         return f"🔧 工具 {tool_name} 执行结果：\n{result}"
     except Exception as exc:  # noqa: BLE001
         logger.exception(f"工具执行失败: {tool_name}")
@@ -123,6 +152,7 @@ def _stream_with_tools(
     context: dict[str, Any] | None = None,
     loop: asyncio.AbstractEventLoop | None = None,
     max_tool_iterations: int = 3,
+    stop: threading.Event | None = None,
 ) -> Iterator[dict]:
     """流式执行 + 真正的工具调用循环（同步生成器，产出 dict 事件）。
 
@@ -131,7 +161,13 @@ def _stream_with_tools(
     这里对齐 SimpleAgent.run 的语义自行实现循环，并区分下发内容：
     - 中间轮（含工具调用）的原始文本不下发，只发 tool_call / tool_result 事件；
     - 最终轮文本仍逐块流式下发（无工具调用时 UX 不变）。
+
+    stop：客户端断开 / 流已判超时后置位，各循环在每个 chunk / 工具调用前检查并
+    立即停止——否则连接断开后仍会继续消耗 LLM token 直到生成自然结束。
     """
+    def _aborted() -> bool:
+        return stop is not None and stop.is_set()
+
     messages: list[dict] = [
         {"role": "system", "content": agent._get_enhanced_system_prompt()}
     ]
@@ -143,6 +179,8 @@ def _stream_with_tools(
     if not tool_mode:
         full = ""
         for chunk in agent.llm.stream_invoke(messages):
+            if _aborted():
+                return
             full += chunk
             yield {"type": "text", "data": {"content": chunk}}
         agent.add_message(Message(input_text, "user"))
@@ -156,6 +194,8 @@ def _stream_with_tools(
         sent = 0
         suppress = False
         for chunk in agent.llm.stream_invoke(messages):
+            if _aborted():
+                return
             buffered += chunk
             if suppress:
                 continue
@@ -177,6 +217,8 @@ def _stream_with_tools(
         clean = buffered
         results: list[str] = []
         for idx, call in enumerate(tool_calls):
+            if _aborted():
+                return
             call_id = f"call-{iteration}-{idx}"
             tool_name = call["tool_name"]
             raw_args = call["parameters"]
@@ -229,33 +271,66 @@ class Orchestrator:
         工具执行（协程型自定义工具）回投到本 loop 执行，保证 DB 连接池可用。
         """
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=_STREAM_QUEUE_MAXSIZE)
+        # 消费端退出信号：客户端断开 / 空闲超时 / 正常结束都会置位，通知生产线程停止
+        stop = threading.Event()
+
+        def _offer(event: Any) -> None:
+            """事件循环线程内入队；stop 后丢弃非终止事件，队列满则直接收尾。"""
+            if event is not _SENTINEL and stop.is_set():
+                return
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                # 消费端严重滞后（多半已断开）：丢弃积压并立即下发终止哨兵
+                while not queue.empty():
+                    queue.get_nowait()
+                stop.set()
+                queue.put_nowait(_SENTINEL)
+
+        def _put(event: Any) -> None:
+            """把事件投回事件循环；循环已关闭（请求已结束后台线程收尾）时静默丢弃。"""
+            try:
+                loop.call_soon_threadsafe(_offer, event)
+            except RuntimeError:
+                pass
 
         def _pump() -> None:
             try:
-                for event in _stream_with_tools(simple_agent, query, context=context, loop=loop):
-                    loop.call_soon_threadsafe(queue.put_nowait, event)
+                for event in _stream_with_tools(
+                    simple_agent, query, context=context, loop=loop, stop=stop
+                ):
+                    _put(event)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("stream_run 执行异常")
-                loop.call_soon_threadsafe(
-                    queue.put_nowait,
-                    {"type": "error", "data": {"code": 5001, "message": str(exc)}},
-                )
+                _put({"type": "error", "data": {"code": 5001, "message": str(exc)}})
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+                _put(_SENTINEL)
 
         threading.Thread(target=_pump, daemon=True).start()
 
-        while True:
-            event = await queue.get()
-            if event is _SENTINEL:
-                break
-            # hello_agents SimpleAgent.stream_run 产出的是纯文本块，
-            # 统一归一化为 dict 事件，保证下游 dispatch()/SSE 处理契约一致。
-            if isinstance(event, str):
-                yield {"type": "text", "data": {"content": event}}
-            else:
-                yield event
+        try:
+            while True:
+                try:
+                    # 空闲看门狗：生产侧（LLM 流 / MCP 工具）卡死时队列永远不会再有事件，
+                    # 无超时的 get() 会让整个 SSE 请求永久挂起；超时即发 error 收尾本轮。
+                    event = await asyncio.wait_for(queue.get(), timeout=_STREAM_IDLE_TIMEOUT)
+                except TimeoutError:
+                    logger.error(f"流式生成空闲超时({_STREAM_IDLE_TIMEOUT}s)，已中止本轮")
+                    yield {"type": "error", "data": {"code": 5004, "message": "生成超时，请稍后重试"}}
+                    return
+                if event is _SENTINEL:
+                    break
+                # hello_agents SimpleAgent.stream_run 产出的是纯文本块，
+                # 统一归一化为 dict 事件，保证下游 dispatch()/SSE 处理契约一致。
+                if isinstance(event, str):
+                    yield {"type": "text", "data": {"content": event}}
+                else:
+                    yield event
+        finally:
+            # 正常结束 / 空闲超时 / 客户端断开取消都会到这里：通知生产线程停止，
+            # 避免断开后继续消耗 LLM token，并避免事件堆入无人消费的队列
+            stop.set()
 
     async def dispatch(
         self,

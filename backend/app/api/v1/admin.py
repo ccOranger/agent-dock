@@ -308,11 +308,15 @@ async def test_mcp_server(body: MCPServerCreate, user=Depends(require_admin)):
     try:
         from hello_agents.protocols.mcp.client import MCPClient
 
-        async with MCPClient(source) as client:
-            tools = await client.list_tools()
+        async def _probe() -> list:
+            async with MCPClient(source) as client:
+                return await client.list_tools()
+
+        # 与相邻的"查看工具列表"保持一致：MCPClient 内部无超时，不响应的服务会永久挂起
+        tools = await asyncio.wait_for(_probe(), timeout=body.timeout_seconds)
         return ApiResponse(data={"ok": True, "tool_count": len(tools), "tools": tools})
     except Exception as e:  # noqa: BLE001
-        return ApiResponse(code=0, data={"ok": False, "error": str(e)})
+        return ApiResponse(code=0, data={"ok": False, "error": str(e) or "连接失败"})
 
 
 @router.get("/mcp-servers/{server_id}/tools", response_model=ApiResponse[dict])

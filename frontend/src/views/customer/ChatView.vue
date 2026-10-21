@@ -70,6 +70,9 @@ function scrollBottom() {
 onMounted(() => store.setRevealHook(scrollBottom))
 onBeforeUnmount(() => {
   store.setRevealHook(null)
+  // 卸载时中断仍在读的流，避免后台继续消费与旧流的收尾回调干扰后续新流
+  controller?.abort()
+  controller = null
   store.forceFinish()
 })
 
@@ -81,7 +84,7 @@ function send() {
   store.pushUser(text)
   store.streaming = true
 
-  controller = streamChat(store.sessionId, text, {
+  const ctrl = streamChat(store.sessionId, text, {
     session: (d: any) => {
       store.sessionId = d.session_id
     },
@@ -117,11 +120,21 @@ function send() {
       store.forceFinish()
       ElMessage.error(d?.message || '对话出错')
     },
+  }, () => {
+    // 兜底复位：流因任何原因结束（done / error / 服务端挂起被断开 / 代理超时断开）都
+    // 必须收尾 streaming 状态，否则输入框会永久禁用；已正常收尾时重复调用是幂等的。
+    // 仅当仍是当前流时收尾：已停止/已卸载的旧流收尾不得污染随后的新流。
+    if (controller !== ctrl) return
+    controller = null
+    store.finishStreaming()
   })
+  controller = ctrl
 }
 
 function abort() {
-  controller?.abort()
+  const ctrl = controller
+  controller = null
+  ctrl?.abort()
   store.forceFinish()
 }
 

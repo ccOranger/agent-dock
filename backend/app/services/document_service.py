@@ -15,6 +15,7 @@ from app.core.exceptions import ParamError
 from app.models.repositories import DocumentRepo
 from app.services import qdrant_helper
 from app.tools.rag_factory import get_rag_tool, invalidate_rag_tool
+from app.utils.async_io import run_in_pool
 
 # RAGTool.run 返回的是格式化字符串（如 “📊 分块数量: 12”），需从中解析分块数。
 _CHUNK_RE = re.compile(r"分块数量[:：]\s*(\d+)")
@@ -97,7 +98,7 @@ class DocumentService:
 
             try:
                 rag_tool = get_rag_tool(namespace)
-                result = await asyncio.to_thread(
+                result = await run_in_pool(
                     rag_tool.run,
                     {
                         "action": "add_document",
@@ -137,7 +138,7 @@ class DocumentService:
 
     async def delete(self, doc_id: str, namespace: str, source_path: str | None = None):
         """删除文档：先按 source_path 精确清理 Qdrant 向量，再删 DB 行，并清理归档原文。"""
-        await asyncio.to_thread(qdrant_helper.delete_document_chunks, namespace, source_path)
+        await run_in_pool(qdrant_helper.delete_document_chunks, namespace, source_path)
         doc = await DocumentRepo.get(doc_id)
         archived = _resolve_archive(doc) if doc else None
         await DocumentRepo.delete(doc_id)
@@ -174,7 +175,7 @@ class DocumentService:
         source_path = qdrant_helper.manual_source_path(str(doc.id))
         try:
             rag_tool = get_rag_tool(namespace)
-            result = await asyncio.to_thread(
+            result = await run_in_pool(
                 rag_tool.run,
                 {
                     "action": "add_text",
@@ -210,10 +211,10 @@ class DocumentService:
         namespace = doc.rag_namespace
         source_path = doc.source or qdrant_helper.manual_source_path(str(doc.id))
         # 清理旧向量
-        await asyncio.to_thread(qdrant_helper.delete_document_chunks, namespace, source_path)
+        await run_in_pool(qdrant_helper.delete_document_chunks, namespace, source_path)
         # 重新入库（同一 document_id → 同一 source_path）
         rag_tool = get_rag_tool(namespace)
-        result = await asyncio.to_thread(
+        result = await run_in_pool(
             rag_tool.run,
             {
                 "action": "add_text",
@@ -237,5 +238,5 @@ class DocumentService:
 
     async def reindex(self, namespace: str):
         rag_tool = get_rag_tool(namespace)
-        await asyncio.to_thread(rag_tool.run, {"action": "reindex", "namespace": namespace})
+        await run_in_pool(rag_tool.run, {"action": "reindex", "namespace": namespace})
         invalidate_rag_tool(namespace)

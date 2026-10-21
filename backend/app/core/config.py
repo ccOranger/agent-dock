@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = 64
     rag_top_k: int = 5
     rag_min_score: float = 0.3
+    # 单次 RAG/记忆检索的超时（秒）：Qdrant/embedding 挂起时降级为空，不阻塞对话
+    rag_timeout: int = 15
     # 单次上传文档大小上限（MB）：超限在落盘阶段直接拒绝，避免磁盘/内存被拖垮
     upload_max_size_mb: int = 20
 

@@ -12,11 +12,13 @@ export function streamChat(
   sessionId: string | null,
   message: string,
   handlers: Record<string, (data: any) => void>,
+  onClose?: () => void,
 ): AbortController {
   return streamSSE({
     url: '/api/v1/chat/stream',
     token: getToken(),
     body: { session_id: sessionId, message, stream: true },
     handlers,
+    onClose,
   })
 }

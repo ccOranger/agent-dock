@@ -5,8 +5,16 @@
 工具根本不执行（工单/订单等不落库）。本文件验证项目级执行器：
 - 协程型工具：绑定 kwargs、注入 user_id/session_id、真正执行；
 - 同步型工具（MCP 包装工具）：按约定接收参数字典，仍可用；
-- _stream_with_tools 端到端：产出 tool_call/tool_result 事件且工具确实执行。
+- _stream_with_tools 端到端：产出 tool_call/tool_result 事件且工具确实执行；
+- 同步工具硬超时：MCP 挂起时 _execute_tool 快速返回失败结果，不拖死请求；
+- 协程工具超时：超时后 cancel 底层 Task，阻止工具在超时后继续写库；
+- _astream 空闲看门狗：生产侧卡死时以一条 error 事件收尾，不永久挂起；
+- 断开停止泵送：消费端关闭后，pump 线程不再继续生成。
 """
+import asyncio
+import threading
+import time
+
 from hello_agents.agents import SimpleAgent
 from hello_agents.tools import Tool, ToolRegistry
 
@@ -115,6 +123,58 @@ def test_execute_tool_sync_tool_receives_dict():
     assert "执行结果" in res and "'a': '1'" in res
 
 
+class _HangingSyncTool(Tool):
+    """模拟挂起的 MCP 工具：run 阻塞时间远大于 timeout，验证硬超时兜底。"""
+
+    timeout = 0.15
+
+    def __init__(self):
+        super().__init__(name="hang", description="挂起的同步工具")
+
+    def get_parameters(self):
+        return []
+
+    def run(self, params):
+        time.sleep(0.6)
+        return "迟到的结果"
+
+
+def test_execute_tool_sync_timeout_returns_failure_without_waiting():
+    agent = _make_agent([_HangingSyncTool()], ["x"])
+    started = time.monotonic()
+    res = _execute_tool(agent, "hang", {}, {}, None)
+    elapsed = time.monotonic() - started
+    # 超时后立即返回失败结果（交给模型继续生成），而不是等工具真正跑完
+    assert "工具调用失败" in res and "超时" in res
+    assert elapsed < 0.5
+
+
+class _HangingAsyncTool(BaseTool):
+    """模拟超时的异步自定义工具：run 的阻塞时间远大于 timeout。"""
+
+    name = "slow"
+    description = "挂起的异步工具"
+    timeout = 0.1
+    parameters = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def run(self):
+        await asyncio.sleep(5)
+        return "迟到的结果"
+
+
+async def test_execute_tool_async_timeout_cancels_underlying_task():
+    """协程工具超时后必须 cancel 底层 Task，阻止其在超时后继续执行/写库。"""
+    agent = _make_agent([_HangingAsyncTool()], ["x"])
+    loop = asyncio.get_running_loop()
+    started = time.monotonic()
+    # _execute_tool 内部阻塞等待 future，必须放到工作线程；工具协程回投主循环执行，
+    # 与生产链路（pump 线程 + 主 loop）一致
+    res = await asyncio.to_thread(_execute_tool, agent, "slow", {}, {}, loop)
+    elapsed = time.monotonic() - started
+    assert "工具调用失败" in res and "超时" in res
+    assert elapsed < 1.5
+
+
 def test_execute_tool_missing_tool():
     agent = _make_agent([_RecordingAsyncTool()], ["x"])
     res = _execute_tool(agent, "no_such_tool", {}, {}, None)
@@ -156,6 +216,55 @@ def test_stream_with_tools_without_tool_call_unchanged():
     assert _RecordingAsyncTool.calls == []
     text = "".join(e["data"]["content"] for e in events if e["type"] == "text")
     assert text == "这是一段普通回答"
+
+
+# ---------------- _astream 空闲看门狗 ----------------
+
+
+async def test_astream_idle_timeout_ends_with_error_event(monkeypatch):
+    """生产侧卡死（不产出任何事件）时，空闲超时必须以一条 error 事件收尾。"""
+    stop_event = threading.Event()
+
+    def _hanging_stream(simple_agent, query, context=None, loop=None, max_tool_iterations=3, stop=None):
+        stop_event.wait(5)  # 模拟 LLM/MCP 永久阻塞：在测试放行前不产出任何事件
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("app.agents.orchestrator._stream_with_tools", _hanging_stream)
+    monkeypatch.setattr("app.agents.orchestrator._STREAM_IDLE_TIMEOUT", 0.2)
+
+    try:
+        events = [e async for e in Orchestrator._astream(object(), "hi")]
+    finally:
+        stop_event.set()
+
+    assert events and events[-1]["type"] == "error"
+    assert events[-1]["data"]["code"] == 5004
+    assert "超时" in events[-1]["data"]["message"]
+
+
+async def test_astream_stops_producer_after_consumer_close(monkeypatch):
+    """消费端（客户端断开）关闭后，pump 线程必须停止，不再继续消耗 LLM token。"""
+    stopped = threading.Event()
+
+    def _endless_stream(simple_agent, query, context=None, loop=None, max_tool_iterations=3, stop=None):
+        while stop is None or not stop.is_set():
+            yield {"type": "text", "data": {"content": "x"}}
+            time.sleep(0.005)
+        stopped.set()
+
+    monkeypatch.setattr("app.agents.orchestrator._stream_with_tools", _endless_stream)
+
+    agen = Orchestrator._astream(object(), "hi")
+    first = await agen.__anext__()
+    assert first["type"] == "text"
+    await agen.aclose()  # 模拟客户端断开：异步生成器被关闭
+
+    for _ in range(100):
+        if stopped.is_set():
+            break
+        await asyncio.sleep(0.02)
+    assert stopped.is_set()
 
 
 # ---------------- 跨轮历史注入（让 Agent 记住刚创建的工单号） ----------------
