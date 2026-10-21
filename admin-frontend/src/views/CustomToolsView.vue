@@ -11,7 +11,7 @@
       type="info"
       :closable="false"
       show-icon
-      title="工具实现来自代码（app/tools/custom），此处仅做后台登记、启用/禁用，并供动态 Agent 绑定；新增工具需先在代码中开发并加入目录后刷新。"
+      title="工具实现来自场景包（app/packs/<包>/tools，基类 BaseTool 在 app/tools/custom/base.py），此处仅做后台登记、启用/禁用，并供动态 Agent 绑定；新增工具需先在所属场景包开发、在其 manifest.yaml 的 tools 段登记，重启后端后刷新。"
       style="margin-bottom: 12px"
     />
 
