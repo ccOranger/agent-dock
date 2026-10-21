@@ -65,7 +65,7 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="360" fixed="right">
+      <el-table-column label="操作" width="300" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button
@@ -75,13 +75,6 @@
             :disabled="row.is_default"
             @click="openBind(row)"
           >绑定 Agent</el-button>
-          <el-button
-            link
-            type="primary"
-            size="small"
-            :disabled="row.is_default"
-            @click="openBindKb(row)"
-          >绑定知识库</el-button>
           <el-button link type="primary" size="small" @click="openEmbed(row)">接入</el-button>
           <el-button link type="primary" size="small" @click="openChat(row)">试聊</el-button>
           <el-button
@@ -232,57 +225,6 @@
     </template>
   </el-drawer>
 
-  <el-drawer v-model="kbVisible" :title="kbTitle" size="720px">
-    <div v-loading="kbLoading" class="bind-body">
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="知识库归属决定「搜什么」：本场景归属的启用库会被开启了检索全部的 Agent 自动覆盖"
-        description="平台共享库不自动参与检索，只有 Agent 显式写了 RAG 命名空间才会被搜到；被其他场景占用的库不可抢绑。保存为全量替换：取消勾选即解绑为平台共享。"
-        style="margin-bottom: 12px"
-      />
-      <div class="bind-columns">
-        <div class="bind-col">
-          <div class="bind-col-title">可归属知识库（{{ kbAvailable.length }}）</div>
-          <div class="bind-list">
-            <div v-for="kb in kbAvailable" :key="kb.namespace" class="bind-item">
-              <div class="bind-info">
-                <span>{{ kb.display_name }}</span>
-                <code class="kb-ns">{{ kb.namespace }}</code>
-                <el-tag v-if="kb.scene_code" size="small" type="warning">{{ kb.scene_code }}</el-tag>
-                <el-tag v-if="!kb.is_active" size="small" type="danger">已停用</el-tag>
-                <el-tag v-if="!kb.available" size="small" type="info">其他场景占用</el-tag>
-              </div>
-              <el-button size="small" :disabled="!kb.available" @click="pickKb(kb.namespace)">归属</el-button>
-            </div>
-            <span v-if="!kbAvailable.length" class="muted">没有可归属的知识库</span>
-          </div>
-        </div>
-        <div class="bind-col">
-          <div class="bind-col-title">已归属（{{ pickedKbs.length }}）</div>
-          <div class="bind-list">
-            <div v-for="kb in pickedKbs" :key="kb.namespace" class="bind-item">
-              <div class="bind-info">
-                <span>{{ kb.display_name }}</span>
-                <code class="kb-ns">{{ kb.namespace }}</code>
-                <el-tag v-if="!kb.is_active" size="small" type="danger">已停用</el-tag>
-              </div>
-              <el-button link type="danger" size="small" @click="unpickKb(kb.namespace)">移除</el-button>
-            </div>
-            <span v-if="!pickedKbs.length" class="muted">
-              未归属任何知识库：本场景内不会自动检索知识库（Agent 显式命名空间仍可用）
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-    <template #footer>
-      <el-button @click="kbVisible = false">取消</el-button>
-      <el-button type="primary" :loading="kbSaving" @click="saveKb">保存归属</el-button>
-    </template>
-  </el-drawer>
-
   <el-drawer
     v-model="embedVisible"
     :title="embedTitle"
@@ -404,9 +346,7 @@ import {
   apiListScenes,
   apiRotateSceneKey,
   apiSceneAgentOptions,
-  apiSceneKnowledgeBaseOptions,
   apiSetSceneAgents,
-  apiSetSceneKnowledgeBases,
   apiUpdateScene,
   apiUpdateSceneWidget,
 } from '@/api'
@@ -414,7 +354,6 @@ import type {
   Scene,
   SceneAgentOption,
   SceneCreatePayload,
-  SceneKnowledgeBaseOption,
   SceneRouterMode,
   SceneStatus,
   SceneUpdatePayload,
@@ -654,62 +593,6 @@ async function saveBind() {
     ElMessage.error(e?.message || '保存绑定失败')
   } finally {
     bindSaving.value = false
-  }
-}
-
-// ===== 知识库归属 =====
-const kbVisible = ref(false)
-const kbLoading = ref(false)
-const kbSaving = ref(false)
-const kbScene = ref<Scene | null>(null)
-const kbOptions = ref<SceneKnowledgeBaseOption[]>([])
-const pickedNamespaces = ref<string[]>([])
-
-const kbTitle = computed(() =>
-  kbScene.value ? `绑定知识库：${kbScene.value.display_name}` : '绑定知识库',
-)
-const kbAvailable = computed(() =>
-  kbOptions.value.filter((kb) => !pickedNamespaces.value.includes(kb.namespace)),
-)
-const pickedKbs = computed(() =>
-  pickedNamespaces.value
-    .map((ns) => kbOptions.value.find((kb) => kb.namespace === ns))
-    .filter((kb): kb is SceneKnowledgeBaseOption => Boolean(kb)),
-)
-
-async function openBindKb(row: Scene) {
-  kbScene.value = row
-  kbVisible.value = true
-  kbLoading.value = true
-  try {
-    kbOptions.value = await apiSceneKnowledgeBaseOptions(row.id)
-    pickedNamespaces.value = kbOptions.value.filter((kb) => kb.bound).map((kb) => kb.namespace)
-  } catch (e: any) {
-    ElMessage.error(e?.message || '加载可绑定知识库失败')
-  } finally {
-    kbLoading.value = false
-  }
-}
-
-function pickKb(namespace: string) {
-  pickedNamespaces.value.push(namespace)
-}
-
-function unpickKb(namespace: string) {
-  pickedNamespaces.value = pickedNamespaces.value.filter((ns) => ns !== namespace)
-}
-
-async function saveKb() {
-  if (!kbScene.value) return
-  kbSaving.value = true
-  try {
-    await apiSetSceneKnowledgeBases(kbScene.value.id, pickedNamespaces.value)
-    ElMessage.success('知识库归属已保存')
-    kbVisible.value = false
-  } catch (e: any) {
-    ElMessage.error(e?.message || '保存知识库归属失败')
-  } finally {
-    kbSaving.value = false
   }
 }
 
@@ -996,10 +879,6 @@ onMounted(load)
 .bind-ops {
   display: flex;
   gap: 2px;
-}
-.kb-ns {
-  font-size: 12px;
-  color: #909399;
 }
 .embed-body {
   min-height: 200px;

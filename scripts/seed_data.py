@@ -123,7 +123,8 @@ DEMO_TOOLS = [
     },
 ]
 
-# 默认业务 Agent（与 app/agents/registry.py 中的 AGENT_REGISTRY 对齐，source=code）
+# 代码侧只保留内核默认助手（与 app/agents/registry.py 的 AGENT_REGISTRY 对齐，source=code）；
+# 业务 Agent 一律由后台动态创建（agents 表 source=dynamic），不再种代码业务线
 SEED_AGENTS = [
     # 默认场景绑定的内核级 Agent：中立问答，只读默认知识库
     {
@@ -132,49 +133,6 @@ SEED_AGENTS = [
         "description": "平台默认问答助手：只依据默认知识库回答，不承诺订单/退款等业务能力",
         "enabled": True,
         "sort_order": 0,
-    },
-    {
-        "name": "knowledge_qa",
-        "display_name": "知识问答",
-        "description": "通用知识问答：产品FAQ、公司政策、使用指南",
-        "enabled": True,
-        "sort_order": 1,
-    },
-    {
-        "name": "order_service",
-        "display_name": "订单服务",
-        "description": "订单服务：查询订单、物流追踪、修改订单、退换申请",
-        "enabled": True,
-        "sort_order": 2,
-    },
-    {
-        "name": "complaint_handler",
-        "display_name": "投诉处理",
-        "description": "投诉处理：受理客户投诉、安抚情绪、创建工单、升级人工",
-        "enabled": True,
-        "sort_order": 3,
-    },
-    # IT 服务台示例知识库（默认启用）
-    {
-        "name": "it_knowledge",
-        "display_name": "IT 知识问答",
-        "description": "IT 知识问答：账号、VPN、邮箱、打印机、办公软件与安全规范",
-        "enabled": True,
-        "sort_order": 4,
-    },
-    {
-        "name": "it_incident",
-        "display_name": "IT 故障受理",
-        "description": "IT 故障受理：设备/网络/账号/系统故障报修、建单、补充信息与升级人工",
-        "enabled": True,
-        "sort_order": 5,
-    },
-    {
-        "name": "it_asset",
-        "display_name": "IT 资产查询",
-        "description": "IT 资产查询：设备型号、序列号、领用人、保修期与网络配置",
-        "enabled": True,
-        "sort_order": 6,
     },
 ]
 
@@ -217,7 +175,7 @@ DEMO_DOCUMENTS = [
         "rag_namespace": "cs_after_sales",
         "chunk_count": 6,
     },
-    # IT 服务台示例知识（与 IT Agent 的 it_default/it_network/it_assets 命名空间对齐）
+    # IT 服务台示例知识（与 IT 知识库命名空间 it_default/it_network/it_assets 对齐）
     {
         "title": "IT 服务台自助指南",
         "source": "docs/it_helpdesk_guide.md",
@@ -315,7 +273,7 @@ ACTIVE_TICKETS = DEMO_TICKETS if DEMO_MODE else []
 
 
 async def main() -> None:
-    from sqlalchemy import select
+    from sqlalchemy import delete, select, update
 
     if "--rebuild" in sys.argv:
         raise SystemExit("seed_data.py 不再建表/删表；全量重建请使用 scripts/rebuild_and_seed.py")
@@ -385,6 +343,30 @@ async def main() -> None:
             ).scalar_one_or_none()
             if row is None:
                 db.add(AgentMeta(source="code", scene_id=None, **a))
+
+        # 已下线的代码业务 Agent：旧库里 source=code 的行连同场景绑定一起清理
+        # （scene_agents 显式删，不依赖库上的 ON DELETE CASCADE）；
+        # 场景兜底若指向它们，一并解除，避免路由档案持续报「兜底不在池内」
+        seed_code_names = {a["name"] for a in SEED_AGENTS}
+        orphan_rows = (
+            await db.execute(
+                select(AgentMeta).where(
+                    AgentMeta.source == "code",
+                    AgentMeta.name.notin_(seed_code_names),
+                )
+            )
+        ).scalars().all()
+        if orphan_rows:
+            orphan_ids = [row.id for row in orphan_rows]
+            await db.execute(delete(SceneAgent).where(SceneAgent.agent_id.in_(orphan_ids)))
+            await db.execute(
+                update(Scene)
+                .where(Scene.fallback_agent_id.in_(orphan_ids))
+                .values(fallback_agent_id=None)
+            )
+            for row in orphan_rows:
+                await db.delete(row)
+
         for a in ACTIVE_DYNAMIC_AGENTS:
             row = (
                 await db.execute(

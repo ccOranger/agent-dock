@@ -30,7 +30,6 @@ import type {
   SceneAgentOption,
   SceneBoundAgent,
   SceneCreatePayload,
-  SceneKnowledgeBaseOption,
   SceneOption,
   SceneRotateKeyResult,
   SceneUpdatePayload,
@@ -149,7 +148,6 @@ export const apiCreateBase = (body: {
   namespace: string
   display_name: string
   description?: string
-  scene_code?: string | null
 }) => unwrap(http.post<never, { data: { data: KnowledgeBase } }>('/knowledge/bases', body))
 
 export const apiUpdateBase = (
@@ -262,23 +260,6 @@ export const apiSetSceneAgents = (id: string, agentIds: string[]) =>
 /** 绑定弹窗：可绑定 Agent（全局 + 本场景专属）及当前绑定状态 */
 export const apiSceneAgentOptions = (id: string) =>
   unwrap(http.get<never, { data: { data: SceneAgentOption[] } }>(`/admin/scenes/${id}/agents`))
-
-/** 绑定弹窗：可绑定知识库（全局 + 本场景归属）及当前状态 */
-export const apiSceneKnowledgeBaseOptions = (id: string) =>
-  unwrap(
-    http.get<never, { data: { data: SceneKnowledgeBaseOption[] } }>(
-      `/admin/scenes/${id}/knowledge-bases`,
-    ),
-  )
-
-/** 全量替换知识库归属；列表外原属本场景的库解绑为平台共享 */
-export const apiSetSceneKnowledgeBases = (id: string, namespaces: string[]) =>
-  unwrap(
-    http.put<never, { data: { data: SceneKnowledgeBaseOption[] } }>(
-      `/admin/scenes/${id}/knowledge-bases`,
-      { namespaces },
-    ),
-  )
 
 /** 嵌入与公开接入：允许来源、匿名开关；开启匿名时后端自动生成 publish_key */
 export const apiUpdateSceneWidget = (id: string, body: SceneWidgetPayload) =>

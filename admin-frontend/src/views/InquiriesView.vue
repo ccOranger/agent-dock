@@ -47,11 +47,15 @@
         </el-table-column>
         <el-table-column prop="user_id" label="客户 ID" width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="mono">{{ row.user_id }}</span>
+            <span v-if="row.user_id" class="mono">{{ row.user_id }}</span>
+            <span v-else class="muted">访客 {{ (row.visitor_id || '').slice(0, 8) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="display_name" label="客户" width="140">
-          <template #default="{ row }">{{ row.display_name || row.username }}</template>
+          <template #default="{ row }">
+            <span v-if="row.display_name || row.username">{{ row.display_name || row.username }}</span>
+            <el-tag v-else size="small" type="info">匿名访客</el-tag>
+          </template>
         </el-table-column>
         <el-table-column label="场景" width="130">
           <template #default="{ row }">

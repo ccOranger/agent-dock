@@ -255,11 +255,11 @@ class InquiryDetailOut(BaseModel):
 
 # ===== 管理后台：知识库维护 =====
 class KnowledgeBaseCreate(BaseModel):
+    """知识库是全局资源：不记场景归属，同库可被多个 Agent 绑定。"""
+
     namespace: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_]+$")
     display_name: str = Field(min_length=1, max_length=128)
     description: str | None = None
-    # 归属场景：不传=平台共享；传了只有该场景的 search_all 能自动覆盖到
-    scene_code: str | None = Field(default=None, max_length=32)
 
 
 class KnowledgeBaseUpdate(BaseModel):

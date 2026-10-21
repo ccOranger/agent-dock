@@ -1,7 +1,8 @@
 """
 AgentRegistry：业务 Agent 类注册表
 业务 Agent 实现在 app/agents/business/ 下，这里显式登记；
-新增业务 Agent：实现 BaseBusinessAgent 子类，并在 _CODE_AGENTS 中补一行。
+业务 Agent 统一由后台动态配置（agents 表 source=dynamic），代码侧只保留内核默认助手；
+确需代码托管时：实现 BaseBusinessAgent 子类，并在 _CODE_AGENTS 中补一行。
 """
 import ast
 import inspect
@@ -9,26 +10,15 @@ import sys
 import textwrap
 
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.business.complaint_agent import ComplaintAgent
 from app.agents.business.default_agent import DefaultAssistantAgent
-from app.agents.business.it_asset_agent import ITAssetAgent
-from app.agents.business.it_incident_agent import ITIncidentAgent
-from app.agents.business.it_knowledge_agent import ITKnowledgeAgent
-from app.agents.business.knowledge_agent import KnowledgeAgent
-from app.agents.business.order_agent import OrderAgent
 from app.core.config import settings
 from app.tools import custom_catalog
 from app.tools.custom.base import BaseTool
 
-# 代码托管业务 Agent：name 由类属性声明，全局唯一
-_CODE_AGENTS: tuple[type[BaseBusinessAgent], ...] = (
-    KnowledgeAgent,
-    OrderAgent,
-    ComplaintAgent,
-    ITKnowledgeAgent,
-    ITIncidentAgent,
-    ITAssetAgent,
-)
+# 代码托管业务 Agent：name 由类属性声明，全局唯一。
+# 业务 Agent 已全部迁移为后台动态 Agent，这里不再登记业务线；
+# 仅 default_assistant 作为内核 Agent 独立注册（见 _KERNEL_AGENTS）。
+_CODE_AGENTS: tuple[type[BaseBusinessAgent], ...] = ()
 
 _agent_names = [cls.name for cls in _CODE_AGENTS]
 _duplicates = sorted({n for n in _agent_names if _agent_names.count(n) > 1})

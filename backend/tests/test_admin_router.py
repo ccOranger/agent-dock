@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.api.v1 import admin_router as ar
 from app.core.config import settings
 from app.models.repositories import AgentRepo
-from app.schemas.scene import DEFAULT_SCENE_ID, SceneContext
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME, DEFAULT_SCENE_ID, SceneContext
 
 PATH = ar.router.prefix  # /admin/router
 
@@ -75,15 +75,15 @@ def test_router_prompt_reflects_current_agent_library(admin_client, monkeypatch)
     _stub_agents(monkeypatch, dynamic_rows=[_dyn_row()])
     data = admin_client.get(f"{PATH}/prompt").json()["data"]
     prompt = data["prompt"]
-    # 代码 Agent 与库中动态 Agent 都进入清单
-    assert "- order_service：" in prompt
+    # 内核代码 Agent 与库中动态 Agent 都进入清单
+    assert f"- {DEFAULT_ASSISTANT_NAME}：" in prompt
     assert "- refund_service：" in prompt
     assert "关键词：退款、到账" in prompt
     assert "典型问法：钱什么时候退回来" in prompt
     names = {c["name"] for c in data["candidates"]}
-    assert {"order_service", "refund_service"} <= names
+    assert {DEFAULT_ASSISTANT_NAME, "refund_service"} <= names
     assert data["candidate_count"] == len(data["candidates"])
-    assert data["fallback_agent"] == "knowledge_qa"
+    assert data["fallback_agent"] == DEFAULT_ASSISTANT_NAME
     assert data["fallback_from_candidates"] is True
 
 
@@ -114,12 +114,13 @@ def test_router_prompt_reports_clue_level_and_truncation(admin_client, monkeypat
     assert kw["keywords_injected"][:2] == ["k0", "k1"]
 
 
-def test_fallback_degrades_when_knowledge_qa_disabled(admin_client, monkeypatch):
-    disabled = SimpleNamespace(name="knowledge_qa", source="code", enabled=False)
-    _stub_agents(monkeypatch, code_rows=[disabled])
+def test_fallback_degrades_when_preferred_agent_disabled(admin_client, monkeypatch):
+    disabled = SimpleNamespace(name=DEFAULT_ASSISTANT_NAME, source="code", enabled=False)
+    # 优先候选被禁用，但清单里仍有其它可用 Agent（动态 Agent）→ 降级到首项
+    _stub_agents(monkeypatch, code_rows=[disabled], dynamic_rows=[_dyn_row()])
     data = admin_client.get(f"{PATH}/prompt").json()["data"]
     names = {c["name"] for c in data["candidates"]}
-    assert "knowledge_qa" not in names
+    assert DEFAULT_ASSISTANT_NAME not in names
     # 兜底不再指向被禁用的 Agent，而是降级到生效清单首项
     assert data["fallback_agent"] in names
     assert data["fallback_from_candidates"] is False

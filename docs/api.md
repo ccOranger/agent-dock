@@ -174,8 +174,6 @@ GET    /api/v1/admin/scenes/{id}                    # 详情（含 widget_config
 PATCH  /api/v1/admin/scenes/{id}                    # 编辑（默认场景只允许改展示名/描述）
 PUT    /api/v1/admin/scenes/{id}/agents             # 绑定 Agent（全量替换，顺序即路由候选顺序）
 GET    /api/v1/admin/scenes/{id}/agents             # 可绑定 Agent + 当前绑定状态
-GET    /api/v1/admin/scenes/{id}/knowledge-bases    # 知识库归属弹窗（被其它场景占用的不可选）
-PUT    /api/v1/admin/scenes/{id}/knowledge-bases    # 全量替换归属；默认场景只读
 PUT    /api/v1/admin/scenes/{id}/widget             # 嵌入配置/允许来源/发布开关
 POST   /api/v1/admin/scenes/{id}/rotate-key         # 轮换服务端 API key（明文仅本次响应）
 DELETE /api/v1/admin/scenes/{id}                    # 删除（默认场景不可删；有关联会话等→3002）

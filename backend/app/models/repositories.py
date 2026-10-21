@@ -477,7 +477,11 @@ class SessionRepo:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
-        """跨客户会话查询（管理后台）：JOIN 用户带出客户名 + 消息数。"""
+        """跨客户会话查询（管理后台）：JOIN 用户带出客户名 + 消息数。
+
+        必须用外连接：嵌入场景的匿名访客会话 user_id 为 NULL，
+        内连接会把它们整批丢掉（咨询列表只剩登录客户的会话）。
+        """
         msg_count = (
             select(func.count())
             .select_from(Message)
@@ -487,7 +491,7 @@ class SessionRepo:
             .label("message_count")
         )
         async with SessionLocal() as db:
-            base = select(Session, CustomerUser.username, CustomerUser.display_name).join(
+            base = select(Session, CustomerUser.username, CustomerUser.display_name).outerjoin(
                 CustomerUser, CustomerUser.id == Session.user_id
             )
             count_base = select(func.count()).select_from(Session)
@@ -513,7 +517,8 @@ class SessionRepo:
                     "status": s.status,
                     "last_route_to": s.last_route_to,
                     "scene_id": str(s.scene_id),
-                    "user_id": str(s.user_id),
+                    "user_id": str(s.user_id) if s.user_id else None,
+                    "visitor_id": str(s.visitor_id) if s.visitor_id else None,
                     "username": username,
                     "display_name": display_name,
                     "message_count": message_count,
@@ -534,11 +539,11 @@ class SessionRepo:
         scene_id: uuid.UUID | str | None = None,
         max_rows: int = 10000,
     ) -> list[dict]:
-        """导出用：返回满足过滤条件的会话（含首条客户问句摘要）。"""
+        """导出用：返回满足过滤条件的会话（含首条客户问句摘要）；同样外连接保留匿名访客会话。"""
         async with SessionLocal() as db:
             stmt = select(
                 Session, CustomerUser.username, CustomerUser.display_name
-            ).join(CustomerUser, CustomerUser.id == Session.user_id)
+            ).outerjoin(CustomerUser, CustomerUser.id == Session.user_id)
             stmt = SessionRepo._apply_filters(
                 stmt, user_id, status, last_route_to, date_from, date_to, scene_id
             )
@@ -558,8 +563,8 @@ class SessionRepo:
                 result.append(
                     {
                         "session_id": str(s.id),
-                        "customer": display_name or username,
-                        "username": username,
+                        "customer": display_name or username or ("匿名访客" if s.visitor_id else ""),
+                        "username": username or "",
                         "scene_id": str(s.scene_id),
                         "title": s.title,
                         "status": s.status,
@@ -938,38 +943,18 @@ class KnowledgeBaseRepo:
         namespace: str,
         display_name: str,
         description: str | None = None,
-        scene_id: uuid.UUID | str | None = None,
     ) -> KnowledgeBase:
-        """scene_id 为空表示平台共享库；非空表示该场景自有库（仅本场景检索）。"""
+        """知识库是全局资源：不记场景归属，检索范围由 Agent 的 rag_namespace(s) 决定。"""
         async with SessionLocal() as db:
             row = KnowledgeBase(
                 namespace=namespace,
                 display_name=display_name,
                 description=description,
-                scene_id=uuid.UUID(str(scene_id)) if scene_id else None,
             )
             db.add(row)
             await db.commit()
             await db.refresh(row)
             return row
-
-    @staticmethod
-    async def set_scene_namespaces(scene_id: uuid.UUID | str, namespaces: list[str]) -> None:
-        """全量替换场景归属：列表内归属本场景，列表外原属本场景的解绑为平台共享。"""
-        sid = uuid.UUID(str(scene_id))
-        async with SessionLocal() as db:
-            await db.execute(
-                update(KnowledgeBase)
-                .where(KnowledgeBase.scene_id == sid, KnowledgeBase.namespace.notin_(namespaces))
-                .values(scene_id=None, updated_at=datetime.now())
-            )
-            if namespaces:
-                await db.execute(
-                    update(KnowledgeBase)
-                    .where(KnowledgeBase.namespace.in_(namespaces))
-                    .values(scene_id=sid, updated_at=datetime.now())
-                )
-            await db.commit()
 
     @staticmethod
     async def update(namespace: str, **fields) -> KnowledgeBase | None:

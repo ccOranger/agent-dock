@@ -2,7 +2,7 @@
 
 隔离的判定标准不是「界面上看不到」，而是「运行时拿不到」：
 - 话术：同 key 场景行覆盖全局行，场景行停用不回落到全局文案；
-- 知识库：search_all 只自动覆盖本场景归属的启用库，全局/他场景库拿不到；
+- 知识库：全局资源不记场景归属，search_all 覆盖全部启用库，跨业务靠命名纪律；
 - 记忆：镜像行按 user/visitor 二选一归属，晋升时不能把 visitor 写成 NULL；
 - 会话：跨场景查看按「不存在」处理，不泄露另一个场景的会话存在性；
 - 链路：摘要与筛选都带 scene 维度，后台能按场景归因。
@@ -19,9 +19,7 @@ from fastapi.testclient import TestClient
 from app.agents import canned_scripts as cs
 from app.agents import orchestrator as orch_mod
 from app.api.v1 import admin_canned_scripts as acs
-from app.api.v1 import admin_scenes as asc
 from app.api.v1 import admin_traces as at
-from app.api.v1 import knowledge as kn
 from app.api.v1 import sessions as sess_api
 from app.core import context_engineer as ce
 from app.models.repositories import CannedScriptRepo, KnowledgeBaseRepo, MemoryRepo, TraceRepo
@@ -127,15 +125,13 @@ def test_canned_create_is_scoped_to_scene(make_test_app, monkeypatch):
     assert captured["create"]["scene_id"] == scene_id
 
 
-# ===== 2. 知识库：search_all 只覆盖本场景归属 =====
+# ===== 2. 知识库：全局资源，search_all 覆盖全部启用库 =====
 @pytest.mark.asyncio
-async def test_rag_search_all_is_scene_scoped(monkeypatch):
-    scene_a, scene_b = uuid.uuid4(), uuid.uuid4()
+async def test_rag_search_all_covers_all_active_bases(monkeypatch):
     rows = [
-        SimpleNamespace(namespace="kb_a", is_active=True, scene_id=scene_a),
-        SimpleNamespace(namespace="kb_b", is_active=True, scene_id=scene_b),
-        SimpleNamespace(namespace="kb_global", is_active=True, scene_id=None),
-        SimpleNamespace(namespace="kb_a_off", is_active=False, scene_id=scene_a),
+        SimpleNamespace(namespace="kb_a", is_active=True),
+        SimpleNamespace(namespace="kb_b", is_active=True),
+        SimpleNamespace(namespace="kb_off", is_active=False),
     ]
 
     async def fake_list_all():
@@ -146,13 +142,8 @@ async def test_rag_search_all_is_scene_scoped(monkeypatch):
         rag_namespace=None, rag_namespaces=[], search_all_knowledge_bases=True
     )
 
-    assert await orch_mod.Orchestrator._resolve_rag_namespaces(agent, str(scene_a)) == ["kb_a"]
-    # 无场景上下文（后台调试）保持旧行为
-    assert set(await orch_mod.Orchestrator._resolve_rag_namespaces(agent)) == {
-        "kb_a",
-        "kb_b",
-        "kb_global",
-    }
+    # 不再按场景过滤：停用库排除，启用库全部覆盖
+    assert await orch_mod.Orchestrator._resolve_rag_namespaces(agent) == ["kb_a", "kb_b"]
 
 
 @pytest.mark.asyncio
@@ -162,87 +153,10 @@ async def test_rag_explicit_namespace_survives_without_search_all():
         rag_namespaces=["cs_order", "cs_default"],
         search_all_knowledge_bases=False,
     )
-    assert await orch_mod.Orchestrator._resolve_rag_namespaces(agent, "scene-a") == [
+    assert await orch_mod.Orchestrator._resolve_rag_namespaces(agent) == [
         "cs_default",
         "cs_order",
     ]
-
-
-def test_kb_list_exposes_scene_owner(make_test_app, monkeypatch):
-    app = make_test_app([kn.router], prefix="")
-    client = TestClient(make_test_app.as_role(app, "agent"))
-    scene_id = uuid.uuid4()
-
-    async def fake_bases():
-        return [
-            SimpleNamespace(
-                namespace="kb_a",
-                display_name="A",
-                description=None,
-                is_active=True,
-                scene_id=scene_id,
-            ),
-            SimpleNamespace(
-                namespace="kb_global",
-                display_name="G",
-                description=None,
-                is_active=True,
-                scene_id=None,
-            ),
-        ]
-
-    async def fake_scenes():
-        return [SimpleNamespace(id=scene_id, code="mall_order")]
-
-    async def fake_count(namespace):
-        return 0
-
-    monkeypatch.setattr(kn.KnowledgeBaseRepo, "list_all", fake_bases)
-    monkeypatch.setattr(kn.SceneRepo, "list_all", fake_scenes)
-    monkeypatch.setattr(kn.DocumentRepo, "count_by_namespace", fake_count)
-
-    data = client.get("/knowledge/bases").json()["data"]
-    by_ns = {row["namespace"]: row for row in data}
-    assert by_ns["kb_a"]["scene_code"] == "mall_order"
-    assert by_ns["kb_global"]["scene_code"] is None
-
-
-def test_scene_kb_binding_rejects_other_scene(make_test_app, monkeypatch):
-    app = make_test_app([asc.router], prefix="")
-    client = TestClient(make_test_app.as_role(app, "admin"))
-    scene_id = uuid.uuid4()
-    other_scene = uuid.uuid4()
-    scene = SimpleNamespace(id=scene_id, is_default=False)
-
-    async def fake_get(sid):
-        return scene
-
-    async def fake_scenes():
-        return []
-
-    async def fake_bases():
-        return [
-            SimpleNamespace(
-                namespace="kb_b",
-                display_name="B",
-                is_active=True,
-                scene_id=other_scene,
-            )
-        ]
-
-    async def fake_set(*a, **kw):  # pragma: no cover - 不应被调用
-        raise AssertionError("占用校验失败时不应改归属")
-
-    monkeypatch.setattr(asc.SceneRepo, "get", fake_get)
-    monkeypatch.setattr(asc.SceneRepo, "list_all", fake_scenes)
-    monkeypatch.setattr(asc.KnowledgeBaseRepo, "list_all", fake_bases)
-    monkeypatch.setattr(asc.KnowledgeBaseRepo, "set_scene_namespaces", fake_set)
-
-    resp = client.put(
-        f"/admin/scenes/{scene_id}/knowledge-bases", json={"namespaces": ["kb_b"]}
-    )
-    assert resp.status_code == 400
-    assert "其他场景占用" in resp.json()["detail"]["message"]
 
 
 # ===== 3. 记忆：actor 归属列 =====

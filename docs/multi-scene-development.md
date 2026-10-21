@@ -307,7 +307,6 @@ SSE 事件保持现有 `text/status/route/done/error`，新增字段只增不改
 | PUT | `/api/v1/admin/scenes/{code}` | 编辑；默认场景只读 |
 | PATCH | `/api/v1/admin/scenes/{code}/status` | 启用/停用/归档；默认场景不可停用 |
 | PUT | `/api/v1/admin/scenes/{code}/agents` | 绑定 Agent 列表（含场景内启停） |
-| PUT | `/api/v1/admin/scenes/{code}/knowledge-bases` | 绑定知识库 |
 | PUT | `/api/v1/admin/scenes/{code}/widget` | 嵌入配置、允许来源、发布标识 |
 | POST | `/api/v1/admin/scenes/{code}/rotate-key` | 轮换服务端 API key，仅返回一次 |
 
@@ -339,10 +338,10 @@ SSE 事件保持现有 `text/status/route/done/error`，新增字段只增不改
 
 | 页面 | 改造 |
 |---|---|
-| 场景管理（新增） | 列表、创建、编辑、停用、绑定 Agent/知识库、嵌入配置、轮换 key、复制嵌入代码 |
+| 场景管理（新增） | 列表、创建、编辑、停用、绑定 Agent、嵌入配置、轮换 key、复制嵌入代码 |
 | 路由信息（重写） | 左侧场景列表 + 右侧详情；`直连/LLM/未配置/已停用` 徽标；生效值 + `继承/覆盖` 标签；候选表；警告；试运行；跳转链路 |
 | Agent 列表 | 增加“所属场景”列与筛选；详情带 `?scene=` 或按 id 查 |
-| 知识库 | 增加归属场景列；“未被使用”警告；新建时建议 `s_{scene_code}_` 前缀 |
+| 知识库 | 全局资源不做场景归属；“未被使用”警告；新建时建议 `s_{scene_code}_` 前缀区分业务 |
 | 固定话术 | 增加场景筛选；`probing` 标为全局；场景内可覆盖同 key |
 | 链路 | 增加场景列/筛选；按 Agent 名筛选必须同时带场景 |
 | MCP | 绑定反查显示 `scene/agent`；场景归属（P1） |
@@ -416,8 +415,8 @@ SSE 事件保持现有 `text/status/route/done/error`，新增字段只增不改
 
 落地备注：
 - 话术合并顺序为「同 key 场景行替换全局行 → 再按 enabled 过滤」，场景行被停用时不会静默回落到全局文案。
-- 知识库归属是单值（`knowledge_bases.scene_id`），后台保存为全量替换：列表外的原属库解绑为平台共享。
-- 咨询列表/导出、链路列表、知识库列表都已补 `scene_code`；后台场景弹窗统一用 `GET/PUT /admin/scenes/{id}/knowledge-bases`。
+- 知识库已改为全局资源（不再记 `knowledge_bases.scene_id` 归属）：同库可被不同场景的 Agent 绑定，跨业务区分交给 namespace 命名与配置纪律；`search_all_knowledge_bases` 运行时覆盖全部启用库（后台默认不开启，Agent 配置弹窗已不展示该字段）。
+- 咨询列表/导出、链路列表仍带 `scene_code`；场景弹窗只保留 Agent 绑定（知识库归属接口已移除）。
 
 ### M5 对外接入（M）
 

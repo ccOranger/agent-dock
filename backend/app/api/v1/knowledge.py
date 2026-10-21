@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 
 from app.api.deps import require_admin, require_staff
 from app.core.exceptions import Conflict, NotFound, ParamError
-from app.models.repositories import DocumentRepo, KnowledgeBaseRepo, SceneRepo
+from app.models.repositories import DocumentRepo, KnowledgeBaseRepo
 from app.schemas.api import (
     KnowledgeBaseCreate,
     KnowledgeBaseUpdate,
@@ -168,9 +168,8 @@ async def update_entry(doc_id: uuid.UUID, body: KnowledgeEntryUpdate, user=Depen
 # ===== 知识库命名空间 CRUD =====
 @router.get("/bases", response_model=ApiResponse[list])
 async def list_bases(user=Depends(require_staff)):
+    """知识库列表：全局资源，不区分场景归属（绑给哪些 Agent 由 Agent 侧展示）。"""
     rows = await KnowledgeBaseRepo.list_all()
-    # 场景归属一次查全：后台需要直接展示「平台共享 / 某场景专属」，避免逐行反查
-    scene_codes = {str(s.id): s.code for s in await SceneRepo.list_all()}
     data = []
     for r in rows:
         data.append(
@@ -179,8 +178,6 @@ async def list_bases(user=Depends(require_staff)):
                 "display_name": r.display_name,
                 "description": r.description,
                 "is_active": r.is_active,
-                "scene_id": str(r.scene_id) if r.scene_id else None,
-                "scene_code": scene_codes.get(str(r.scene_id)) if r.scene_id else None,
                 "document_count": await DocumentRepo.count_by_namespace(r.namespace),
             }
         )
@@ -191,24 +188,16 @@ async def list_bases(user=Depends(require_staff)):
 async def create_base(body: KnowledgeBaseCreate, user=Depends(require_admin)):
     if await KnowledgeBaseRepo.get(body.namespace) is not None:
         raise Conflict("命名空间已存在")
-    scene_id = None
-    if body.scene_code:
-        scene = await SceneRepo.get_by_code(body.scene_code)
-        if scene is None:
-            raise NotFound("场景不存在")
-        scene_id = scene.id
     row = await KnowledgeBaseRepo.create(
         namespace=body.namespace,
         display_name=body.display_name,
         description=body.description,
-        scene_id=scene_id,
     )
     return ApiResponse(
         data={
             "namespace": row.namespace,
             "display_name": row.display_name,
             "is_active": row.is_active,
-            "scene_id": str(row.scene_id) if row.scene_id else None,
         }
     )
 

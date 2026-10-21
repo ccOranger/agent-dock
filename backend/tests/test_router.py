@@ -2,18 +2,16 @@
 import pytest
 
 from app.agents.registry import AGENT_REGISTRY
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME
 
-VALID = {"knowledge_qa", "order_service", "complaint_handler"}
+# 解析器测试用的有效名单：不依赖代码注册表，只验证契约本身
+VALID = {DEFAULT_ASSISTANT_NAME, "invoice_service", "refund_service"}
 
 
-def test_registry_completeness():
-    from app.agents.business.complaint_agent import ComplaintAgent
-    from app.agents.business.knowledge_agent import KnowledgeAgent
-    from app.agents.business.order_agent import OrderAgent
-
-    assert KnowledgeAgent.name in AGENT_REGISTRY
-    assert OrderAgent.name in AGENT_REGISTRY
-    assert ComplaintAgent.name in AGENT_REGISTRY
+def test_registry_only_keeps_kernel_assistant():
+    """业务 Agent 已全部改为后台动态配置，代码注册表只保留内核默认助手。"""
+    assert DEFAULT_ASSISTANT_NAME in AGENT_REGISTRY
+    assert set(AGENT_REGISTRY) == {DEFAULT_ASSISTANT_NAME}
 
 
 def test_new_agent_auto_discovered():
@@ -56,7 +54,7 @@ def test_prompt_rules_not_hardcoded():
     for fragment in ("优先 order_service", "优先 complaint_handler", "若是一般知识问题"):
         assert fragment not in prompt
     # 兜底 Agent 已渲染为生效清单中的名称
-    assert "agent_name 填 knowledge_qa" in prompt
+    assert f"agent_name 填 {DEFAULT_ASSISTANT_NAME}" in prompt
 
 
 def test_format_agent_list_degrades_without_clues():
@@ -69,19 +67,19 @@ def test_format_agent_list_degrades_without_clues():
 
 
 def test_resolve_fallback_agent_from_effective_list():
-    """兜底 Agent 从生效清单派生：knowledge_qa 被禁用时不能继续指向它。"""
+    """兜底 Agent 从生效清单派生：默认助手被禁用时不能继续指向它。"""
     from app.agents.router_agent import RouterAgent
 
-    both = [{"name": "order_service"}, {"name": "knowledge_qa"}]
-    assert RouterAgent.resolve_fallback_agent(both) == "knowledge_qa"
-    # knowledge_qa 不在清单（后台已禁用）→ 降级到首个生效 Agent
+    both = [{"name": "order_service"}, {"name": DEFAULT_ASSISTANT_NAME}]
+    assert RouterAgent.resolve_fallback_agent(both) == DEFAULT_ASSISTANT_NAME
+    # 默认助手不在清单（后台已禁用）→ 降级到首个生效 Agent
     assert RouterAgent.resolve_fallback_agent([{"name": "order_service"}]) == "order_service"
-    # 清单为空 → 保持旧契约名称（反正下游会报未注册）
-    assert RouterAgent.resolve_fallback_agent([]) == "knowledge_qa"
+    # 清单为空 → 保持默认名称（反正下游会报未注册）
+    assert RouterAgent.resolve_fallback_agent([]) == DEFAULT_ASSISTANT_NAME
 
 
 def test_parse_intents_fallback_uses_given_agent():
-    """解析失败时落到传入的兜底 Agent，而非硬编码 knowledge_qa。"""
+    """解析失败时落到传入的兜底 Agent，而非硬编码具名 Agent。"""
     from app.agents.router_agent import RouterAgent
 
     intents = RouterAgent._parse_intents("不按要求返回 JSON", {"invoice_service"}, "invoice_service")
@@ -100,7 +98,7 @@ def test_fallback_intent_is_marked_so_it_survives_threshold():
     assert intent["is_fallback"] is True
     # 模型自己给出的正常意图不带该标记（即使置信度很低，仍该转人工）
     normal = RouterAgent._parse_intents(
-        '{"intents":[{"agent_name":"knowledge_qa","confidence":0.2,"reason":"不确定"}]}', VALID
+        '{"intents":[{"agent_name":"invoice_service","confidence":0.2,"reason":"不确定"}]}', VALID
     )[0]
     assert "is_fallback" not in normal
 
@@ -110,12 +108,12 @@ def test_parse_intents_multi_keeps_order():
 
     raw = (
         '{"intents":['
-        '{"agent_name":"order_service","confidence":0.9,"reason":"查订单"},'
-        '{"agent_name":"knowledge_qa","confidence":0.7,"reason":"问政策"}]}'
+        '{"agent_name":"invoice_service","confidence":0.9,"reason":"开票"},'
+        '{"agent_name":"refund_service","confidence":0.7,"reason":"退款"}]}'
     )
     intents = RouterAgent._parse_intents(raw, VALID)
     # 保持模型给出的主次顺序，不按置信度重排
-    assert [i["agent_name"] for i in intents] == ["order_service", "knowledge_qa"]
+    assert [i["agent_name"] for i in intents] == ["invoice_service", "refund_service"]
     assert intents[1]["confidence"] == 0.7
 
 
@@ -123,10 +121,10 @@ def test_parse_intents_compatible_with_legacy_single_format():
     """旧单意图输出仍被接受（归一化为 1 个意图）"""
     from app.agents.router_agent import RouterAgent
 
-    raw = '{"agent_name":"complaint_handler","confidence":0.85,"reason":"投诉"}'
+    raw = '{"agent_name":"refund_service","confidence":0.85,"reason":"退款"}'
     intents = RouterAgent._parse_intents(raw, VALID)
     assert len(intents) == 1
-    assert intents[0]["agent_name"] == "complaint_handler"
+    assert intents[0]["agent_name"] == "refund_service"
 
 
 def test_parse_intents_dedupe_and_drop_unknown():
@@ -134,11 +132,11 @@ def test_parse_intents_dedupe_and_drop_unknown():
 
     raw = (
         '{"intents":['
-        '{"agent_name":"order_service","confidence":0.9,"reason":"a"},'
+        '{"agent_name":"invoice_service","confidence":0.9,"reason":"a"},'
         '{"agent_name":"ghost_agent","confidence":0.9,"reason":"b"},'
-        '{"agent_name":"order_service","confidence":0.6,"reason":"c"}]}'
+        '{"agent_name":"invoice_service","confidence":0.6,"reason":"c"}]}'
     )
-    assert [i["agent_name"] for i in RouterAgent._parse_intents(raw, VALID)] == ["order_service"]
+    assert [i["agent_name"] for i in RouterAgent._parse_intents(raw, VALID)] == ["invoice_service"]
 
 
 @pytest.mark.parametrize(
@@ -148,23 +146,18 @@ def test_parse_intents_dedupe_and_drop_unknown():
         '{"intents":[{"agent_name":"ghost_agent","confidence":0.9,"reason":"臆造"}]}',
     ],
 )
-def test_parse_intents_fallback_to_knowledge_qa(raw):
+def test_parse_intents_fallback_to_preferred_agent(raw):
     from app.agents.router_agent import RouterAgent
 
     intents = RouterAgent._parse_intents(raw, VALID)
     assert intents == [
-        {"agent_name": "knowledge_qa", "confidence": 0.3, "reason": "解析失败", "is_fallback": True}
+        {
+            "agent_name": DEFAULT_ASSISTANT_NAME,
+            "confidence": 0.3,
+            "reason": "解析失败",
+            "is_fallback": True,
+        }
     ]
-
-
-def test_knowledge_qa_claims_meta_questions():
-    """“你是谁/你能做什么”这类元问题必须由 knowledge_qa 显式认领，
-    否则路由会判“不贴合”走兜底，历史上这些提问会直接转人工。"""
-    from app.agents.business.knowledge_agent import KnowledgeAgent
-
-    for kw in ("你是谁", "能做什么"):
-        assert kw in KnowledgeAgent.routing_keywords
-    assert any("你是谁" in e for e in KnowledgeAgent.routing_examples)
 
 
 def test_match_routing_clues_hits_substrings():
@@ -221,9 +214,9 @@ def test_annotate_intent_evidence_tolerates_unknown_agent():
 def test_parse_intents_tolerates_code_fence():
     from app.agents.router_agent import RouterAgent
 
-    raw = '```json\n{"intents":[{"agent_name":"knowledge_qa","confidence":0.6,"reason":"faq"}]}\n```'
+    raw = '```json\n{"intents":[{"agent_name":"invoice_service","confidence":0.6,"reason":"faq"}]}\n```'
     intents = RouterAgent._parse_intents(raw, VALID)
-    assert intents[0]["agent_name"] == "knowledge_qa"
+    assert intents[0]["agent_name"] == "invoice_service"
 
 
 def test_conversation_excludes_current_query():

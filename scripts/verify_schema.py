@@ -59,7 +59,7 @@ EXPECTED_COLUMNS = {
     "visitors": {"id", "scene_id", "external_key", "last_seen_at"},
     "sessions": {"id", "scene_id", "user_id", "visitor_id", "last_route_to"},
     "memories": {"id", "user_id", "visitor_id", "memory_uid", "session_id", "source_message_id"},
-    "knowledge_bases": {"namespace", "scene_id", "is_active"},
+    "knowledge_bases": {"namespace", "is_active"},
     "canned_scripts": {"id", "scene_id", "key", "category", "priority"},
     "tools": {"id", "scene_id", "name", "type"},
     "request_traces": {

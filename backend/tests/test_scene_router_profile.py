@@ -18,6 +18,7 @@ from app.agents.scene_router import (
 )
 from app.core.config import settings
 from app.schemas.scene import (
+    DEFAULT_ASSISTANT_NAME,
     DEFAULT_FALLBACK_TEXT,
     DEFAULT_SCENE_ID,
     SceneContext,
@@ -134,21 +135,21 @@ def test_configured_fallback_in_pool_wins():
 def test_configured_fallback_missing_degrades_with_warning():
     profile = build_scene_router_profile(
         _context(
-            [_candidate("order_service"), _candidate("knowledge_qa")],
+            [_candidate("order_service"), _candidate(DEFAULT_ASSISTANT_NAME)],
             fallback_agent_id=str(uuid.uuid4()),
         )
     )
     # 配置的兜底不在池内：降级到全局优先候选，并明确告警
-    assert profile.fallback_agent == "knowledge_qa"
+    assert profile.fallback_agent == DEFAULT_ASSISTANT_NAME
     assert profile.fallback_source == FALLBACK_SOURCE_CONFIGURED_MISSING
     assert SceneWarningCode.FALLBACK_NOT_IN_POOL.value in profile.warnings
 
 
-def test_fallback_prefers_knowledge_qa_when_no_scene_override():
+def test_fallback_prefers_default_assistant_when_no_scene_override():
     profile = build_scene_router_profile(
-        _context([_candidate("order_service"), _candidate("knowledge_qa")])
+        _context([_candidate("order_service"), _candidate(DEFAULT_ASSISTANT_NAME)])
     )
-    assert profile.fallback_agent == "knowledge_qa"
+    assert profile.fallback_agent == DEFAULT_ASSISTANT_NAME
     assert profile.fallback_source == FALLBACK_SOURCE_PREFERRED
 
 
@@ -299,7 +300,7 @@ async def test_route_uses_profile_candidates_and_prompt(fake_router_llm):
 
     # 提示词只包含本场景候选，且带场景约束段
     assert "- refund_service：" in _FakeSimpleAgent.last_prompt
-    assert "- knowledge_qa：" not in _FakeSimpleAgent.last_prompt
+    assert f"- {DEFAULT_ASSISTANT_NAME}：" not in _FakeSimpleAgent.last_prompt
     assert "code: mall_order" in _FakeSimpleAgent.last_prompt
     assert result["intents"][0]["agent_name"] == "refund_service"
     assert result["mode"] == "llm"
@@ -309,15 +310,15 @@ async def test_route_uses_profile_candidates_and_prompt(fake_router_llm):
 @pytest.mark.asyncio
 async def test_route_rejects_agent_outside_scene_pool(fake_router_llm):
     profile = build_scene_router_profile(
-        _context([_candidate("order_service"), _candidate("knowledge_qa")])
+        _context([_candidate("order_service"), _candidate(DEFAULT_ASSISTANT_NAME)])
     )
     _FakeSimpleAgent.response = json.dumps(
         {"intents": [{"agent_name": "refund_service", "confidence": 0.99, "reason": "臆造"}]}
     )
     result = await ra.RouterAgent().route("退款", profile=profile)
 
-    # 池外名称被丢弃 → 回落到档案派生的兜底 Agent（knowledge_qa），而不是全局清单
-    assert result["intents"][0]["agent_name"] == "knowledge_qa"
+    # 池外名称被丢弃 → 回落到档案派生的兜底 Agent（default_assistant），而不是全局清单
+    assert result["intents"][0]["agent_name"] == DEFAULT_ASSISTANT_NAME
     assert result["intents"][0]["is_fallback"] is True
 
 

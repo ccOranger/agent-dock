@@ -34,6 +34,20 @@ SAMPLE_ROWS = [
         "created_at": datetime(2025, 1, 2, 9, 0, 0),
         "updated_at": datetime(2025, 1, 2, 9, 1, 0),
     },
+    # 嵌入场景的匿名访客会话：user_id 为 NULL，列表必须能看到（外连接修复回归）
+    {
+        "id": "s-3",
+        "title": "我要开发票",
+        "status": "active",
+        "last_route_to": "mcd_service",
+        "user_id": None,
+        "visitor_id": "v-1",
+        "username": None,
+        "display_name": None,
+        "message_count": 2,
+        "created_at": datetime(2025, 1, 3, 9, 0, 0),
+        "updated_at": datetime(2025, 1, 3, 9, 2, 0),
+    },
 ]
 
 SAMPLE_EXPORT_ROWS = [
@@ -90,8 +104,12 @@ def test_list_sessions_pagination_and_filters_passthrough(client, monkeypatch):
     body = resp.json()
     assert body["data"]["total"] == 42
     assert body["data"]["page"] == 2
-    assert len(body["data"]["items"]) == 2
+    assert len(body["data"]["items"]) == 3
     assert body["data"]["items"][0]["display_name"] == "爱丽丝"
+    # 匿名访客行不被丢掉：user_id 为 None，带 visitor_id
+    visitor_row = body["data"]["items"][2]
+    assert visitor_row["user_id"] is None
+    assert visitor_row["visitor_id"] == "v-1"
     # 过滤条件正确透传到 Repo 层，且时间已解析为 datetime
     assert captured["status"] == "closed"
     assert captured["last_route_to"] == "order_service"

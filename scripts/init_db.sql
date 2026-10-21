@@ -210,17 +210,17 @@ CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_content_trgm ON memories USING gin (content gin_trgm_ops);
 
 -- ========== 知识库命名空间（管理后台维护） ==========
--- scene_id NULL=平台共享；场景自有知识库必须显式绑定后才会被检索。
+-- 知识库是全局资源：不记场景归属，同库可被多个 Agent 绑定；
+-- 业务区分交给 namespace 命名与配置纪律。
+-- 旧库升级（可选，代码已不再读写该列）：ALTER TABLE knowledge_bases DROP COLUMN scene_id;
 CREATE TABLE knowledge_bases (
     namespace     VARCHAR(64) PRIMARY KEY,
-    scene_id      UUID REFERENCES scenes(id) ON DELETE RESTRICT,
     display_name  VARCHAR(128) NOT NULL,
     description   TEXT,
     is_active     BOOLEAN NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_knowledge_bases_scene_active ON knowledge_bases(scene_id, is_active);
 
 -- 知识库命名空间种子（与现有代码 Agent 的 rag_namespace 一致）
 INSERT INTO knowledge_bases (namespace, display_name, description) VALUES

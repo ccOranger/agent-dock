@@ -173,7 +173,6 @@
           v-model="form.rag_namespaces"
           multiple
           clearable
-          :disabled="form.search_all_knowledge_bases"
           placeholder="可选，额外跨库检索（与主库合并去重）"
         >
           <el-option
@@ -183,19 +182,6 @@
             :value="kb.namespace"
           />
         </el-select>
-        <div v-if="form.search_all_knowledge_bases" class="muted hint">已开启“全部知识库”，此处选择被忽略</div>
-      </el-form-item>
-      <el-form-item>
-        <template #label>
-          全部知识库
-          <el-tooltip
-            placement="top"
-            content="开启后覆盖全部启用中的知识库（含后台新建的库，无需改代码），并忽略上方主知识库 / 附加知识库的单独选择。"
-          >
-            <span class="q-help">?</span>
-          </el-tooltip>
-        </template>
-        <el-switch v-model="form.search_all_knowledge_bases" />
       </el-form-item>
       <el-form-item label="MCP 工具">
         <el-select v-model="form.mcp_tool_names" multiple clearable placeholder="选择已配置的 MCP 服务">
@@ -422,7 +408,8 @@ function openEdit(row: AgentInfo) {
     llm_model: row.model ?? '',
     rag_namespace: row.rag_namespace ?? null,
     rag_namespaces: [...(row.rag_namespaces ?? [])],
-    search_all_knowledge_bases: row.search_all_knowledge_bases ?? false,
+    // “全部知识库”开关不再开放配置：编辑时固定归 false，检索范围只由主库/附加库决定
+    search_all_knowledge_bases: false,
     mcp_tool_names: [...(row.mcp_tools ?? [])],
     custom_tool_names: [...(row.custom_tool_names ?? [])],
     enabled: row.enabled,

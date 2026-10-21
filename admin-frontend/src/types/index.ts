@@ -12,8 +12,10 @@ export interface InquirySession {
   /** 会话归属场景：跨场景会话互不可见 */
   scene_id?: string | null
   scene_code?: string | null
-  user_id: string
-  username: string
+  /** 登录客户会话才有 user_id；嵌入匿名访客会话只有 visitor_id */
+  user_id?: string | null
+  visitor_id?: string | null
+  username?: string | null
   display_name?: string | null
   message_count: number
   created_at: string
@@ -114,9 +116,6 @@ export interface KnowledgeBase {
   description?: string | null
   is_active: boolean
   document_count: number
-  /** 归属场景：NULL=平台共享；非空=仅该场景的 search_all 自动覆盖 */
-  scene_id?: string | null
-  scene_code?: string | null
 }
 
 export interface DocumentItem {
@@ -535,17 +534,6 @@ export interface SceneBoundAgent {
   description?: string | null
   source: 'code' | 'dynamic'
   sort_order: number
-}
-
-/** 知识库绑定弹窗的一行：其他场景占用的库不可选（避免抢绑） */
-export interface SceneKnowledgeBaseOption {
-  namespace: string
-  display_name: string
-  is_active: boolean
-  scene_id?: string | null
-  scene_code?: string | null
-  bound: boolean
-  available: boolean
 }
 
 /** 嵌入与公开接入配置：未传字段保持原值，widget_config 是全量替换而不是深合并 */

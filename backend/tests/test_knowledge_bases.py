@@ -44,21 +44,17 @@ def admin_client(make_test_app):
 def test_list_bases_with_document_count(staff_client, monkeypatch):
     bases = [
         SimpleNamespace(
-            namespace="cs_order", display_name="订单", description=None, is_active=True, scene_id=None
+            namespace="cs_order", display_name="订单", description=None, is_active=True
         )
     ]
 
     async def fake_list_all():
         return bases
 
-    async def fake_scenes():
-        return []
-
     async def fake_count(namespace):
         return 7
 
     monkeypatch.setattr(kn.KnowledgeBaseRepo, "list_all", fake_list_all)
-    monkeypatch.setattr(kn.SceneRepo, "list_all", fake_scenes)
     monkeypatch.setattr(kn.DocumentRepo, "count_by_namespace", fake_count)
 
     resp = staff_client.get(f"{kn.router.prefix}/bases")
@@ -74,10 +70,10 @@ def test_create_base_success_and_conflict(admin_client, monkeypatch):
     async def fake_get(namespace):
         return SimpleNamespace(namespace=namespace) if namespace in existing else None
 
-    async def fake_create(namespace, display_name, description, scene_id=None):
+    async def fake_create(namespace, display_name, description):
         existing.add(namespace)
         return SimpleNamespace(
-            namespace=namespace, display_name=display_name, is_active=True, scene_id=scene_id
+            namespace=namespace, display_name=display_name, is_active=True
         )
 
     monkeypatch.setattr(kn.KnowledgeBaseRepo, "get", fake_get)

@@ -584,7 +584,6 @@ class Orchestrator:
                 history=history,
                 collector=collector,
                 intent_index=index,
-                scene=scene,
             ):
                 etype = event.get("type")
                 data = event.get("data") or {}
@@ -667,7 +666,6 @@ class Orchestrator:
         history: list[dict] | None = None,
         collector=None,
         intent_index: int = 0,
-        scene: SceneContext | None = None,
     ) -> AsyncIterator[dict]:
         """构建并流式执行单个业务 Agent（含 MCP 预取与上下文工程）。"""
         agent_name = getattr(business_agent, "name", "?")
@@ -684,9 +682,7 @@ class Orchestrator:
 
         # ---- 上下文工程 ----
         # 多意图共享同一 query：按 (用户, query, 命名空间) 缓存，第二个意图不再重复检索
-        rag_namespaces = await self._resolve_rag_namespaces(
-            business_agent, scene_id=scene.scene_id if scene is not None else None
-        )
+        rag_namespaces = await self._resolve_rag_namespaces(business_agent)
         cache_key = (user_id, query, tuple(rag_namespaces))
         enriched_query = self._ctx_cache.get(cache_key)
         if enriched_query is None:
@@ -751,13 +747,14 @@ class Orchestrator:
                 simple_agent._history.append(Message(content, role))
 
     @staticmethod
-    async def _resolve_rag_namespaces(business_agent, scene_id: str | None = None) -> list[str]:
+    async def _resolve_rag_namespaces(business_agent) -> list[str]:
         """解析业务 Agent 实际检索的知识库命名空间列表。
 
+        知识库不记场景归属：检索范围完全由 Agent 自己声明，同库可被多个场景的 Agent 复用。
+
         优先级：
-        - search_all_knowledge_bases=True：只覆盖本场景归属的启用知识库（场景隔离）；
-          全局共享库不会自动注入，需显式写进 rag_namespace(s) 才会被检索。
-          无场景上下文（scene_id=None，如后台调试）时保持旧行为：全部启用库。
+        - search_all_knowledge_bases=True：覆盖全部启用知识库（后台默认不开启该开关，
+          跨业务检索靠 namespace 命名与配置纪律控制）。
         - 否则：rag_namespace（单库）与 rag_namespaces（显式多库）合并去重，按声明顺序检索。
         """
         own = business_agent.rag_namespace
@@ -776,16 +773,7 @@ class Orchestrator:
             from app.models.repositories import KnowledgeBaseRepo
 
             bases = await KnowledgeBaseRepo.list_all()
-            if scene_id:
-                # 只自动覆盖本场景的库；全局库（scene_id 为空）不自动注入，
-                # 需 Agent 在 rag_namespace(s) 里显式绑定，避免“全库检索”变成跨场景泄露。
-                namespaces = [
-                    b.namespace
-                    for b in bases
-                    if b.is_active and b.scene_id is not None and str(b.scene_id) == str(scene_id)
-                ]
-            else:
-                namespaces = [b.namespace for b in bases if b.is_active]
+            namespaces = [b.namespace for b in bases if b.is_active]
             # 自身默认空间与显式多库前置（优先级更高），再补齐其余启用库
             return _dedupe(([own] if own else []) + extra + namespaces)
         return _dedupe(([own] if own else []) + extra)

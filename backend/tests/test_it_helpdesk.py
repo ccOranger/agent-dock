@@ -1,4 +1,4 @@
-"""IT Helpdesk 能力：路由线索、资产假数据与 IT 工单工具契约。
+"""IT 服务台工具：资产假数据与 IT 工单工具契约。
 
 工具不连真实 DB：TicketRepo / AuditRepo 均以 monkeypatch 替换，只校验
 参数透传、metadata 来源标记（source=it_helpdesk）与返回值结构。
@@ -6,9 +6,6 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from app.agents.business.it_asset_agent import ITAssetAgent
-from app.agents.business.it_incident_agent import ITIncidentAgent
-from app.agents.business.it_knowledge_agent import ITKnowledgeAgent
 from app.models.repositories import AuditRepo, TicketRepo
 from app.tools.custom import mock_assets
 from app.tools.custom.it_asset_tool import QueryItAssetTool
@@ -39,22 +36,6 @@ def test_ticket_to_dict_exposes_metadata():
     data = TicketRepo.to_dict(row, include_updates=True)
     assert data["metadata"] == {"source": "it_helpdesk"}
     assert data["updates"] == []
-
-
-# ===== Agent 声明 =====
-def test_it_agents_declare_routing_clues_and_namespaces():
-    assert ITKnowledgeAgent.name == "it_knowledge"
-    assert ITKnowledgeAgent.rag_namespace == "it_default"
-    assert set(ITKnowledgeAgent.rag_namespaces) == {"it_network", "it_assets"}
-
-    assert ITIncidentAgent.name == "it_incident"
-    assert ITAssetAgent.name == "it_asset"
-    assert ITAssetAgent.rag_namespace == "it_assets"
-
-    for cls in (ITKnowledgeAgent, ITIncidentAgent, ITAssetAgent):
-        assert cls.routing_keywords, f"{cls.name} 缺 routing_keywords"
-        assert cls.routing_examples, f"{cls.name} 缺 routing_examples"
-        assert cls.system_prompt
 
 
 # ===== 资产假数据 =====

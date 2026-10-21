@@ -48,12 +48,6 @@ class SceneAgentsUpdate(BaseModel):
     agent_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
-class SceneKnowledgeBasesUpdate(BaseModel):
-    """全量替换知识库归属：列表内归本场景，列表外原属本场景的解绑为平台共享。"""
-
-    namespaces: list[str] = Field(default_factory=list, max_length=100)
-
-
 class SceneWidgetUpdate(BaseModel):
     """嵌入与公开接入配置；未传的字段保持原值。
 

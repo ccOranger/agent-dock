@@ -15,7 +15,7 @@ import pytest
 
 from app.agents import canned_scripts as cs
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.business.knowledge_agent import KnowledgeAgent
+from app.agents.business.default_agent import DEFAULT_ASSISTANT_PROMPT, DefaultAssistantAgent
 from app.agents.canned_scripts import (
     CAPABILITY_TEXT,
     IDENTITY_TEXT,
@@ -28,12 +28,11 @@ from app.agents.canned_scripts import (
     rule_from_row,
 )
 from app.agents.orchestrator import Orchestrator
-from app.agents.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
 from app.core.tracing import OUTCOME_ANSWERED, SPAN_CANNED, TraceCollector
 from app.models.repositories import CannedScriptRepo
 
 # 业务提示词开头片段（用于断言格式约束是后置追加、没顶掉原有提示词）
-KNOWLEDGE_HEAD = KNOWLEDGE_SYSTEM_PROMPT.strip()[:12]
+BUSINESS_HEAD = DEFAULT_ASSISTANT_PROMPT.strip()[:12]
 
 
 def _key(query: str) -> str | None:
@@ -294,9 +293,9 @@ def test_format_rules_cover_non_canned_requirements():
 
 def test_format_rules_appended_to_business_agent_prompt():
     """代码 Agent 与后台动态 Agent 共用基类，有无工具都要带上格式约束"""
-    agent = KnowledgeAgent(user_id="u1", session_id="s1")
+    agent = DefaultAssistantAgent(user_id="u1", session_id="s1")
     with_tools = agent._final_system_prompt(["memory"])
-    assert KNOWLEDGE_HEAD in with_tools
+    assert BUSINESS_HEAD in with_tools
     assert agent.FORMAT_RULES in with_tools
     assert "工具使用要求" in with_tools
     without_tools = agent._final_system_prompt([])

@@ -189,11 +189,14 @@ class Document(Base, TimestampMixin):
 
 
 class KnowledgeBase(Base, TimestampMixin):
+    """知识库（命名空间）：全局资源，可被任意多个 Agent 绑定。
+
+    业务区分交给命名与配置纪律，不在库上做场景归属。
+    """
+
     __tablename__ = "knowledge_bases"
 
     namespace: Mapped[str] = mapped_column(String(64), primary_key=True)
-    # NULL=平台共享；场景自有知识库必须显式绑定后才会被检索
-    scene_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("scenes.id", ondelete="RESTRICT"))
     display_name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

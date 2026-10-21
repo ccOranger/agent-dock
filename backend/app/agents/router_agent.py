@@ -15,7 +15,7 @@ from app.agents.prompts.router import GLOBAL_SCENE_RULES, ROUTER_SYSTEM_PROMPT, 
 from app.agents.registry import AGENT_REGISTRY, list_agents, list_effective_agents
 from app.core.config import settings
 from app.core.tracing import SPAN_ROUTER, clip_payload
-from app.schemas.scene import SceneRouterProfile
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME, SceneRouterProfile
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,10 @@ FALLBACK_REASON = "解析失败"
 # 由调度层根据 ROUTER_FALLBACK_ANSWER 决定是兜底应答还是转人工。
 FALLBACK_CONFIDENCE = 0.3
 # 兜底 Agent 的优先候选：存在且启用时首选；被后台禁用则依次降级到生效清单首项
-FALLBACK_CANDIDATES = ("knowledge_qa",)
-# 生效清单为空（极端：全部 Agent 被禁用）时的兜底名，与旧契约保持一致
-FALLBACK_AGENT_DEFAULT = "knowledge_qa"
+# 业务 Agent 均改为后台动态配置后，兜底到中立的默认助手；动态 Agent 由场景自行绑定
+FALLBACK_CANDIDATES = (DEFAULT_ASSISTANT_NAME,)
+# 生效清单为空（极端：全部 Agent 被禁用）时的兜底名
+FALLBACK_AGENT_DEFAULT = DEFAULT_ASSISTANT_NAME
 
 # 路由分发器自身标识（它不在 AGENT_REGISTRY / agents 表中，由代码定义，后台只读）
 ROUTER_AGENT_NAME = "路由分发器"
@@ -479,7 +480,7 @@ async def render_router_prompt() -> dict:
         "prompt_chars": len(prompt),
         "candidate_count": len(agents),
         "fallback_agent": fallback_agent,
-        # 兜底是否命中优先候选（否则说明 knowledge_qa 被禁用，已降级到清单首项）
+        # 兜底是否命中优先候选（否则说明 default_assistant 被禁用或不在本场景池内，已降级到清单首项）
         "fallback_from_candidates": fallback_agent in FALLBACK_CANDIDATES,
         "candidates": [_candidate_brief(a) for a in agents],
     }

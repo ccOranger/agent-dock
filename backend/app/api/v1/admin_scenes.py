@@ -13,13 +13,12 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import require_admin, require_staff
 from app.core.cors import invalidate_origin_cache
 from app.core.exceptions import Conflict, NotFound, ParamError
-from app.models.repositories import AgentRepo, AuditRepo, KnowledgeBaseRepo, SceneRepo
+from app.models.repositories import AgentRepo, AuditRepo, SceneRepo
 from app.schemas.common import ApiResponse
 from app.schemas.scene import DEFAULT_SCENE_CODE, SceneStatus
 from app.schemas.scene_admin import (
     SceneAgentsUpdate,
     SceneCreate,
-    SceneKnowledgeBasesUpdate,
     SceneUpdate,
     SceneWidgetUpdate,
 )
@@ -183,63 +182,6 @@ async def list_scene_agent_options(scene_id: str, user=Depends(require_admin)):
     """绑定弹窗：可绑定 Agent + 当前绑定状态。"""
     scene = await _get_scene_or_404(scene_id)
     return ApiResponse(data=await SceneRepo.list_agents_for_admin(scene.id))
-
-
-async def _knowledge_base_options(scene_id) -> list[dict]:
-    """可绑定知识库 + 当前归属：其他场景占用的库不允许抢绑。"""
-    scene_codes = {str(s.id): s.code for s in await SceneRepo.list_all()}
-    data = []
-    for row in await KnowledgeBaseRepo.list_all():
-        owner = str(row.scene_id) if row.scene_id else None
-        data.append(
-            {
-                "namespace": row.namespace,
-                "display_name": row.display_name,
-                "is_active": row.is_active,
-                "scene_id": owner,
-                "scene_code": scene_codes.get(owner) if owner else None,
-                "bound": owner == str(scene_id),
-                "available": owner is None or owner == str(scene_id),
-            }
-        )
-    return data
-
-
-@router.get("/{scene_id}/knowledge-bases", response_model=ApiResponse[list])
-async def list_scene_knowledge_base_options(scene_id: str, user=Depends(require_admin)):
-    """知识库绑定弹窗：全部库 + 归属状态（被其他场景占用时不可选）。"""
-    scene = await _get_scene_or_404(scene_id)
-    return ApiResponse(data=await _knowledge_base_options(scene.id))
-
-
-@router.put("/{scene_id}/knowledge-bases", response_model=ApiResponse[list])
-async def set_scene_knowledge_bases(
-    scene_id: str, body: SceneKnowledgeBasesUpdate, user=Depends(require_admin)
-):
-    """全量替换知识库归属；默认场景只读（避免改变无码请求的检索范围）。"""
-    scene = await _get_scene_or_404(scene_id)
-    if scene.is_default:
-        raise ParamError(_DEFAULT_READONLY_HINT)
-    namespaces = list(dict.fromkeys(body.namespaces))
-    rows = {r.namespace: r for r in await KnowledgeBaseRepo.list_all()}
-    unknown = [n for n in namespaces if n not in rows]
-    if unknown:
-        raise ParamError(f"以下知识库不存在: {unknown}")
-    stolen = [
-        n
-        for n in namespaces
-        if rows[n].scene_id is not None and str(rows[n].scene_id) != str(scene.id)
-    ]
-    if stolen:
-        raise ParamError(f"以下知识库已被其他场景占用: {stolen}")
-    await KnowledgeBaseRepo.set_scene_namespaces(scene.id, namespaces)
-    await AuditRepo.write(
-        "scene.set_knowledge_bases",
-        user_id=user.id,
-        target_type="scene",
-        target_id=str(scene.id),
-    )
-    return ApiResponse(data=await _knowledge_base_options(scene.id))
 
 
 @router.put("/{scene_id}/widget", response_model=ApiResponse[dict])
