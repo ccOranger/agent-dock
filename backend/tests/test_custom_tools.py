@@ -11,6 +11,7 @@ from app.tools import custom_catalog
 from app.tools.custom_loader import register_custom_tools
 
 _EXPECTED_NAMES = {
+    "echo",
     "query_order",
     "list_orders",
     "modify_order",
@@ -42,6 +43,15 @@ def test_catalog_exists_and_build():
     tool = custom_catalog.build("query_order")
     assert tool is not None and tool.name == "query_order"
     assert custom_catalog.build("nope") is None
+
+
+@pytest.mark.asyncio
+async def test_echo_tool_returns_input():
+    """echo 零依赖自检工具：原样回显入参，用于验证工具调用链路打通。"""
+    tool = custom_catalog.build("echo")
+    assert tool is not None and tool.name == "echo"
+    res = await tool.run(text="hello 链路")
+    assert res == {"ok": True, "data": {"text": "hello 链路"}}
 
 
 # ===== 注册器 =====

@@ -9,6 +9,7 @@
   声明自动注入），故 build() 直接 cls() 实例化。
 """
 from app.tools.custom.base import BaseTool
+from app.tools.custom.echo_tool import EchoTool
 from app.tools.custom.it_asset_tool import QueryItAssetTool
 from app.tools.custom.it_ticket_tool import CreateItTicketTool, EscalateItTool, UpdateItTicketTool
 from app.tools.custom.logistics_tool import QueryLogisticsTool
@@ -18,6 +19,7 @@ from app.tools.custom.ticket_tool import CreateTicketTool, EscalateTool, UpdateT
 
 # 代码托管的全部自定义工具：name 由类属性声明，全局唯一
 _TOOL_CLASSES: tuple[type[BaseTool], ...] = (
+    EchoTool,
     QueryOrderTool,
     ListOrdersTool,
     ModifyOrderTool,
