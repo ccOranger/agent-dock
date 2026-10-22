@@ -1,5 +1,8 @@
 """应用配置：基于 pydantic-settings，从环境变量 / .env 加载"""
+
+import os
 from functools import lru_cache
+from urllib.request import getproxies
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +11,32 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # 而 pydantic-settings 不会写入 os.environ，故在此显式加载 .env 到进程环境。
 # （必须在实例化 Settings / 框架读取之前执行）
 load_dotenv(".env")
+
+
+def _bypass_proxy_for_loopback() -> None:
+    """本机服务（Qdrant 等）直连，不走系统代理。
+
+    Windows 开了 Clash 一类代理后，httpx 会把 http://127.0.0.1:6333 也交给代理，
+    代理对回环地址返回 502，表现为 RAG 工具初始化失败、上传文档 500。
+    这里把回环地址并入 no_proxy；同时把系统代理固化成环境变量，避免只设
+    no_proxy 时 urllib 不再读注册表代理、连外网的 LLM/embedding 反而断掉。
+    """
+    proxies = getproxies()
+    for scheme in ("http", "https"):
+        value = proxies.get(scheme)
+        if value and not os.environ.get(f"{scheme}_proxy") and not os.environ.get(f"{scheme.upper()}_PROXY"):
+            os.environ[f"{scheme}_proxy"] = value
+
+    hosts = {
+        h.strip() for h in (os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or "").split(",") if h.strip()
+    }
+    hosts.update({"localhost", "127.0.0.1", "::1"})
+    merged = ",".join(sorted(hosts))
+    os.environ["no_proxy"] = merged
+    os.environ["NO_PROXY"] = merged
+
+
+_bypass_proxy_for_loopback()
 
 
 class Settings(BaseSettings):

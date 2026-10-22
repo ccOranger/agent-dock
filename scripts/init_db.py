@@ -3,7 +3,8 @@
 用于容器首启/空库部署：建表、扩展、知识库命名空间种子与 schema 版本。
 整脚本包在一个事务里，逐条用 savepoint 执行：命中 "对象已存在"（SQLSTATE
 42P07/42710/42P06）只回滚该条并继续，其余错误回滚整脚本并非零退出，
-避免留下半套 schema。本脚本不做 ALTER/数据迁移；旧库请直接全量重建。
+避免留下半套 schema。脚本只含幂等的列宽修正（如 documents.content_type），
+其余结构性变更仍靠全量重建（rebuild_and_seed.py）。
 
 用法（DATABASE_URL 指向目标库）：
     python ../scripts/init_db.py

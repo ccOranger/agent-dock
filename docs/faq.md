@@ -122,6 +122,10 @@ services:
 - 文件超过 `UPLOAD_MAX_SIZE_MB`（默认 20 MB），或反向代理 `client_max_body_size` 太小；
 - 文件解析依赖缺失（PDF/Word 解析在镜像内已包含）。
 
+### 上传文档报 500，日志里 Qdrant 报 502 Bad Gateway
+
+Windows 开了 Clash 一类系统代理时，httpx 会把 `http://127.0.0.1:6333` 也交给代理，代理对回环地址返回 502，RAG 工具初始化失败，上传接口随之 500。应用启动时会自动把 `localhost` / `127.0.0.1` / `::1` 并入 `no_proxy`；自己写的脚本要直连本机服务，同样需要 `NO_PROXY`（或 `httpx.Client(trust_env=False)`）。
+
 ### 检索结果恒空 / `chunk_count` 恒为 0
 
 依次确认：文档状态是 `indexed`、查询的 namespace 与文档一致、Qdrant collection 有向量、`RAG_MIN_SCORE` 没有设得过高。切换过 embedding 模型时需重建索引。

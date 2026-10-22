@@ -177,7 +177,7 @@ class Document(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     title: Mapped[str] = mapped_column(String(256))
     source: Mapped[str | None] = mapped_column(String(512))
-    content_type: Mapped[str | None] = mapped_column(String(64))
+    content_type: Mapped[str | None] = mapped_column(String(128))  # docx 的 MIME 有 71 字符
     kind: Mapped[str] = mapped_column(String(16), default="upload")
     size_bytes: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="pending")

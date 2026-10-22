@@ -237,7 +237,7 @@ CREATE TABLE documents (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title           VARCHAR(256) NOT NULL,
     source          VARCHAR(512),
-    content_type    VARCHAR(64),
+    content_type    VARCHAR(128),
     size_bytes      BIGINT,
     kind              VARCHAR(16) NOT NULL DEFAULT 'upload'
                     CHECK (kind IN ('upload','manual')),
@@ -251,6 +251,9 @@ CREATE TABLE documents (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 旧库升级：docx 的 MIME（application/vnd.openxmlformats-officedocument.…）有 71 字符，
+-- varchar(64) 会让上传直接 500；放大列宽是幂等操作，新库执行也无副作用。
+ALTER TABLE documents ALTER COLUMN content_type TYPE VARCHAR(128);
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
 CREATE INDEX IF NOT EXISTS idx_documents_namespace ON documents(rag_namespace);
 CREATE INDEX IF NOT EXISTS idx_documents_kind ON documents(kind);
