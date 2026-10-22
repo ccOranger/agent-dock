@@ -4,7 +4,9 @@
 
 用法（在 backend 目录，配好 .env 后）：
     python ../scripts/init_db.py
-    python ../scripts/seed_data.py
+    python ../scripts/seed_data.py                # 建种子 + 演示知识写向量（仅 SEED_DEMO=true）
+    python ../scripts/seed_data.py --skip-docs    # 只写 DB 种子，不碰 Qdrant
+    python ../scripts/seed_data.py --force-docs   # 已有向量也重灌
 """
 import asyncio
 import os
@@ -14,6 +16,9 @@ import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 os.environ.setdefault("PYTHONPATH", "backend")
+
+# 种子里的相对路径（docs/demo/*.md）以仓库根为基准，与执行时的 CWD 无关
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
@@ -136,7 +141,7 @@ SEED_AGENTS = [
     },
 ]
 
-# 示例动态 Agent（source=dynamic，仅演示模式写入）：演示后台创建 + MCP 绑定
+# 示例动态 Agent（source=dynamic，仅演示模式写入）：演示后台创建 + 知识库/MCP/自定义工具绑定
 DEMO_DYNAMIC_AGENTS = [
     {
         "name": "refund_service",
@@ -147,58 +152,144 @@ DEMO_DYNAMIC_AGENTS = [
         "system_prompt": "你是退款咨询助手，负责解答退款政策与进度问题；必要时调用退款相关工具。",
         "mcp_tool_names": ["mcp_refund"],
     },
+    {
+        # 投诉处理：绑定售后知识库 + 建单/补单/升级人工三类工单工具
+        "name": "complaint_handler",
+        "display_name": "投诉处理",
+        "description": "投诉处理：受理客户投诉、安抚情绪、创建工单、升级人工（示例动态 Agent，绑定工单与升级工具）",
+        "enabled": True,
+        "sort_order": 11,
+        "system_prompt": (
+            "你是投诉处理助手，负责安抚客户情绪、受理投诉；"
+            "识别到投诉应立即创建工单，客户补充订单号等细节时更新对应工单，"
+            "情绪激动或问题严重时升级人工，不做超出售后政策的承诺。"
+        ),
+        "rag_namespace": "cs_after_sales",
+        "routing_keywords": ["投诉", "举报", "态度", "维权", "赔偿"],
+        "routing_examples": ["我要投诉你们的客服", "这次服务太差必须给我个说法"],
+        "custom_tool_names": ["create_ticket", "update_ticket", "escalate"],
+    },
+    {
+        # 通用知识问答：只读通用知识库，无需业务工具
+        "name": "knowledge_qa",
+        "display_name": "通用知识问答",
+        "description": "通用知识问答：产品FAQ、公司政策、使用指南（示例动态 Agent，只读通用知识库）",
+        "enabled": True,
+        "sort_order": 12,
+        "system_prompt": (
+            "你是通用知识问答助手，依据知识库回答产品FAQ、公司政策与使用指南；"
+            "无法从知识库确认时如实说明并建议转人工，不臆造答案。"
+        ),
+        "rag_namespace": "cs_default",
+        "routing_keywords": ["怎么用", "说明书", "政策", "FAQ", "常见问题"],
+        "routing_examples": ["这个功能怎么使用", "你们的退换货政策是什么"],
+    },
+    {
+        # 订单服务：绑定订单知识库 + 订单/物流/退款一整套自定义工具
+        "name": "order_service",
+        "display_name": "订单服务",
+        "description": "订单服务：查询订单、物流追踪、修改订单、退换申请（示例动态 Agent，绑定订单/物流/退款工具）",
+        "enabled": True,
+        "sort_order": 13,
+        "system_prompt": (
+            "你是订单服务助手，负责查询订单、追踪物流、修改订单与提交退换申请；"
+            "调用工具前先向客户确认订单号等关键信息，修改类操作必须与客户核对后再执行。"
+        ),
+        "rag_namespace": "cs_order",
+        "routing_keywords": ["订单", "物流", "发货", "签收", "改地址", "退换"],
+        "routing_examples": ["我的订单到哪了", "帮我把收货地址改一下"],
+        "custom_tool_names": [
+            "query_order",
+            "list_orders",
+            "modify_order",
+            "query_logistics",
+            "submit_refund",
+            "query_refund",
+        ],
+    },
 ]
 
-# 示例知识库文档（仅演示模式写入；实际向量存于 Qdrant）
+
+def _custom_tool_seed(name: str) -> dict:
+    """从代码目录取某个自定义工具的参数 Schema，生成登记到 tools 表（type=custom）的种子行。
+
+    运行时装配走代码目录（custom_loader），DB 登记仅为让后台「自定义工具」页可回显、
+    并让动态 Agent 编辑校验（已登记且启用）通过。
+    """
+    from app.tools import custom_catalog
+
+    spec = next((s for s in custom_catalog.list_specs() if s["name"] == name), {})
+    return {
+        "name": name,
+        "type": "custom",
+        "schema_": spec.get("parameters", {}),
+        "config": {},
+    }
+
+
+# 演示动态 Agent 绑定的自定义工具：自动汇总去重后登记到 tools 表，保证绑定可管理
+DEMO_CUSTOM_TOOLS = [
+    _custom_tool_seed(name)
+    for name in sorted(
+        {
+            tool
+            for agent in DEMO_DYNAMIC_AGENTS
+            for tool in agent.get("custom_tool_names", [])
+        }
+    )
+]
+
+# 示例知识库文档（仅演示模式写入）：归档行指向 docs/demo/ 下的示例原文；
+# 原文 → 向量由 main() 收尾的 ingest_demo_documents() 完成（Qdrant/embedding 不可用时自动跳过）。
 DEMO_DOCUMENTS = [
     {
         "title": "产品常见问题 FAQ",
-        "source": "docs/product_faq.md",
+        "source": "docs/demo/product_faq.md",
         "content_type": "text/markdown",
         "status": "ready",
         "rag_namespace": "cs_default",
-        "chunk_count": 12,
+        "chunk_count": 0,
     },
     {
         "title": "订单与物流自助指南",
-        "source": "docs/order_guide.md",
+        "source": "docs/demo/order_guide.md",
         "content_type": "text/markdown",
         "status": "ready",
         "rag_namespace": "cs_order",
-        "chunk_count": 8,
+        "chunk_count": 0,
     },
     {
         "title": "售后与投诉处理政策",
-        "source": "docs/after_sales_policy.md",
+        "source": "docs/demo/after_sales_policy.md",
         "content_type": "text/markdown",
         "status": "ready",
         "rag_namespace": "cs_after_sales",
-        "chunk_count": 6,
+        "chunk_count": 0,
     },
     # IT 服务台示例知识（与 IT 知识库命名空间 it_default/it_network/it_assets 对齐）
     {
         "title": "IT 服务台自助指南",
-        "source": "docs/it_helpdesk_guide.md",
+        "source": "docs/demo/it_helpdesk_guide.md",
         "content_type": "text/markdown",
         "status": "ready",
         "rag_namespace": "it_default",
-        "chunk_count": 10,
+        "chunk_count": 0,
     },
     {
         "title": "办公网络与 VPN 故障排查手册",
-        "source": "docs/it_network_guide.md",
+        "source": "docs/demo/it_network_guide.md",
         "content_type": "text/markdown",
         "status": "ready",
         "rag_namespace": "it_network",
-        "chunk_count": 9,
+        "chunk_count": 0,
     },
     {
         "title": "IT 资产领用与保修说明",
-        "source": "docs/it_asset_guide.md",
+        "source": "docs/demo/it_asset_guide.md",
         "content_type": "text/markdown",
         "status": "ready",
         "rag_namespace": "it_assets",
-        "chunk_count": 7,
+        "chunk_count": 0,
     },
 ]
 
@@ -266,10 +357,83 @@ ACTIVE_STAFF = (
     ]
 )
 ACTIVE_CUSTOMERS = DEMO_CUSTOMERS if DEMO_MODE else []
-ACTIVE_TOOLS = SEED_TOOLS + DEMO_TOOLS if DEMO_MODE else SEED_TOOLS
+ACTIVE_TOOLS = SEED_TOOLS + DEMO_TOOLS + DEMO_CUSTOM_TOOLS if DEMO_MODE else SEED_TOOLS
 ACTIVE_DYNAMIC_AGENTS = DEMO_DYNAMIC_AGENTS if DEMO_MODE else []
 ACTIVE_DOCUMENTS = DEMO_DOCUMENTS if DEMO_MODE else []
 ACTIVE_TICKETS = DEMO_TICKETS if DEMO_MODE else []
+
+
+async def ingest_demo_documents(force: bool = False) -> tuple[int, int, int]:
+    """演示文档原文 → 向量（seed 的收尾步骤，与建 Agent 一样一步完成）。
+
+    文档行由 main() 先落库，这里只补 Qdrant 分块。任一前置条件不满足都只提示、
+    不让 seed 失败（entrypoint 会把 seed 失败当成启动失败重试）：
+    - Qdrant 不可用 → 整批跳过；
+    - 原文缺失（后端镜像不含 docs/）→ 整批跳过，提示去宿主机跑；
+    - embedding 报错 → 中断，已入库的不受影响。
+    返回 (入库, 跳过, 失败)。
+    """
+    from sqlalchemy import select
+
+    from app.services import qdrant_helper
+    from app.services.document_service import DocumentService
+
+    if not DEMO_DOCUMENTS:
+        return 0, 0, 0
+
+    missing = [
+        d["source"] for d in DEMO_DOCUMENTS if not os.path.isfile(os.path.join(PROJECT_ROOT, d["source"]))
+    ]
+    if missing:
+        print(
+            f"   演示知识向量：跳过（缺少原文 {missing[0]}；后端镜像不含 docs/，请在宿主机 backend 目录执行）"
+        )
+        return 0, len(DEMO_DOCUMENTS), 0
+
+    try:
+        qdrant_helper.get_qdrant_client().get_collections()
+    except Exception as e:  # noqa: BLE001
+        print(f"   演示知识向量：跳过（Qdrant 不可用：{type(e).__name__}: {e}）")
+        return 0, len(DEMO_DOCUMENTS), 0
+
+    service = DocumentService()
+    created = skipped = failed = 0
+    for d in DEMO_DOCUMENTS:
+        title, namespace = d["title"], d["rag_namespace"]
+        with open(os.path.join(PROJECT_ROOT, d["source"]), encoding="utf-8") as f:
+            content = f.read()
+
+        async with AsyncSession(engine) as db:
+            row = (
+                await db.execute(
+                    select(Document).where(
+                        Document.title == title, Document.rag_namespace == namespace
+                    )
+                )
+            ).scalar_one_or_none()
+        # 已入库（有向量）跳过；种子归档行（无向量）或 --force 先清旧向量 + 旧行
+        if row is not None:
+            if row.status == "processing":
+                skipped += 1
+                continue
+            if row.chunk_count and not force:
+                skipped += 1
+                continue
+            await service.delete(str(row.id), namespace, row.source)
+
+        try:
+            await service.create_entry(
+                namespace=namespace, title=title, content=content, uploaded_by=None
+            )
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            print(f"   演示知识向量：失败 [{namespace}] {title} -> {type(e).__name__}: {e}")
+            print("   已中断；确认 EMBED_API_KEY/模型可用后重跑 seed_data.py --force-docs")
+            break
+        created += 1
+
+    print(f"   演示知识向量：入库 {created} 篇 / 跳过 {skipped} 篇 / 失败 {failed} 篇")
+    return created, skipped, failed
 
 
 async def main() -> None:
@@ -461,6 +625,10 @@ async def main() -> None:
         print("=" * 64)
     else:
         print(f"   管理员 {ADMIN_USERNAME} 已存在，未重置密码")
+
+    # 演示知识：原文 → 向量。前置条件不满足时只提示，不让 seed 失败
+    if ACTIVE_DOCUMENTS and "--skip-docs" not in sys.argv:
+        await ingest_demo_documents(force="--force-docs" in sys.argv)
 
 
 if __name__ == "__main__":

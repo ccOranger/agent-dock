@@ -184,7 +184,7 @@ docker compose stop backend web
 
 1. PostgreSQL / Redis / Qdrant（如需 semantic 再加 Neo4j）就绪。
 2. 建库：本机 `bash scripts/init_db.sh`；云库推荐直接跑 `python scripts/rebuild_and_seed.py`（单往返 simple query，规避连接池代理断连）。
-3. 后端：确认 `backend/.env`（见 §8）→ 在 `backend` 目录 `python ..\scripts\init_db.py` 建表、`python ..\scripts\seed_data.py` 灌种子（均幂等；全新库可直接 `rebuild_and_seed.py`）→ `uvicorn app.main:app`。
+3. 后端：确认 `backend/.env`（见 §8）→ 在 `backend` 目录 `python ..\scripts\init_db.py` 建表、`python ..\scripts\seed_data.py` 灌种子（均幂等；全新库可直接 `rebuild_and_seed.py`）→ `uvicorn app.main:app`。演示模式下 seed 会把 `docs/demo` 的 6 篇原文一并写成向量（Qdrant/embedding 不可用时自动跳过；`--skip-docs` 显式跳过、`--force-docs` 重灌）。
 4. 前端：仓库根 `npm install`（一次装好两个前端与 `packages/shared`）→ `npm run dev:chat`（5173）/ `npm run dev:admin`（5174）。
 
 启动日志应看到 HelloAgents 初始化（工具 → 注册 → Agent）与 Agent 自动登记；`app/main.py` 会把 stdout/stderr 切到 UTF-8。
@@ -234,15 +234,15 @@ docker compose stop backend web
   cd backend; .\.venv\Scripts\python.exe ..\scripts\rebuild_and_seed.py
   # DROP 旧表（含遗留 users）→ init_db.sql 建表 → 灌种子；单往返 simple query 适配云库代理
   # 生产初始化设 SEED_DEMO=false（随机管理员密码只打印一次）；演示环境设 SEED_DEMO=true
+  # 演示模式的文档向量在重建末尾自动补（Qdrant/embedding 不可用时跳过）；Qdrant 旧向量不会随重建清除
   ```
 - **脚本清单**（`scripts/`）：
   | 脚本 | 作用 |
   |------|------|
   | `init_db.sql` | 全量 schema（已去除 `uuid-ossp`/`pgvector` 依赖，UUID 用内置 `gen_random_uuid()`） |
   | `init_db.sh` | 本机一键建库 |
-  | `seed_data.py` | 种子定义：初始人员/客户/Agent/工具/示例文档/MCP 配置（不建表；幂等，可对旧数据 upsert） |
-  | `seed_it_kb.py` | 可选：把 IT 示例 FAQ 写入 Qdrant（需 embedding 可用；已存在同名跳过，单条失败继续） |
-  | `rebuild_and_seed.py` | 开发阶段全量重建 + 灌种子（云库友好） |
+  | `seed_data.py` | 种子定义：初始人员/客户/Agent/工具/示例文档/MCP 配置（不建表；幂等；演示模式下顺带把 `docs/demo` 原文写成向量） |
+  | `rebuild_and_seed.py` | 开发阶段全量重建 + 灌种子 + 补演示知识向量（云库友好） |
   | `seed_memory_via_chat.py` | 模拟对话造记忆测试数据 |
   | `backup.sh` | 生产备份：pg_dump + Qdrant 快照 + 业务数据 + Redis RDB（带保留期） |
   | `cleanup_traces.py` | 清理过期链路（见下） |

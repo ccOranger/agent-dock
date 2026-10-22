@@ -36,6 +36,7 @@ from seed_data import (  # noqa: E402
     CANNED_TITLES,
     DEMO_MODE,
     SEED_AGENTS,
+    ingest_demo_documents,
 )
 
 from app.agents.canned_scripts import SEED_RULES  # noqa: E402
@@ -116,10 +117,13 @@ def build_sql() -> str:
     for a in ACTIVE_DYNAMIC_AGENTS:
         parts.append(
             "INSERT INTO agents (name, display_name, description, enabled, sort_order, source, "
-            "system_prompt, mcp_tool_names) VALUES "
+            "system_prompt, routing_keywords, routing_examples, rag_namespace, "
+            "mcp_tool_names, custom_tool_names) VALUES "
             f"({lit(a['name'])}, {lit(a['display_name'])}, {lit(a['description'])}, "
             f"{lit(a['enabled'])}, {lit(a['sort_order'])}, 'dynamic', {lit(a['system_prompt'])}, "
-            f"{lit(a['mcp_tool_names'])});"
+            f"{lit(a.get('routing_keywords', []))}, {lit(a.get('routing_examples', []))}, "
+            f"{lit(a.get('rag_namespace'))}, "
+            f"{lit(a.get('mcp_tool_names', []))}, {lit(a.get('custom_tool_names', []))});"
         )
     # 默认场景只绑定默认助手；放在 Agent 插入之后，子查询才能取到 id
     parts.append(
@@ -203,6 +207,10 @@ async def main() -> None:
             await vconn.close()
     except Exception as e:  # noqa: BLE001
         print("   （校验查询失败，可忽略/稍后手动核对）:", type(e).__name__, e)
+
+    # 演示文档：重建只落归档行，原文 → 向量在这里补（Qdrant/embedding 不可用时只提示）
+    if DEMO_MODE:
+        await ingest_demo_documents()
 
 
 if __name__ == "__main__":
