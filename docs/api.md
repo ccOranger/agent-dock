@@ -63,6 +63,8 @@ curl -N -X POST http://localhost:8000/api/v1/chat/stream \
 
 组件只向宿主暴露 `window.AgentDockWidget.open()` / `close()` / `toggle()`；宿主页可监听 `cs:widget:done` 等 postMessage 事件。开发环境演示页：`http://localhost:5173/embed-demo.html`。
 
+> 定位分工：气泡只承担匿名接入（`visitor_id` 无鉴权，不代表宿主登录客户）。需要识别宿主客户时，由宿主站自研前端携带 customer token（`Authorization`）直接对接聊天接口；或由宿主后端用 `X-API-Key` 做 BFF 代理、把宿主客户 id 作为 `visitor_id` 下传。不要把客户 id 直接透传到浏览器侧当身份使用。
+
 ## Chat（核心）
 
 ```
