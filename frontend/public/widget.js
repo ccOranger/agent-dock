@@ -1,7 +1,13 @@
 /*
  * AgentDock 嵌入组件（一行 script 引入）
  *
- *   <script src="https://your-host/widget.js" data-scene="mall_order"></script>
+ *   <script src="https://your-host/widget.js" data-scene="mall_order"
+ *           data-ext='{"platform":"web","channel":"miniapp"}'></script>
+ *
+ * data-integration 是接入方公开标识：只用于匿名访客归属与命名空间，
+ * 不是密钥；不填时访客落在场景级匿名池。
+ * data-ext 是客户端声明的埋点上下文（渠道等设备信息都作为其中的普通键），
+ * 只用于统计，不是身份或租户凭证。
  *
  * 组件会读取场景公开配置（标题/主题色/位置），创建右下角气泡，点击后加载
  * /embed.html 到 iframe。iframe 与宿主跨域隔离，宿主 CSS 不会影响对话界面。
@@ -15,6 +21,8 @@
     console.warn('[AgentDock] 缺少 data-scene，嵌入代码未生效');
     return;
   }
+  var integration = (script.getAttribute('data-integration') || '').trim();
+  var ext = (script.getAttribute('data-ext') || '').trim();
   var scriptUrl = new URL(script.src);
   var origin = scriptUrl.origin;
   var apiBase = (script.getAttribute('data-api') || origin).replace(/\/$/, '');
@@ -39,6 +47,11 @@
     }
     if (html) node.innerHTML = html;
     return node;
+  }
+
+  // 埋点 ext 随 iframe 传给嵌入页，最终进入聊天请求的 ext 字段
+  function extraQuery() {
+    return ext ? '&ext=' + encodeURIComponent(ext) : '';
   }
 
   var BUBBLE_ICON =
@@ -81,7 +94,12 @@
   function ensureIframe() {
     if (state.iframe) return state.iframe;
     var iframe = document.createElement('iframe');
-    iframe.src = origin + '/embed.html?scene=' + encodeURIComponent(scene);
+    iframe.src =
+      origin +
+      '/embed.html?scene=' +
+      encodeURIComponent(scene) +
+      (integration ? '&integration=' + encodeURIComponent(integration) : '') +
+      extraQuery();
     iframe.title = state.title;
     iframe.setAttribute('allow', 'clipboard-write');
     iframe.style.width = '100%';
@@ -222,7 +240,10 @@
   state.button.style.display = 'none';
 
   // 读取公开配置：主题/标题/位置以后台为准，失败时退回 data-* 属性
-  fetch(apiBase + '/api/v1/public/scenes/' + encodeURIComponent(scene))
+  fetch(
+    apiBase + '/api/v1/public/scenes/' + encodeURIComponent(scene),
+    integration ? { headers: { 'X-Integration-Code': integration } } : undefined,
+  )
     .then(function (resp) {
       return resp.ok ? resp.json() : null;
     })
@@ -249,5 +270,12 @@
       state.button.style.display = 'flex';
     });
 
-  window.AgentDockWidget = { open: open, close: close, toggle: toggle, scene: scene };
+  window.AgentDockWidget = {
+    open: open,
+    close: close,
+    toggle: toggle,
+    scene: scene,
+    integration: integration || null,
+    ext: ext || null,
+  };
 })();

@@ -27,6 +27,9 @@
 | U15 | 链路详情显示路由意图依据 | 每个意图回显命中的路由关键词与 `clue_basis`（命中/配了没中/没配），后台时间线单独成块 | [15-route-intent-evidence.md](15-route-intent-evidence.md) |
 | U16 | 高频固定话术（硬模板 + 后台可配） | 身份/能力/探听三类在路由之前逐字应答（毫秒级、不进模型），规则入库可后台改，排版软约束统一进基类提示词 | [16-canned-scripts-db.md](16-canned-scripts-db.md) |
 | U17 | IT Helpdesk 场景包与包启停（历史） | 第二个场景包（3 Agent + 4 工具 + 3 知识库）；manifest `features`、包资产归属与运营台整体启停；场景包机制已移除，本文仅作记录 | [17-it-helpdesk-pack.md](17-it-helpdesk-pack.md) |
+| U18 | 接入方与 Key 归属（integrations） | 服务端 Key 从场景迁到接入方：多 Key 轮换、场景授权、访客按接入方命名空间隔离；移除场景 rotate-key | [18-integration-keys.md](18-integration-keys.md) |
+| U19 | 匿名接入的接入方归属 | `integrations.public_code` + `data-integration` / `X-Integration-Code`：匿名嵌入也能确定接入方，访客写入 `integration_id` | [19-anonymous-integration-attribution.md](19-anonymous-integration-attribution.md) |
+| U20 | 单租户降级与自定义埋点 | 后台隐藏接入方入口、默认接入方授权全部场景、嵌入不再带 `data-integration`；`ChatRequest.ext` + `chat_events` 全量埋点（预留 `tenant_id` / `total_tokens`） | [20-single-tenant-degradation.md](20-single-tenant-degradation.md) |
 
 ## 与三份主文档的关系
 

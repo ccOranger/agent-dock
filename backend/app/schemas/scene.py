@@ -120,8 +120,6 @@ class SceneContext:
     # ---- 公开接入（鉴权与嵌入）----
     # 已发布场景才有 publish_key；无 Authorization 时据此判定可否匿名访问
     publish_key: str | None = None
-    # 服务端接入的 API key 哈希（sha256）；为空表示未开启服务端接入
-    api_key_hash: str | None = None
     allowed_origins: tuple[str, ...] = ()
     widget_config: dict = field(default_factory=dict)
 

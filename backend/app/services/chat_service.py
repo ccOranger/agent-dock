@@ -7,7 +7,13 @@ from app.core.database import SessionLocal
 from app.core.exceptions import UnsafeInput
 from app.core.security import detect_injection, sanitize_output
 from app.core.tracing import OUTCOME_ERROR, TraceCollector, new_request_trace_id
-from app.models.repositories import MessageRepo, SessionRepo, TraceRepo, VisitorRepo
+from app.models.repositories import (
+    ChatEventRepo,
+    MessageRepo,
+    SessionRepo,
+    TraceRepo,
+    VisitorRepo,
+)
 from app.schemas.scene import Actor, ActorType, SceneContext
 from app.services.scene_service import resolve_scene
 from app.utils.sse import sse_event
@@ -44,6 +50,25 @@ class ChatService:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"链路写入失败（不阻塞主流程）: {e}")
 
+    @staticmethod
+    async def _attach_chat_event_identity(trace_id: str | None, session) -> None:
+        """把真实 session/visitor 回填到请求级埋点，失败只告警。
+
+        埋点在进入 service 前写入，首轮 session_id 与匿名访客的 visitor_id 还是空；
+        这里按 trace_id 补一次，chat_events 才能 join 会话与访客做统计。
+        """
+        if not trace_id:
+            return
+        try:
+            await ChatEventRepo.attach_identity(
+                trace_id=trace_id,
+                session_id=str(session.id),
+                visitor_id=str(session.visitor_id) if session.visitor_id else None,
+                user_id=str(session.user_id) if session.user_id else None,
+            )
+        except Exception as exc:  # noqa: BLE001 - 埋点旁路不得阻塞对话
+            logger.warning(f"对话埋点身份回填失败（不阻塞对话）: {exc}")
+
     async def stream(
         self,
         user_id: str | None,
@@ -52,12 +77,13 @@ class ChatService:
         trace_id: str | None = None,
         scene_code: str | None = None,
         visitor_id: str | None = None,
+        integration_id: str | None = None,
         scene: SceneContext | None = None,
     ) -> AsyncIterator[str]:
         # 场景在会话之前解析：错码/停用/未配置直接失败，不产生空会话；
         # 路由层已预校验时直接复用快照，避免一轮请求重复查两次场景。
         scene = scene or await resolve_scene(scene_code)
-        actor = await self._resolve_actor(scene, user_id, visitor_id)
+        actor = await self._resolve_actor(scene, user_id, visitor_id, integration_id)
         async with SessionLocal() as db:
             session = await SessionRepo.get_or_create_for_actor(
                 actor, scene.scene_id, session_id, db=db
@@ -71,6 +97,7 @@ class ChatService:
             user_msg = await MessageRepo.add(session.id, role="user", content=message, db=db)
             # 用户消息先落库：后续异常 / 客户端断连也不丢用户输入
             await db.commit()
+            await self._attach_chat_event_identity(trace_id, session)
 
             # 采集本轮经过的 Agent / MCP / 工具 / RAG / 记忆，流结束后一次写入 request_traces
             collector = TraceCollector(
@@ -149,13 +176,14 @@ class ChatService:
         trace_id: str | None = None,
         scene_code: str | None = None,
         visitor_id: str | None = None,
+        integration_id: str | None = None,
         scene: SceneContext | None = None,
     ) -> dict:
         """非流式备用接口：聚合完整回复"""
         if detect_injection(message):
             raise UnsafeInput()
         scene = scene or await resolve_scene(scene_code)
-        actor = await self._resolve_actor(scene, user_id, visitor_id)
+        actor = await self._resolve_actor(scene, user_id, visitor_id, integration_id)
         async with SessionLocal() as db:
             session = await SessionRepo.get_or_create_for_actor(
                 actor, scene.scene_id, session_id, db=db
@@ -166,6 +194,7 @@ class ChatService:
                     session.title = derived
             user_msg = await MessageRepo.add(session.id, role="user", content=message, db=db)
             await db.commit()
+            await self._attach_chat_event_identity(trace_id, session)
 
             history = await MessageRepo.list_recent(session.id, limit=HISTORY_FETCH_LIMIT, db=db)
             # 同 stream：读完成交释放连接，非流式生成期间也可能较长
@@ -227,12 +256,21 @@ class ChatService:
 
     @staticmethod
     async def _resolve_actor(
-        scene: SceneContext, user_id: str | None, visitor_id: str | None
+        scene: SceneContext,
+        user_id: str | None,
+        visitor_id: str | None,
+        integration_id: str | None = None,
     ) -> Actor:
-        """登录客户优先；否则按外部访客标识（或新建匿名访客）签发 visitor actor。"""
+        """登录客户优先；否则按外部访客标识（或新建匿名访客）签发 visitor actor。
+
+        integration_id 来自 X-API-Key 反查：同一 external_key 在不同接入方下
+        对应不同的 visitors 行，会话与记忆因此不会串号。
+        """
         if user_id:
             return Actor(ActorType.USER, str(user_id))
-        visitor = await VisitorRepo.get_or_create(scene.scene_id, external_key=visitor_id)
+        visitor = await VisitorRepo.get_or_create(
+            scene.scene_id, external_key=visitor_id, integration_id=integration_id
+        )
         return Actor(ActorType.VISITOR, str(visitor.id))
 
     @staticmethod

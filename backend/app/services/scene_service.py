@@ -1,5 +1,4 @@
 """场景解析：把对外的 scene_code 收敛成一轮对话可用的快照。"""
-import hashlib
 import hmac
 import logging
 
@@ -78,7 +77,6 @@ def build_scene_context(scene, agents: list[dict]) -> SceneContext:
         candidates=tuple(agents),
         # 旧测试/手工构造的场景快照未必带这些公开接入字段
         publish_key=getattr(scene, "publish_key", None),
-        api_key_hash=getattr(scene, "api_key_hash", None),
         allowed_origins=tuple(getattr(scene, "allowed_origins", None) or ()),
         widget_config=dict(getattr(scene, "widget_config", None) or {}),
     )
@@ -102,22 +100,19 @@ def _pick_direct_agent(scene, agents: list[dict]) -> str | None:
     return agents[0]["name"] if len(agents) == 1 else None
 
 
-def hash_api_key(raw: str) -> str:
-    """服务端接入 key 只存哈希；后台轮换后明文只回显一次。"""
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
 def authorize_scene_access(
     scene: SceneContext,
     *,
     user,
-    api_key: str | None = None,
+    integration: dict | None = None,
     publish_key: str | None = None,
 ) -> None:
-    """聊天入口鉴权：登录客户 / 服务端 API key / 已发布场景匿名，三者取一。
+    """聊天入口鉴权：登录客户 / 接入方 API Key / 已发布场景匿名，三者取一。
 
     - 带了 Authorization 但 token 无效的情况已在依赖层报错，不会走到这里；
-    - 场景未发布且未配置 API key 时，匿名请求一律 401；
+    - integration 是 X-API-Key 或 X-Integration-Code 反查出的接入方（含已授权场景 id），
+      未命中在入口处已 401；匿名嵌入靠公开标识归属，但仍必须通过场景授权；
+    - 场景未发布且未配置接入方时，匿名请求一律 401；
     - publish_key 是嵌入页里的公开标识，主动传错时按无效处理，便于排查配置。
     """
     if user is not None:
@@ -125,10 +120,14 @@ def authorize_scene_access(
             raise Forbidden("仅客户身份可发起对话")
         return
 
-    if api_key:
-        if scene.api_key_hash and hmac.compare_digest(hash_api_key(api_key), scene.api_key_hash):
-            return
-        raise Unauthorized("API key 无效")
+    if integration is not None:
+        # 公开标识会出现在宿主页源码里，不能绕过场景的“开放匿名”开关
+        if integration.get("via") == "public_code" and not scene.publish_key:
+            raise Unauthorized("该场景未开放匿名访问")
+        # 场景是业务维度，接入方是调用方维度：Key 有效不代表有权访问该场景
+        if str(scene.scene_id) not in set(integration.get("scene_ids") or ()):
+            raise Forbidden("该接入方未授权访问此场景")
+        return
 
     if publish_key:
         # 先 encode：compare_digest 对非 ASCII str 会抛 TypeError（请求头可被伪造）

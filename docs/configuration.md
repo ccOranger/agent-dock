@@ -55,7 +55,7 @@ JWT_SECRET=<≥32 字节随机串>
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `SEED_DEMO` | `false` | `true` 时写入演示账号、示例文档与演示动态 Agent，**仅演示环境** |
+| `SEED_DEMO` | `false` | `true` 时写入演示账号、示例文档、演示动态 Agent、`customer_service` 演示场景与默认接入方（`ic_default`，授权全部场景），**仅演示环境** |
 | `SEED_ADMIN_USERNAME` | `admin` | 非演示模式创建的初始管理员用户名 |
 | `SEED_ADMIN_PASSWORD` | 空 | 留空则随机生成并只打印一次；显式指定时要求足够强度 |
 

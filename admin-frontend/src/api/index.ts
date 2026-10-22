@@ -10,6 +10,10 @@ import type {
   DocumentItem,
   InquiryDetail,
   InquirySession,
+  Integration,
+  IntegrationCreatePayload,
+  IntegrationKeyIssueResult,
+  IntegrationUpdatePayload,
   KnowledgeBase,
   LoginResult,
   MCPServer,
@@ -31,7 +35,6 @@ import type {
   SceneBoundAgent,
   SceneCreatePayload,
   SceneOption,
-  SceneRotateKeyResult,
   SceneUpdatePayload,
   SceneWidgetPayload,
   SearchResult,
@@ -265,13 +268,32 @@ export const apiSceneAgentOptions = (id: string) =>
 export const apiUpdateSceneWidget = (id: string, body: SceneWidgetPayload) =>
   unwrap(http.put<never, { data: { data: Scene } }>(`/admin/scenes/${id}/widget`, body))
 
-/** 轮换服务端 API key：旧 key 立即失效，明文只返回这一次 */
-export const apiRotateSceneKey = (id: string) =>
+// ===== Admin：接入方（服务端调用身份）=====
+// Key 挂在接入方而不是场景上：场景是业务维度，接入方是调用方维度。
+export const apiListIntegrations = () =>
+  unwrap(http.get<never, { data: { data: Integration[] } }>('/admin/integrations'))
+
+export const apiGetIntegration = (id: string) =>
+  unwrap(http.get<never, { data: { data: Integration } }>(`/admin/integrations/${id}`))
+
+export const apiCreateIntegration = (body: IntegrationCreatePayload) =>
+  unwrap(http.post<never, { data: { data: Integration } }>('/admin/integrations', body))
+
+export const apiUpdateIntegration = (id: string, body: IntegrationUpdatePayload) =>
+  unwrap(http.put<never, { data: { data: Integration } }>(`/admin/integrations/${id}`, body))
+
+export const apiDeleteIntegration = (id: string) => http.delete(`/admin/integrations/${id}`)
+
+/** 签发服务端 Key：明文只在本次响应出现一次，库里只存 sha256 */
+export const apiIssueIntegrationKey = (id: string) =>
   unwrap(
-    http.post<never, { data: { data: SceneRotateKeyResult } }>(
-      `/admin/scenes/${id}/rotate-key`,
+    http.post<never, { data: { data: IntegrationKeyIssueResult } }>(
+      `/admin/integrations/${id}/keys`,
     ),
   )
+
+export const apiRevokeIntegrationKey = (id: string, keyId: string) =>
+  http.delete(`/admin/integrations/${id}/keys/${keyId}`)
 
 // ===== Admin：路由分发器（只读，无任何写接口）=====
 export const apiGetRouterInfo = () =>

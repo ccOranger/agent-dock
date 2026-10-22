@@ -30,6 +30,9 @@ from app.schemas.scene import (  # noqa: E402
 EXPECTED_TABLES = {
     "scenes",
     "scene_agents",
+    "integrations",
+    "integration_keys",
+    "integration_scenes",
     "visitors",
     "staff_users",
     "customer_users",
@@ -43,6 +46,7 @@ EXPECTED_TABLES = {
     "audit_logs",
     "tickets",
     "request_traces",
+    "chat_events",
     "canned_scripts",
     "schema_meta",
 }
@@ -52,11 +56,14 @@ EXPECTED_COLUMNS = {
         "id", "code", "display_name", "status", "is_default", "router_mode",
         "router_model", "router_confidence_threshold", "router_max_intents",
         "fallback_agent_id", "fallback_text", "extra_router_prompt",
-        "widget_config", "allowed_origins", "publish_key", "api_key_hash", "metadata",
+        "widget_config", "allowed_origins", "publish_key", "metadata",
     },
     "agents": {"id", "scene_id", "name", "source", "enabled"},
     "scene_agents": {"scene_id", "agent_id", "enabled", "sort_order"},
-    "visitors": {"id", "scene_id", "external_key", "last_seen_at"},
+    "integrations": {"id", "name", "public_code", "status", "metadata"},
+    "integration_keys": {"id", "integration_id", "key_hash", "hint"},
+    "integration_scenes": {"integration_id", "scene_id"},
+    "visitors": {"id", "scene_id", "integration_id", "external_key", "last_seen_at"},
     "sessions": {"id", "scene_id", "user_id", "visitor_id", "last_route_to"},
     "memories": {"id", "user_id", "visitor_id", "memory_uid", "session_id", "source_message_id"},
     "knowledge_bases": {"namespace", "is_active"},
@@ -65,6 +72,10 @@ EXPECTED_COLUMNS = {
     "request_traces": {
         "id", "scene_code", "visitor_id", "router_skipped", "router_fallback",
         "router_ms", "prompt_hash", "spans",
+    },
+    "chat_events": {
+        "id", "trace_id", "scene_code", "session_id", "visitor_id", "user_id",
+        "integration_id", "tenant_id", "ext", "message_chars", "total_tokens",
     },
     "schema_meta": {"key", "value"},
 }
@@ -76,7 +87,9 @@ EXPECTED_CONSTRAINTS = {
     "ck_sessions_actor",
     "ck_memories_actor",
     "ck_agents_code_global",
-    "uq_visitors_scene_external",
+    "uq_integrations_name",
+    "uq_integrations_public_code",
+    "uq_integration_keys_key_hash",
 }
 
 EXPECTED_INDEXES = {
@@ -84,6 +97,13 @@ EXPECTED_INDEXES = {
     "idx_sessions_scene_created",
     "idx_traces_scene_created",
     "idx_memories_visitor_type",
+    "uq_visitors_anon_scene_external",
+    "uq_visitors_integration_scene_external",
+    "idx_integration_scenes_scene",
+    "idx_chat_events_scene_created",
+    "idx_chat_events_visitor_created",
+    "idx_chat_events_integration_created",
+    "idx_chat_events_trace",
 }
 
 
@@ -231,10 +251,42 @@ async def check_behaviour(conn: asyncpg.Connection, checker: Checker) -> None:
         )
         checker.ok("同场景重复话术 key 被拒绝")
 
-        # 访客 external_key 可空：同一场景允许两个 NULL（NULLS DISTINCT）
+        # 访客 external_key 可空：浏览器匿名（integration_id IS NULL）允许两个 NULL
         await conn.execute("INSERT INTO visitors (scene_id, external_key) VALUES ($1, NULL)", scene_a)
         await conn.execute("INSERT INTO visitors (scene_id, external_key) VALUES ($1, NULL)", scene_a)
         checker.ok("同场景多个 NULL external_key 放行")
+
+        # 接入方命名空间：不同接入方传相同 external_key 不串号，同一接入方内重复要拒绝
+        public_code = f"ic_verify_{suffix}"
+        integration_a = await conn.fetchval(
+            "INSERT INTO integrations (name, public_code) VALUES ($1, $2) RETURNING id",
+            f"__verify_int_a_{suffix}", public_code,
+        )
+        integration_b = await conn.fetchval(
+            "INSERT INTO integrations (name, public_code) VALUES ($1, $2) RETURNING id",
+            f"__verify_int_b_{suffix}", f"{public_code}_b",
+        )
+        await _expect_error(
+            conn, "重复接入方公开标识", asyncpg.UniqueViolationError,
+            "INSERT INTO integrations (name, public_code) VALUES ($1, $2)",
+            f"__verify_int_dup_{suffix}", public_code,
+        )
+        checker.ok("接入方公开标识唯一")
+        await conn.execute(
+            "INSERT INTO visitors (scene_id, integration_id, external_key) VALUES ($1, $2, 'cust-1')",
+            scene_a, integration_a,
+        )
+        await conn.execute(
+            "INSERT INTO visitors (scene_id, integration_id, external_key) VALUES ($1, $2, 'cust-1')",
+            scene_a, integration_b,
+        )
+        checker.ok("不同接入方相同 external_key 互不影响")
+        await _expect_error(
+            conn, "同接入方重复 external_key", asyncpg.UniqueViolationError,
+            "INSERT INTO visitors (scene_id, integration_id, external_key) VALUES ($1, $2, 'cust-1')",
+            scene_a, integration_a,
+        )
+        checker.ok("同接入方重复 external_key 被拒绝")
 
         await _expect_error(
             conn, "会话双空 actor", asyncpg.CheckViolationError,

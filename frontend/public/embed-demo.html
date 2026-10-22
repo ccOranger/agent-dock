@@ -49,7 +49,12 @@
           本页只通过一行 script 引入客服组件，没有任何构建依赖。打开右下角气泡即可验证：
           宿主页样式不影响组件、组件不污染宿主全局（除 <code>window.AgentDockWidget</code>）。
         </p>
-        <pre>&lt;script src="/widget.js" data-scene="mcd_order"&gt;&lt;/script&gt;</pre>
+        <pre>&lt;script src="/widget.js" data-scene="customer_service"
+          data-ext='{"platform":"web","channel":"demo"}'&gt;&lt;/script&gt;</pre>
+        <p class="tip">
+          <code>data-ext</code> 只用于埋点统计（整体落 <code>chat_events.ext</code>），
+          不参与身份与隔离；单租户部署无需传 <code>data-integration</code>。
+        </p>
         <p class="tip">
           页面右下角会出现气泡；主题色、标题与位置来自后台场景的「嵌入配置」。
           未发布（未开放匿名）的场景会在气泡内提示无法开始对话。
@@ -57,6 +62,7 @@
       </div>
     </div>
 
-    <script src="/widget.js" data-scene="mcd_order"></script>
+    <script src="/widget.js" data-scene="customer_service"
+          data-ext='{"platform":"web","channel":"demo"}'></script>
   </body>
 </html>

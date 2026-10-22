@@ -34,7 +34,16 @@ from seed_data import (  # noqa: E402
     ADMIN_PASSWORD_GENERATED,
     ADMIN_USERNAME,
     CANNED_TITLES,
+    DEMO_INTEGRATION_DESCRIPTION,
+    DEMO_INTEGRATION_ID,
+    DEMO_INTEGRATION_NAME,
+    DEMO_INTEGRATION_PUBLIC_CODE,
     DEMO_MODE,
+    DEMO_SCENE_AGENT_NAMES,
+    DEMO_SCENE_CODE,
+    DEMO_SCENE_DESCRIPTION,
+    DEMO_SCENE_ID,
+    DEMO_SCENE_NAME,
     SEED_AGENTS,
     ingest_demo_documents,
 )
@@ -43,6 +52,7 @@ from app.agents.canned_scripts import SEED_RULES  # noqa: E402
 
 # 需要删除的表（含遗留单表 users）；先删子表再删父表，CASCADE 兜底依赖
 DROP_TABLES = [
+    "chat_events",
     "request_traces",
     "tickets",
     "audit_logs",
@@ -55,6 +65,9 @@ DROP_TABLES = [
     "canned_scripts",
     "scene_agents",
     "agents",
+    "integration_scenes",
+    "integration_keys",
+    "integrations",
     "visitors",
     "scenes",
     "customer_users",
@@ -132,6 +145,31 @@ def build_sql() -> str:
         f"WHERE name = {lit(DEFAULT_ASSISTANT_NAME)} AND scene_id IS NULL "
         "ON CONFLICT (scene_id, agent_id) DO NOTHING;"
     )
+    # 演示场景：客服场景（LLM 路由到投诉 / 知识问答 / 订单三个演示动态 Agent）
+    if DEMO_MODE:
+        parts.append(
+            "INSERT INTO scenes (id, code, display_name, description, router_mode) VALUES ("
+            f"{lit(DEMO_SCENE_ID)}, {lit(DEMO_SCENE_CODE)}, {lit(DEMO_SCENE_NAME)}, "
+            f"{lit(DEMO_SCENE_DESCRIPTION)}, 'llm');"
+        )
+        for order, agent_name in enumerate(DEMO_SCENE_AGENT_NAMES):
+            parts.append(
+                "INSERT INTO scene_agents (scene_id, agent_id, enabled, sort_order) "
+                f"SELECT {lit(DEMO_SCENE_ID)}, id, TRUE, {order} FROM agents "
+                f"WHERE name = {lit(agent_name)} AND scene_id IS NULL "
+                "ON CONFLICT (scene_id, agent_id) DO NOTHING;"
+            )
+        # 单租户降级：默认接入方（Key 容器）授权全部场景，Key 调用任意场景都不会 403
+        parts.append(
+            "INSERT INTO integrations (id, name, public_code, description) VALUES ("
+            f"{lit(DEMO_INTEGRATION_ID)}, {lit(DEMO_INTEGRATION_NAME)}, "
+            f"{lit(DEMO_INTEGRATION_PUBLIC_CODE)}, {lit(DEMO_INTEGRATION_DESCRIPTION)});"
+        )
+        parts.append(
+            "INSERT INTO integration_scenes (integration_id, scene_id) "
+            f"SELECT {lit(DEMO_INTEGRATION_ID)}, id FROM scenes "
+            "ON CONFLICT (integration_id, scene_id) DO NOTHING;"
+        )
     # 固定话术：全局行（scene_id NULL）。重建后与 seed_data.py 的种子保持一致。
     for rule in SEED_RULES:
         parts.append(
@@ -168,6 +206,10 @@ async def main() -> None:
         print("[OK] 重建 + seed 语句已提交")
         if DEMO_MODE:
             print("   演示账号：admin/Admin@123、service01/Agent@123、alice/Alice@123")
+            print(
+                f"   默认接入方：{DEMO_INTEGRATION_NAME}（{DEMO_INTEGRATION_PUBLIC_CODE}），"
+                "已授权全部场景；嵌入代码无需传 data-integration"
+            )
         else:
             print(f"   管理员账号：{ADMIN_USERNAME}")
             if ADMIN_PASSWORD_GENERATED:
@@ -193,15 +235,21 @@ async def main() -> None:
                 "(select count(*) from tickets) tickets, "
                 "(select count(*) from scenes) scenes, "
                 "(select count(*) from scene_agents) scene_agents, "
+                "(select count(*) from integrations) integrations, "
+                "(select count(*) from integration_scenes) integration_scenes, "
                 "(select count(*) from visitors) visitors, "
-                "(select count(*) from request_traces) traces"
+                "(select count(*) from request_traces) traces, "
+                "(select count(*) from chat_events) chat_events"
             )
             print(
                 f"   行数 -> staff={row['staff']} customer={row['cust']} "
                 f"agents={row['agents']} tools={row['tools']} "
                 f"documents={row['docs']} tickets={row['tickets']} "
                 f"scenes={row['scenes']} scene_agents={row['scene_agents']} "
-                f"visitors={row['visitors']} traces={row['traces']}"
+                f"integrations={row['integrations']} "
+                f"integration_scenes={row['integration_scenes']} "
+                f"visitors={row['visitors']} traces={row['traces']} "
+                f"chat_events={row['chat_events']}"
             )
         finally:
             await vconn.close()

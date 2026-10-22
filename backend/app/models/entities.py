@@ -46,7 +46,6 @@ class Scene(Base, TimestampMixin):
     widget_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     allowed_origins: Mapped[list] = mapped_column(JSONB, default=list)
     publish_key: Mapped[str | None] = mapped_column(String(64))
-    api_key_hash: Mapped[str | None] = mapped_column(String(128))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
 
@@ -66,13 +65,68 @@ class SceneAgent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Integration(Base, TimestampMixin):
+    """接入方：服务端调用的身份边界，持有 API Key 并被授权访问若干场景。
+
+    Key 挂在接入方而不是场景上：场景是业务维度，接入方是调用方维度。
+    同一场景被多个宿主接入时，靠接入方把访客身份命名空间分开。
+    """
+
+    __tablename__ = "integrations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    # 公开标识：嵌入页用 data-integration 传回，用于匿名访客归属与命名空间；
+    # 会出现在宿主页面源码里，不是安全凭证，防滥用仍靠来源白名单与限流。
+    public_code: Mapped[str] = mapped_column(String(32), unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+
+class IntegrationKey(Base):
+    """接入方的服务端 API Key；只存 sha256，明文仅在签发响应里出现一次。
+
+    允许一个接入方持有多把（轮换过渡期新旧并存），吊销即删除该行。
+    """
+
+    __tablename__ = "integration_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    integration_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integrations.id", ondelete="CASCADE")
+    )
+    key_hash: Mapped[str] = mapped_column(String(128), unique=True)
+    # 密钥尾号，后台列表用它识别是哪一把，不足以还原 key
+    hint: Mapped[str] = mapped_column(String(16), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IntegrationScene(Base):
+    """接入方 ↔ 场景授权（多对多）：接入方只能调用被授权场景。"""
+
+    __tablename__ = "integration_scenes"
+
+    integration_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integrations.id", ondelete="CASCADE"), primary_key=True
+    )
+    scene_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scenes.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Visitor(Base, TimestampMixin):
-    """匿名访客；按场景隔离，id 由服务端签发。"""
+    """访客；浏览器匿名按场景隔离，服务端接入再按接入方隔离。"""
 
     __tablename__ = "visitors"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     scene_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scenes.id", ondelete="CASCADE"))
+    # NULL=浏览器匿名（嵌入气泡签发）；非空=某个接入方下传的终端主体
+    integration_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("integrations.id", ondelete="CASCADE")
+    )
     external_key: Mapped[str | None] = mapped_column(String(128))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -363,6 +417,31 @@ class RequestTrace(Base):
     response_chars: Mapped[int] = mapped_column(Integer, default=0)
 
     spans: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatEvent(Base):
+    """对话埋点：一行 = 一次聊天请求，全量记录，不受 request_traces 采样影响。
+
+    ext 是客户端声明的自定义上下文（如 platform/channel），只用于统计与软策略；
+    租户/接入方归属仍来自凭证，tenant_id 预留给多租户模式由鉴权层注入。
+    """
+
+    __tablename__ = "chat_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    trace_id: Mapped[str] = mapped_column(String(64), default="")
+    scene_code: Mapped[str] = mapped_column(String(32), default="default")
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    visitor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    integration_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # 预留给多租户：当前恒为 NULL，切换时由凭证解析后统一写入
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    ext: Mapped[dict] = mapped_column(JSONB, default=dict)
+    message_chars: Mapped[int] = mapped_column(Integer, default=0)
+    # 预留：LLM usage 采集后回填，用于按接入方统计 token 用量
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

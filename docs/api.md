@@ -32,23 +32,27 @@ POST   /api/v1/public/scenes/{code}/visitors  # 签发匿名访客（仅已发�
 
 - 场景未发布（`publish_key` 为空）时，公开配置仍可读，但 `allow_anonymous=false`，签发访客返回 403；
 - `visitor_id` 是给宿主页面存 localStorage 的稳定标识（对应 `visitors.external_key`），聊天时原样传入即可复用同一访客的会话与记忆；
-- `publish_key` 是公开标识（会出现在嵌入页源码里），不是密钥；服务端接入 key 只能用 `X-API-Key`，后台轮换后明文只回显一次。
+- `publish_key` 是场景级公开标识（会出现在嵌入页源码里），不是密钥；服务端接入 key 只能用 `X-API-Key`，由接入方（`/integrations` 直达页）签发，明文只在签发响应回显一次；
+- `X-Integration-Code`（或 `?integration=ic_xxx`）是接入方公开标识，用于匿名访客归属：带它签发的访客会写入 `integration_id`，同一场景下不同接入方互不干扰；无效标识 401、未授权场景 403、场景未开放匿名 401，不降级为匿名池。它同样不是密钥，可被伪造。
 
 ```bash
-# 1. 读取公开配置
-curl http://localhost:8000/api/v1/public/scenes/mcd_order
+# 1. 读取公开配置（带接入方归属；也可用 ?integration=ic_xxx）
+curl -H "X-Integration-Code: ic_xxx" http://localhost:8000/api/v1/public/scenes/mcd_order
 
-# 2. 签发访客（返回 {"visitor_id":"v_xxx","scene_code":"mcd_order"}）
-curl -X POST http://localhost:8000/api/v1/public/scenes/mcd_order/visitors
+# 2. 签发访客（返回 {"visitor_id":"v_xxx","scene_code":"mcd_order","integration_code":"ic_xxx"}）
+curl -X POST -H "X-Integration-Code: ic_xxx" \
+  http://localhost:8000/api/v1/public/scenes/mcd_order/visitors
 
 # 3. 匿名嵌入聊天（SSE；scene_code 同时放在 query，供 CORS 中间件识别场景来源）
 curl -N -X POST "http://localhost:8000/api/v1/chat/stream?scene_code=mcd_order" \
   -H "Content-Type: application/json" \
   -H "X-Scene-Code: mcd_order" \
+  -H "X-Integration-Code: ic_xxx" \
   -H "X-Publish-Key: pk_xxx" \
   -d '{"scene_code":"mcd_order","visitor_id":"v_xxx","message":"我的订单到哪了"}'
 
 # 4. 服务端 API key 对接（不需要 scene_code 时落到 default 场景）
+#    Key 在 /integrations 签发；单租户默认接入方已授权全部场景
 curl -N -X POST http://localhost:8000/api/v1/chat/stream \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk_xxx" \
@@ -58,8 +62,13 @@ curl -N -X POST http://localhost:8000/api/v1/chat/stream \
 前端嵌入只用一行 script（气泡 + iframe 隔离，主题/标题/欢迎语来自后台「接入」配置）：
 
 ```html
-<script src="https://your-host/widget.js" data-scene="mcd_order"></script>
+<script src="https://your-host/widget.js" data-scene="mcd_order"
+        data-ext='{"platform":"web","channel":"purchase"}'></script>
 ```
+
+单租户部署下**不需要**传 `data-integration`：后台已隐藏「接入方管理」入口与场景接入抽屉的归属选择，生成的代码也不带该属性。该属性仍兼容（公开标识可在 `/integrations` 直达页获取），多接入方/多租户时再启用。
+
+`data-ext` 是扁平 JSON，组件会整体透传到聊天请求的 `ext`；渠道等设备信息（如 `platform`）就作为其中的普通键，服务端不单独建列。它只是**客户端声明**，不能用于身份或隔离。
 
 组件只向宿主暴露 `window.AgentDockWidget.open()` / `close()` / `toggle()`；宿主页可监听 `cs:widget:done` 等 postMessage 事件。开发环境演示页：`http://localhost:5173/embed-demo.html`。
 
@@ -79,21 +88,31 @@ POST   /api/v1/chat/message             # 非流式备用，返回 {data, trace_
   "scene_code": "mcd_order",
   "session_id": null,
   "visitor_id": "v_xxx",
-  "message": "我的订单到哪了"
+  "message": "我的订单到哪了",
+  "ext": {"platform": "web", "channel": "purchase"}
 }
 ```
 
 `scene_code` 缺省 = 默认场景（`default`，单 Agent 直连，不路由）；未知 3003、停用 3004、无可用 Agent 3005，不会静默回落其它场景。
 
-**鉴权顺序**（登录客户 / 服务端 key / 嵌入发布标识 / 已发布匿名，四者取一）：
+`ext` 是自定义埋点上下文：扁平 JSON，最多 10 个字段，字段名 `^[a-z][a-z0-9_]{0,31}$`，值只能是字符串/整数/布尔（字符串 ≤128 字符），序列化后 ≤1KB，`token/password/authorization/secret/api_key/access_token/refresh_token` 等敏感键直接 422。服务端把 `ext` 原样存入 `chat_events.ext`（JSONB），不再拆列；它不参与身份、场景隔离与限流分桶。
+
+**鉴权顺序**（登录客户 / 服务端 key / 接入方公开标识 / 嵌入发布标识 / 已发布匿名，五者取一）：
 
 1. `Authorization: Bearer <customer token>` → 客户身份（`user:<id>`）；带了但无效仍报 401，不降级为匿名；
-2. `X-API-Key: sk_xxx` → 按场景 `api_key_hash` 做 sha256 比对；
-3. `X-Publish-Key: pk_xxx` → 公开标识，主动传错按 401 处理；
-4. 场景已发布（`publish_key` 非空）→ 匿名访客放行（`visitor:<id>`）；
-5. 都没有 → 401/2001。
+2. `X-API-Key: sk_xxx` → 按 `key_hash` 反查启用中的接入方，再校验该接入方是否被授权到目标场景：Key 无效/接入方停用 401，未授权该场景 403；
+3. `X-Integration-Code: ic_xxx` → 按公开标识反查启用中的接入方，用于匿名访客归属；无效标识 401、未授权场景 403、场景未开放匿名 401，不降级为匿名池；
+4. `X-Publish-Key: pk_xxx` → 公开标识，主动传错按 401 处理；
+5. 场景已发布（`publish_key` 非空）→ 匿名访客放行（`visitor:<id>`）；
+6. 都没有 → 401/2001。
+
+> Key 归属接入方而不是场景：一个接入方可持多把 Key（轮换过渡期新旧并存）并被授权到多个场景。访客按 `integration_id` 分命名空间，同一 `visitor_id` 在不同接入方下互不影响；不带 Key 和公开标识的匿名访客 `integration_id` 为空。
+
+> 登录客户优先于接入方标识：带客户 token 时不会解析 `X-API-Key` / `X-Integration-Code`。公开标识仅做归属，不是安全凭证；强隔离请用 `X-API-Key`。
 
 **限流**：Redis 分钟频次 / 日配额 / 并发流三档（默认 30 次/分、2000 次/日、3 条并发），按 `scene + user/visitor/ip` 分桶；超限 4029/429，Redis 故障时放行（fail-open）。SSE 在流结束（含异常/断连）时释放并发槽位。
+
+**对话埋点**：鉴权通过后、限流之前旁路写入 `chat_events`（全量，不受 `request_traces` 采样影响），记录 `trace_id`、场景、身份、`ext` 与消息长度；不存消息正文与 IP。被限流的请求同样留痕；写入失败只告警，不影响对话。首轮 `session_id` 与匿名 `visitor_id` 在进入 service 拿到真实会话/访客后按 `trace_id` 回填，旧值与无效值不会被写成 NULL（[U20](updates/20-single-tenant-degradation.md)）。
 
 **跨域**：嵌入页需在请求 URL 带 `?scene_code=` 或请求头带 `X-Scene-Code`（中间件不读 body）；Origin 必须在全局 `ALLOWED_ORIGINS` 或该场景 `allowed_origins` 中，未授权 preflight 返回 403/2003。
 
@@ -172,12 +191,11 @@ PATCH  /api/v1/admin/agents/{name}/toggle   # 启用/禁用（body: enabled；�
 GET    /api/v1/admin/scenes                         # 列表（含状态、Agent 数、路由模式、publish_key）
 GET    /api/v1/admin/scenes/options                 # 启用中的场景下拉（聊天入口/资源归属回显）
 POST   /api/v1/admin/scenes                         # 新建（code 全局唯一；默认场景标识保留）
-GET    /api/v1/admin/scenes/{id}                    # 详情（含 widget_config/allowed_origins/api_key_set）
+GET    /api/v1/admin/scenes/{id}                    # 详情（含 widget_config/allowed_origins；服务端 Key 见接入方管理）
 PATCH  /api/v1/admin/scenes/{id}                    # 编辑（默认场景只允许改展示名/描述）
 PUT    /api/v1/admin/scenes/{id}/agents             # 绑定 Agent（全量替换，顺序即路由候选顺序）
 GET    /api/v1/admin/scenes/{id}/agents             # 可绑定 Agent + 当前绑定状态
 PUT    /api/v1/admin/scenes/{id}/widget             # 嵌入配置/允许来源/发布开关
-POST   /api/v1/admin/scenes/{id}/rotate-key         # 轮换服务端 API key（明文仅本次响应）
 DELETE /api/v1/admin/scenes/{id}                    # 删除（默认场景不可删；有关联会话等→3002）
 ```
 
@@ -196,7 +214,27 @@ DELETE /api/v1/admin/scenes/{id}                    # 删除（默认场景不�
 - `allow_anonymous=true` 时若场景尚未发布则生成 `pk_...`；已有 `publish_key` 保持不变；`false` 时清空（已嵌入页面立即失效）；
 - 保存后立即失效 CORS 来源缓存，无需等待 TTL。
 
-`POST /rotate-key` 返回 `{"api_key": "sk_...", "api_key_set": true}`。库里只存 sha256；再次轮换后旧 key 立即失效。场景详情只回显 `api_key_set`，不返回哈希或明文。
+服务端 API Key 不再挂在场景上：场景只保留公开标识 `publish_key` 与来源白名单，调用凭证由接入方签发与吊销（后台菜单已隐藏，可直达 `/integrations`），见下节。
+
+## Admin · Integrations（接入方与 Key，require_admin）
+
+Key 的所有者是接入方（服务端调用方），场景只是被授权对象：一个接入方可持多把 Key（轮换过渡期新旧并存），
+停用接入方会让名下全部 Key 立即失效。访客按接入方划分命名空间，不同接入方下相同客户标识互不影响。
+
+```
+GET    /api/v1/admin/integrations                    # 列表（附 key_count 与已授权场景）
+POST   /api/v1/admin/integrations                    # 新建（名称唯一；scene_ids 需为已存在场景）
+GET    /api/v1/admin/integrations/{id}               # 详情（含 keys 尾号与场景）
+PUT    /api/v1/admin/integrations/{id}               # 更新名称/说明/状态/授权场景（不传 scene_ids 保持原授权）
+DELETE /api/v1/admin/integrations/{id}               # 删除（已有访客会话→3002，请改为停用）
+POST   /api/v1/admin/integrations/{id}/keys          # 签发 Key：明文仅本次响应出现，库里只存 sha256
+DELETE /api/v1/admin/integrations/{id}/keys/{key_id} # 吊销 Key（立即失效）
+```
+
+- Key 明文形如 `sk_...`，响应同时带 `hint`（尾号）供后台区分多把 Key；
+- `status=disabled` 后该接入方全部 Key 立即失效，重新启用即可恢复（Key 不删除）。
+
+> 单租户降级（U20）：后台菜单已隐藏本页，但接口与前端路由 `/integrations` 保留；默认接入方授权全部场景，新建场景自动授权给所有启用接入方。
 
 ## Admin · Router（路由分发器，只读，require_admin）
 

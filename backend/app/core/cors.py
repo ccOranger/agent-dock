@@ -31,7 +31,7 @@ _SCENE_PATH_RE = re.compile(r"^/api/v1/public/scenes/([^/]+)")
 _CORS_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
 _DEFAULT_HEADERS = (
     "Authorization, Content-Type, X-API-Key, X-Publish-Key, "
-    "X-Scene-Code, X-Trace-Id"
+    "X-Integration-Code, X-Scene-Code, X-Trace-Id"
 )
 
 # scene_code -> (过期时刻 monotonic, 允许来源)

@@ -76,6 +76,8 @@ interface PublicScene {
   allow_anonymous: boolean
   publish_key: string | null
   auth_modes: string[]
+  /** 匿名接入的归属信息；未带公开标识时为 null */
+  integration?: { code: string; name: string } | null
   widget: WidgetConfig
 }
 
@@ -93,6 +95,30 @@ interface VisitorIssued {
 
 const params = new URLSearchParams(window.location.search)
 const sceneCode = (params.get('scene') || '').trim()
+// 接入方公开标识：只用于匿名访客归属，不是安全凭证
+const integrationCode = (params.get('integration') || '').trim()
+// 自定义埋点：扁平 JSON，渠道等设备信息都作为其中的普通键（如 {"platform":"web"}）
+const extParam = params.get('ext') || ''
+
+function parseExt(raw: string): Record<string, string | number | boolean> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, string | number | boolean> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        out[key] = value
+      }
+    }
+    return out
+  } catch {
+    // 非法 JSON 静默忽略：埋点不能阻塞对话
+    return {}
+  }
+}
+
+const ext = parseExt(extParam)
 // 仅调试用：主站已登录客户可在 URL 带 token；嵌入场景默认匿名
 const customerToken = params.get('token') || ''
 
@@ -127,7 +153,8 @@ function closeWidget() {
 }
 
 function cacheKey(code: string) {
-  return `cs_embed_visitor_${code}`
+  // 同一场景可能被多个接入方嵌入：缓存键必须带接入方，否则会复用错命名空间的访客
+  return `cs_embed_visitor_${integrationCode || 'anon'}_${code}`
 }
 
 function loadVisitor(code: string): string {
@@ -173,6 +200,7 @@ async function init() {
   try {
     const info = await requestJSON<PublicScene>(
       `/api/v1/public/scenes/${encodeURIComponent(sceneCode)}`,
+      integrationCode ? { headers: { 'X-Integration-Code': integrationCode } } : undefined,
     )
     scene.value = info
     themeColor.value = info.widget?.theme_color || '#2b5aa0'
@@ -188,6 +216,7 @@ async function init() {
       if (!visitorId.value) {
         const headers: Record<string, string> = {}
         if (info.publish_key) headers['X-Publish-Key'] = info.publish_key
+        if (integrationCode) headers['X-Integration-Code'] = integrationCode
         const issued = await requestJSON<VisitorIssued>(
           `/api/v1/public/scenes/${encodeURIComponent(sceneCode)}/visitors`,
           { method: 'POST', headers },
@@ -244,11 +273,13 @@ function send() {
     token: customerToken || undefined,
     headers: {
       'X-Scene-Code': sceneCode,
+      ...(integrationCode ? { 'X-Integration-Code': integrationCode } : {}),
       ...(info?.publish_key ? { 'X-Publish-Key': info.publish_key } : {}),
     },
     body: {
       scene_code: sceneCode,
       message: text,
+      ...(Object.keys(ext).length ? { ext } : {}),
       ...(sessionId.value ? { session_id: sessionId.value } : {}),
       ...(visitorId.value ? { visitor_id: visitorId.value } : {}),
     },

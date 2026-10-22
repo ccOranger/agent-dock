@@ -1,8 +1,25 @@
 """各业务接口的请求/响应 Schema"""
+import json
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# 自定义埋点上下文：扁平标量、限键限长，避免客户端把 JSON 当垃圾桶
+EXT_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+EXT_MAX_KEYS = 10
+EXT_MAX_VALUE_CHARS = 128
+EXT_MAX_BYTES = 1024
+EXT_BLOCKED_KEYS = {
+    "token",
+    "password",
+    "authorization",
+    "secret",
+    "api_key",
+    "access_token",
+    "refresh_token",
+}
 
 
 # ===== Auth =====
@@ -53,6 +70,35 @@ class ChatRequest(BaseModel):
     client_msg_id: str | None = Field(default=None, max_length=64)
     message: str = Field(min_length=1, max_length=4000)
     stream: bool = True
+    # 自定义埋点上下文（扁平 JSON）：渠道等设备信息也统一放进来，原样存 ext
+    ext: dict[str, str | int | bool] | None = None
+
+    @field_validator("ext")
+    @classmethod
+    def _validate_ext(cls, value: dict | None) -> dict | None:
+        if value is None:
+            return None
+        if len(value) > EXT_MAX_KEYS:
+            raise ValueError(f"ext 最多 {EXT_MAX_KEYS} 个字段")
+        cleaned: dict[str, str | int | bool] = {}
+        for key, item in value.items():
+            if not EXT_KEY_RE.match(str(key)):
+                raise ValueError(f"ext 字段名不合法: {key}")
+            if str(key).lower() in EXT_BLOCKED_KEYS:
+                raise ValueError(f"ext 不允许包含敏感字段: {key}")
+            if isinstance(item, bool):
+                cleaned[key] = item
+            elif isinstance(item, int):
+                cleaned[key] = item
+            elif isinstance(item, str):
+                if len(item) > EXT_MAX_VALUE_CHARS:
+                    raise ValueError(f"ext.{key} 超长（最多 {EXT_MAX_VALUE_CHARS} 字符）")
+                cleaned[key] = item
+            else:
+                raise ValueError(f"ext.{key} 只支持字符串/整数/布尔值")
+        if len(json.dumps(cleaned, ensure_ascii=False)) > EXT_MAX_BYTES:
+            raise ValueError(f"ext 序列化后超过 {EXT_MAX_BYTES} 字节")
+        return cleaned
 
 
 class ChatMessageRequest(ChatRequest):

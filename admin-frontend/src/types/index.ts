@@ -498,8 +498,6 @@ export interface Scene {
   allowed_origins: string[]
   /** 嵌入组件外观；只含后台显式保存过的键，缺省值以后端为准 */
   widget_config?: Record<string, unknown>
-  /** 是否已配置服务端 API key（哈希不出后台接口） */
-  api_key_set?: boolean
   /** 启用中的绑定 Agent 数（停用的绑定不计入） */
   agent_count: number
   created_at?: string | null
@@ -543,12 +541,6 @@ export interface SceneWidgetPayload {
   allow_anonymous?: boolean
 }
 
-export interface SceneRotateKeyResult {
-  /** 一次性明文，关闭抽屉后无法再次查看 */
-  api_key: string
-  api_key_set: boolean
-}
-
 export interface SceneCreatePayload {
   code: string
   display_name: string
@@ -573,6 +565,61 @@ export interface SceneUpdatePayload {
   extra_router_prompt?: string | null
   /** 传了才全量替换绑定；顺序即路由候选顺序 */
   agent_ids?: string[]
+}
+
+// ===== 接入方（服务端调用身份：Key 归属 + 场景授权）=====
+export type IntegrationStatus = 'active' | 'disabled'
+
+/** 场景授权的最小展示信息：后台用它把 UUID 映射回可读名称 */
+export interface IntegrationSceneRef {
+  id: string
+  code: string
+  display_name: string
+}
+
+/** Key 只保留尾号：哈希不回后台，明文只在签发响应出现一次 */
+export interface IntegrationKeyInfo {
+  id: string
+  hint: string
+  created_at?: string | null
+}
+
+export interface Integration {
+  id: string
+  name: string
+  /** 公开标识：嵌入页 data-integration 携带，仅用于匿名访客归属，不是密钥 */
+  public_code: string
+  description?: string | null
+  /** disabled 后该接入方名下所有 Key 立即失效 */
+  status: IntegrationStatus
+  key_count: number
+  scenes: IntegrationSceneRef[]
+  /** 仅详情接口返回 */
+  keys?: IntegrationKeyInfo[]
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface IntegrationCreatePayload {
+  name: string
+  description?: string | null
+  /** 初始授权场景；不传等于暂不授权任何场景 */
+  scene_ids?: string[]
+}
+
+/** 未传 scene_ids 保持原授权；传空数组才清空 */
+export interface IntegrationUpdatePayload {
+  name?: string
+  description?: string | null
+  status?: IntegrationStatus
+  scene_ids?: string[]
+}
+
+export interface IntegrationKeyIssueResult {
+  id: string
+  /** 一次性明文：关闭弹窗后无法再次查看 */
+  api_key: string
+  hint: string
 }
 
 // ===== 高频固定话术（硬模板）=====

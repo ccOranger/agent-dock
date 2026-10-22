@@ -33,7 +33,6 @@ CREATE TABLE scenes (
     widget_config   JSONB NOT NULL DEFAULT '{}'::jsonb,   -- 标题/欢迎语/主题/位置等
     allowed_origins JSONB NOT NULL DEFAULT '[]'::jsonb,   -- 嵌入允许来源
     publish_key     VARCHAR(64),                          -- 前端嵌入公开标识（非密钥）
-    api_key_hash    VARCHAR(128),                         -- 服务端 API key 哈希
     metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -83,19 +82,67 @@ CREATE TABLE customer_users (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ========== 访客（匿名接入，按场景隔离） ==========
+-- ========== 接入方（服务端 API 调用的身份边界） ==========
+-- Key 挂接入方而不是场景：场景是业务维度，接入方是调用方维度。
+-- 同一场景可被多个接入方接入，靠接入方隔离访客身份命名空间。
+CREATE TABLE integrations (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(64) NOT NULL,
+    -- 公开标识：嵌入页用 data-integration 传回，用于匿名访客归属与命名空间；
+    -- 会出现在宿主页面源码里，不是安全凭证。
+    public_code     VARCHAR(32) NOT NULL
+                    DEFAULT ('ic_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 16)),
+    description     TEXT,
+    status          VARCHAR(16) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active','disabled')),
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_integrations_name UNIQUE (name),
+    CONSTRAINT uq_integrations_public_code UNIQUE (public_code)
+);
+CREATE INDEX IF NOT EXISTS idx_integrations_status ON integrations(status);
+
+-- 一个接入方可持有多把 Key（轮换过渡期新旧并存）；只存哈希，明文仅签发时回显
+CREATE TABLE integration_keys (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    integration_id  UUID NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+    key_hash        VARCHAR(128) NOT NULL,
+    hint            VARCHAR(16) NOT NULL DEFAULT '',        -- 尾号，后台识别用
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_integration_keys_key_hash UNIQUE (key_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_keys_integration
+    ON integration_keys(integration_id);
+
+-- 接入方 ↔ 场景授权：接入方只能调用被授权的场景
+CREATE TABLE integration_scenes (
+    integration_id  UUID NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+    scene_id        UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (integration_id, scene_id)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_scenes_scene ON integration_scenes(scene_id);
+
+-- ========== 访客（浏览器匿名按场景隔离，服务端接入再按接入方隔离） ==========
 CREATE TABLE visitors (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     scene_id        UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
-    external_key    VARCHAR(128),                         -- 宿主页面可传入的稳定标识（可选）
+    integration_id  UUID REFERENCES integrations(id) ON DELETE CASCADE,  -- NULL=浏览器匿名
+    external_key    VARCHAR(128),                         -- 宿主页面/接入方下传的稳定标识（可选）
     metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
     last_seen_at    TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    -- external_key 可空：空表示不做宿主侧归并，同一场景允许多个 NULL；
-    -- 非空时同一场景内唯一。默认 NULLS DISTINCT，正是这里需要的语义。
-    CONSTRAINT uq_visitors_scene_external UNIQUE (scene_id, external_key)
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- external_key 可空：空表示不做宿主侧归并，允许多个 NULL；
+-- 两类命名空间分开建部分唯一索引，避免 NULL 让 ON CONFLICT 失效：
+-- 1) 浏览器匿名（integration_id IS NULL）：按场景 + external_key 复用；
+-- 2) 服务端接入：按接入方 + 场景 + external_key 复用，不同接入方传相同 id 不会串号。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_visitors_anon_scene_external
+    ON visitors(scene_id, external_key) WHERE integration_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_visitors_integration_scene_external
+    ON visitors(integration_id, scene_id, external_key) WHERE integration_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_visitors_scene_last_seen ON visitors(scene_id, last_seen_at DESC);
 
 -- ========== Agent 元数据注册（代码托管 + 动态后台创建） ==========
@@ -359,6 +406,33 @@ CREATE INDEX IF NOT EXISTS idx_traces_agents ON request_traces USING gin (agent_
 CREATE INDEX IF NOT EXISTS idx_traces_tools ON request_traces USING gin (tool_names);
 CREATE INDEX IF NOT EXISTS idx_traces_mcp ON request_traces USING gin (mcp_server_names);
 
+-- ========== 对话埋点（全量记录，不受链路采样影响） ==========
+-- 一行 = 一次聊天请求；ext 是客户端声明的渠道/上下文（如 platform），只用于统计与软策略。
+-- tenant_id 预留给多租户：当前恒为 NULL，切换时由凭证解析后注入。
+CREATE TABLE IF NOT EXISTS chat_events (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trace_id        VARCHAR(64) NOT NULL DEFAULT '',
+    scene_code      VARCHAR(32) NOT NULL DEFAULT 'default',
+    session_id      UUID,
+    visitor_id      UUID,
+    user_id         UUID,
+    integration_id  UUID,
+    tenant_id       UUID,
+    ext             JSONB NOT NULL DEFAULT '{}'::jsonb,
+    message_chars   INT NOT NULL DEFAULT 0,
+    total_tokens    INT,                            -- 预留：LLM usage 采集后回填
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_events_scene_created
+    ON chat_events(scene_code, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_events_visitor_created
+    ON chat_events(visitor_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_events_integration_created
+    ON chat_events(integration_id, created_at DESC);
+-- 身份回填按 trace_id 定位请求行：无索引会随埋点增长退化为全表扫描
+CREATE INDEX IF NOT EXISTS idx_chat_events_trace
+    ON chat_events(trace_id);
+
 -- ========== 高频固定话术（硬模板，后台可维护） ==========
 -- scene_id NULL=全局（probing 等）；非空=场景覆盖。
 -- 同一 key 允许“全局一条 + 每个场景各一条”，运行时按场景优先合并。
@@ -387,5 +461,5 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     value       TEXT NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO schema_meta (key, value) VALUES ('version', '2')
+INSERT INTO schema_meta (key, value) VALUES ('version', '5')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

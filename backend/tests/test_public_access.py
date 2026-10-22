@@ -13,14 +13,15 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import admin_scenes as scenes_api
 from app.api.v1 import public as public_api
+from app.api.v1.chat import _resolve_and_authorize
 from app.core import cors as cors_mod
 from app.core import ratelimit as rl
 from app.core.config import settings
 from app.core.cors import SceneCORSMiddleware
 from app.core.exceptions import Forbidden, RateLimited, Unauthorized
-from app.models.repositories import AuditRepo, SceneRepo, VisitorRepo
+from app.models.repositories import AuditRepo, IntegrationRepo, SceneRepo, VisitorRepo
 from app.schemas.scene import SceneContext
-from app.services.scene_service import authorize_scene_access, hash_api_key
+from app.services.scene_service import authorize_scene_access
 
 PUBLIC_PATH = public_api.router.prefix  # /public/scenes
 ADMIN_PATH = scenes_api.router.prefix  # /admin/scenes
@@ -44,7 +45,6 @@ def _scene(**kw) -> SimpleNamespace:
         "widget_config": {},
         "allowed_origins": [],
         "publish_key": None,
-        "api_key_hash": None,
         "created_at": None,
         "updated_at": None,
     }
@@ -110,7 +110,6 @@ def test_public_scene_hides_orchestration(public_client, monkeypatch):
         "router_model",
         "router_mode",
         "extra_router_prompt",
-        "api_key_hash",
     }
     assert leaked.isdisjoint(data)
 
@@ -157,9 +156,10 @@ def test_issue_visitor_returns_external_key(public_client, monkeypatch):
     _install_scene(monkeypatch, scene)
     captured: dict = {}
 
-    async def fake_get_or_create(scene_id, external_key=None):
+    async def fake_get_or_create(scene_id, external_key=None, integration_id=None):
         captured["scene_id"] = str(scene_id)
         captured["external_key"] = external_key
+        captured["integration_id"] = integration_id
         return SimpleNamespace(id=uuid.uuid4())
 
     monkeypatch.setattr(VisitorRepo, "get_or_create", fake_get_or_create)
@@ -170,6 +170,77 @@ def test_issue_visitor_returns_external_key(public_client, monkeypatch):
     assert data["scene_code"] == "mall"
     assert captured["external_key"] == data["visitor_id"]
     assert captured["scene_id"] == str(scene.id)
+    assert captured["integration_id"] is None
+    assert data["integration_code"] is None
+
+
+def _install_integration(monkeypatch, integration) -> None:
+    async def resolve(raw):
+        return integration if raw == integration["public_code"] else None
+
+    monkeypatch.setattr(IntegrationRepo, "resolve_public_code", resolve)
+
+
+def test_public_scene_returns_integration_attribution(public_client, monkeypatch):
+    scene = _scene(publish_key="pk_demo")
+    _install_scene(monkeypatch, scene)
+    _install_integration(
+        monkeypatch,
+        {"id": "i-1", "name": "宿主 A", "public_code": "ic_a", "scene_ids": {str(scene.id)}},
+    )
+
+    data = public_client.get(
+        f"/api/v1{PUBLIC_PATH}/mall", headers={"X-Integration-Code": "ic_a"}
+    ).json()["data"]
+    assert data["integration"] == {"code": "ic_a", "name": "宿主 A"}
+
+    # 也支持 query 形式，便于 iframe 直接携带
+    via_query = public_client.get(
+        f"/api/v1{PUBLIC_PATH}/mall?integration=ic_a"
+    ).json()["data"]
+    assert via_query["integration"]["code"] == "ic_a"
+
+
+def test_public_scene_rejects_invalid_or_unauthorized_integration(public_client, monkeypatch):
+    scene = _scene(publish_key="pk_demo")
+    _install_scene(monkeypatch, scene)
+    _install_integration(
+        monkeypatch,
+        {"id": "i-1", "name": "宿主 A", "public_code": "ic_a", "scene_ids": set()},
+    )
+
+    invalid = public_client.get(
+        f"/api/v1{PUBLIC_PATH}/mall", headers={"X-Integration-Code": "ic_missing"}
+    )
+    assert invalid.status_code == 401
+
+    unauthorized = public_client.get(
+        f"/api/v1{PUBLIC_PATH}/mall", headers={"X-Integration-Code": "ic_a"}
+    )
+    assert unauthorized.status_code == 403
+    assert unauthorized.json()["detail"]["code"] == 2003
+
+
+def test_issue_visitor_binds_integration_namespace(public_client, monkeypatch):
+    scene = _scene(publish_key="pk_demo")
+    _install_scene(monkeypatch, scene)
+    _install_integration(
+        monkeypatch,
+        {"id": "i-1", "name": "宿主 A", "public_code": "ic_a", "scene_ids": {str(scene.id)}},
+    )
+    captured: dict = {}
+
+    async def fake_get_or_create(scene_id, external_key=None, integration_id=None):
+        captured.update(integration_id=integration_id, external_key=external_key)
+        return SimpleNamespace(id=uuid.uuid4())
+
+    monkeypatch.setattr(VisitorRepo, "get_or_create", fake_get_or_create)
+    resp = public_client.post(
+        f"/api/v1{PUBLIC_PATH}/mall/visitors", headers={"X-Integration-Code": "ic_a"}
+    )
+    assert resp.status_code == 200
+    assert captured["integration_id"] == "i-1"
+    assert resp.json()["data"]["integration_code"] == "ic_a"
 
 
 def test_issue_visitor_rejects_wrong_publish_key(public_client, monkeypatch):
@@ -206,11 +277,60 @@ def test_chat_allows_published_scene_anonymous():
     authorize_scene_access(_ctx(publish_key="pk_demo"), user=None)
 
 
-def test_chat_api_key_is_hashed_match():
-    scene = _ctx(api_key_hash=hash_api_key("sk_right"))
-    authorize_scene_access(scene, user=None, api_key="sk_right")
+def test_chat_api_key_resolves_to_authorized_integration():
+    scene = _ctx()
+    integration = {"id": "i-1", "name": "宿主 A", "scene_ids": {scene.scene_id}}
+    authorize_scene_access(scene, user=None, integration=integration)
+    # Key 有效但未被授权访问该场景：403，不降级为匿名
+    with pytest.raises(Forbidden):
+        authorize_scene_access(
+            scene, user=None, integration={"id": "i-2", "name": "宿主 B", "scene_ids": set()}
+        )
+
+
+def _request(**headers) -> SimpleNamespace:
+    return SimpleNamespace(headers={k.lower(): v for k, v in headers.items()})
+
+
+@pytest.mark.asyncio
+async def test_anonymous_public_code_resolves_integration(monkeypatch):
+    scene = _ctx(publish_key="pk_demo")
+    integration = {
+        "id": "i-1",
+        "name": "宿主 A",
+        "public_code": "ic_a",
+        "via": "public_code",
+        "scene_ids": {scene.scene_id},
+    }
+
+    async def resolve(raw):
+        return integration if raw == "ic_a" else None
+
+    monkeypatch.setattr(IntegrationRepo, "resolve_public_code", resolve)
+    got = await _resolve_and_authorize(_request(**{"X-Integration-Code": "ic_a"}), scene, None)
+    assert got["id"] == "i-1"
+
+
+@pytest.mark.asyncio
+async def test_anonymous_public_code_rejects_invalid_and_unauthorized(monkeypatch):
+    scene = _ctx(publish_key="pk_demo")
+
+    async def resolve(raw):
+        if raw != "ic_b":
+            return None
+        return {
+            "id": "i-2",
+            "name": "宿主 B",
+            "public_code": "ic_b",
+            "via": "public_code",
+            "scene_ids": set(),
+        }
+
+    monkeypatch.setattr(IntegrationRepo, "resolve_public_code", resolve)
     with pytest.raises(Unauthorized):
-        authorize_scene_access(scene, user=None, api_key="sk_wrong")
+        await _resolve_and_authorize(_request(**{"X-Integration-Code": "ic_missing"}), scene, None)
+    with pytest.raises(Forbidden):
+        await _resolve_and_authorize(_request(**{"X-Integration-Code": "ic_b"}), scene, None)
 
 
 def test_chat_wrong_publish_key_is_rejected():
@@ -433,7 +553,6 @@ def test_update_widget_normalizes_and_publishes(admin_client, monkeypatch):
     assert "unknown" not in data["widget_config"]
     assert data["allowed_origins"] == ["https://mall.example.com"]
     assert data["publish_key"].startswith("pk_")
-    assert data["api_key_set"] is False
 
 
 def test_update_widget_keeps_existing_publish_key(admin_client, monkeypatch):
@@ -463,18 +582,3 @@ def test_update_widget_rejects_bad_origin(admin_client, monkeypatch):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == 1001
-
-
-def test_rotate_key_returns_plaintext_once(admin_client, monkeypatch):
-    scene = _scene()
-    _install_scene(monkeypatch, scene)
-    resp = admin_client.post(f"{ADMIN_PATH}/{scene.id}/rotate-key")
-    assert resp.status_code == 200
-    raw = resp.json()["data"]["api_key"]
-    assert raw.startswith("sk_")
-    assert scene.api_key_hash == hash_api_key(raw)
-    # 之后的场景详情只回显“已配置”，不再出现明文或哈希
-    detail = admin_client.get(f"{ADMIN_PATH}/{scene.id}").json()["data"]
-    assert detail["api_key_set"] is True
-    assert "api_key_hash" not in detail
-    assert raw not in str(detail)

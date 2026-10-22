@@ -18,6 +18,7 @@
         <el-menu-item index="/scenes" v-if="isAdmin">
           <span>业务场景</span>
         </el-menu-item>
+        <!-- 单租户降级：接入方入口隐藏；路由 /integrations 保留可直达，能力不删 -->
         <el-menu-item index="/agents" v-if="isAdmin">
           <span>Agent 管理</span>
         </el-menu-item>

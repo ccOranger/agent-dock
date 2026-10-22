@@ -50,7 +50,10 @@
 
     <script>
       (function () {
-        var scene = new URLSearchParams(window.location.search).get('scene');
+        var params = new URLSearchParams(window.location.search);
+        var scene = params.get('scene');
+        var integration = params.get('integration');
+        var ext = params.get('ext');
         var missing = document.createElement('p');
         missing.style.padding = '0 24px';
         if (!scene) {
@@ -61,6 +64,8 @@
         var script = document.createElement('script');
         script.src = '/widget.js';
         script.setAttribute('data-scene', scene);
+        if (integration) script.setAttribute('data-integration', integration);
+        if (ext) script.setAttribute('data-ext', ext);
         document.body.appendChild(script);
       })();
     </script>

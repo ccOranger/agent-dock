@@ -4,6 +4,7 @@
 - 不能改 code / 路由模式 / 绑定 Agent，避免把「无 code 请求」打到一个业务 Agent 上；
 - 不能停用、不能删除。
 """
+import logging
 import secrets
 import uuid
 
@@ -13,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import require_admin, require_staff
 from app.core.cors import invalidate_origin_cache
 from app.core.exceptions import Conflict, NotFound, ParamError
-from app.models.repositories import AgentRepo, AuditRepo, SceneRepo
+from app.models.repositories import AgentRepo, AuditRepo, IntegrationRepo, SceneRepo
 from app.schemas.common import ApiResponse
 from app.schemas.scene import DEFAULT_SCENE_CODE, SceneStatus
 from app.schemas.scene_admin import (
@@ -22,10 +23,11 @@ from app.schemas.scene_admin import (
     SceneUpdate,
     SceneWidgetUpdate,
 )
-from app.services.scene_service import hash_api_key
 from app.services.widget_config import normalize_origins, normalize_widget_config
 
 router = APIRouter(prefix="/admin/scenes", tags=["admin-scenes"])
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_READONLY_HINT = "默认场景只允许修改展示名与描述"
 
@@ -114,6 +116,11 @@ async def create_scene(body: SceneCreate, user=Depends(require_admin)):
     )
     if agent_ids:
         await SceneRepo.set_agents(scene.id, agent_ids)
+    # 单租户降级：新场景自动授权给全部接入方，避免已有 Key 调用新场景 403
+    try:
+        await IntegrationRepo.grant_scene_to_all(scene.id)
+    except Exception as exc:  # noqa: BLE001 - 授权失败不回滚已创建的场景
+        logger.warning(f"新场景自动授权接入方失败（不影响场景创建）: {exc}")
     await AuditRepo.write(
         "scene.create", user_id=user.id, target_type="scene", target_id=str(scene.id)
     )
@@ -221,21 +228,6 @@ async def update_scene_widget(
         target_id=str(scene.id),
     )
     return ApiResponse(data=SceneRepo.to_dict(scene))
-
-
-@router.post("/{scene_id}/rotate-key", response_model=ApiResponse[dict])
-async def rotate_scene_api_key(scene_id: str, user=Depends(require_admin)):
-    """轮换服务端接入 key：明文只在本次响应出现一次，库里只存 sha256。"""
-    scene = await _get_scene_or_404(scene_id)
-    raw = f"sk_{secrets.token_urlsafe(32)}"
-    await SceneRepo.update(scene.id, api_key_hash=hash_api_key(raw))
-    await AuditRepo.write(
-        "scene.rotate_key",
-        user_id=user.id,
-        target_type="scene",
-        target_id=str(scene.id),
-    )
-    return ApiResponse(data={"api_key": raw, "api_key_set": True})
 
 
 @router.delete("/{scene_id}", response_model=ApiResponse[dict])

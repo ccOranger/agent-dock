@@ -15,12 +15,35 @@
 - **业务场景**：`scenes` + `scene_agents`；对外仍是 `/chat/stream`，用 `scene_code` 区分场景，无码请求落默认场景（固定 `default_assistant` 直连，不路由）。
 - **场景隔离**：话术、知识库、会话、记忆、链路全部带场景维度。话术 `scene_id NULL` 为全局，同 key 场景行覆盖全局；知识库 `scene_id NULL` 为平台共享，`search_all` 只覆盖本场景归属库；跨场景复用 `session_id` 返回 404。
 - **场景路由档案**：由场景配置 + Agent 池 + 全局模板派生的只读视图（direct / llm / unconfigured、候选、警告、`prompt_hash`），后台可查看详情、提示词并试运行；路由不是独立实体。
-- **公开接入**：`GET /public/scenes/{code}` 下发展示配置与鉴权方式，`POST /public/scenes/{code}/visitors` 签发匿名访客；聊天鉴权支持客户 Token / `X-API-Key` / `X-Publish-Key` / 已发布匿名四种方式。
+- **公开接入**：`GET /public/scenes/{code}` 下发展示配置与鉴权方式，`POST /public/scenes/{code}/visitors` 签发匿名访客；聊天鉴权支持客户 Token / `X-API-Key`（接入方 Key）/ `X-Publish-Key` / 已发布匿名四种方式。
 - **动态 CORS**：按场景 `allowed_origins` 校验跨域（全局 `ALLOWED_ORIGINS` 继续放行自有前端）；场景码从路径、`?scene_code=` 或 `X-Scene-Code` 解析，preflight 未授权 403/2003，带 TTL 缓存与主动失效。
 - **限流**：按 `scene + user/visitor/ip` 分桶的分钟频次 / 日配额 / 并发流（默认 30 / 2000 / 3），Redis 故障 fail-open，SSE 结束释放并发槽。
 - **嵌入组件**：`embed.html` 独立 Vite 入口（不引入 Element Plus）+ `public/widget.js` 一行 script；气泡 + iframe 隔离宿主样式，主题/标题/欢迎语由后台下发，移动端全屏，postMessage 驱动关闭与未读角标。
-- **后台场景化**：场景管理、接入抽屉（外观、允许来源、匿名开关、嵌入代码、实时预览、key 换发）、路由档案页；话术 / 知识库 / 链路 / 咨询列表均增加场景维度。
+- **后台场景化**：场景管理、接入抽屉（外观、允许来源、匿名开关、嵌入代码、实时预览）、路由档案页；话术 / 知识库 / 链路 / 咨询列表均增加场景维度；服务端 Key 统一在「接入方管理」签发与吊销。
 - **初始化**：`scripts/init_db.sql` 作为唯一 DDL 源；`rebuild_and_seed.py` 支持 `SEED_DEMO=false`（生产初始化，随机管理员密码）与 `true`（演示数据）两种模式；不做旧库迁移，重建后校验行数。
+- **演示种子场景**：`SEED_DEMO=true` 时额外创建 `customer_service` 客服场景（LLM 路由到投诉处理 / 通用知识问答 / 订单服务三个动态 Agent），并创建演示接入方（公开标识 `ic_demo_customer_service`）授权该场景，便于验证匿名归属。
+
+### 新增：接入方与 Key 归属（U18）
+
+- **接入方实体**：新增 `integrations` / `integration_keys` / `integration_scenes`，服务端 Key 从场景迁到接入方：一个接入方可持多把 Key（轮换期新旧并存）并被授权到多个场景，可独立轮换/吊销而不影响其他调用方。
+- **鉴权语义**：`X-API-Key` 按 `key_hash` 反查启用中的接入方，Key 无效/接入方停用返回 401（不降级为匿名），Key 有效但目标场景未授权返回 403。
+- **访客命名空间**：`visitors` 增加 `integration_id`，按「接入方 + 场景 + `external_key`」隔离；不同接入方传入相同客户标识不再串会话与记忆（两个 PostgreSQL 部分唯一索引避开 NULL）。
+- **后台与接口**：新增 `/api/v1/admin/integrations` CRUD 与 Key 签发/吊销接口、后台「接入方管理」页；更新时未传 `scene_ids` 保持原授权，有访客的接入方禁止删除（409）。
+
+### 新增：匿名接入的接入方归属（U19）
+
+- **公开标识**：`integrations` 增加 `public_code`（`ic_xxx`，唯一），后台「接入方管理」展示并可复制；它是公开归属标识，不是密钥。
+- **匿名归属**：嵌入组件新增 `data-integration`，公开配置、访客签发与聊天请求统一带 `X-Integration-Code`（公开配置也支持 `?integration=`）；带标识签发的匿名访客写入 `integration_id`，同一场景下不同接入方互不干扰。
+- **拒绝语义**：公开标识无效 401、接入方未授权场景 403、场景未开放匿名 401，不降级为匿名池；登录客户优先，带客户 token 时不解析公开标识。
+- **后台接入抽屉**：场景接入配置增加「归属接入方」选择，生成的嵌入代码与实时预览自动带 `data-integration`。
+- **统计基础**：匿名访客可按 `integration_id` 归属，后续可通过 `request_traces.visitor_id → visitors.integration_id` 聚合各接入方的 LLM token 使用。
+
+### 变更：单租户降级与自定义埋点（U20）
+
+- **单租户降级**：后台隐藏「接入方管理」菜单与场景接入抽屉的「归属接入方 / 服务端 Key」，生成的嵌入代码不再带 `data-integration`；演示种子改为唯一「默认接入方」（`ic_default`）并授权全部场景，新建场景自动授权所有启用接入方，已签发的 Key 继续可用。入口 `/integrations` 与后端接口保留，改回 `SHOW_INTEGRATION_UI` 即可恢复。
+- **自定义埋点入参**：`ChatRequest.ext` 接收扁平 JSON（≤10 键、仅标量、≤1KB、敏感键拒绝），原样存入 `chat_events.ext`；嵌入组件支持 `data-ext`，`widget.js` 透传到 iframe。渠道等设备信息不单建列，作为 `ext` 的普通键（如 `platform`）传入。
+- **埋点表**：新增 `chat_events`（全量、不受 trace 采样影响；预留 `tenant_id` / `total_tokens`，不存消息正文与 IP），对话入口在鉴权后、限流前旁路写入，失败只告警；进入 service 拿到真实会话后按 `trace_id` 回填 `session_id` / `visitor_id`，首轮与匿名请求也能按会话/访客聚合。
+- ⚠️ `SCHEMA_VERSION` 由 `4` 升到 `5`（新增 `chat_events`），旧库需执行 `scripts/rebuild_and_seed.py` 全量重建。
 
 ### 移除：场景包机制
 
@@ -32,6 +55,9 @@
 - 默认场景只绑定 `default_assistant`，不再挂全部代码 Agent；业务 Agent 通过场景绑定进入候选。
 - 旧路径 `GET /admin/router` 与 `/admin/router/prompt` 保留为全局视图别名，计划 v0.3 移除。
 - 两个前端 vite 支持 `VITE_API_TARGET`（默认 `http://localhost:8000`），嵌入地址可用 `VITE_EMBED_URL` 覆盖（默认复用 `VITE_PUBLIC_CHAT_URL`）。
+- ⚠️ 场景级服务端 Key 下线：删除 `scenes.api_key_hash` 与 `POST /api/v1/admin/scenes/{id}/rotate-key`，场景详情不再回显 `api_key_set`；旧 Key 无法自动映射到接入方，重建后需在「接入方管理」重新签发。
+- ⚠️ `SCHEMA_VERSION` 由 `2` 升到 `3`（新增三张表、`visitors.integration_id` 与两个部分唯一索引），旧库需执行 `scripts/rebuild_and_seed.py` 全量重建。
+- ⚠️ `SCHEMA_VERSION` 由 `3` 升到 `4`（`integrations.public_code` 与唯一约束），旧库同样需全量重建。
 
 ### 修复
 

@@ -302,9 +302,11 @@ async def test_actor_prefers_logged_in_user():
 
 @pytest.mark.asyncio
 async def test_actor_visitor_is_created_in_scene(monkeypatch):
-    async def get_or_create(scene_id, external_key=None):
+    async def get_or_create(scene_id, external_key=None, integration_id=None):
         assert str(scene_id) == DEFAULT_SCENE_ID
         assert external_key == "browser-key"
+        # 不带 X-API-Key 的嵌入访客落在匿名命名空间
+        assert integration_id is None
         return SimpleNamespace(id=uuid.uuid4())
 
     monkeypatch.setattr(VisitorRepo, "get_or_create", get_or_create)
@@ -319,6 +321,35 @@ async def test_actor_visitor_is_created_in_scene(monkeypatch):
     actor = await ChatService._resolve_actor(ctx, None, "browser-key")
     assert actor.type is ActorType.VISITOR
     assert actor.key.startswith("visitor:")
+
+
+@pytest.mark.asyncio
+async def test_actor_visitor_uses_integration_namespace(monkeypatch):
+    captured: dict = {}
+
+    async def get_or_create(scene_id, external_key=None, integration_id=None):
+        captured.update(
+            scene_id=str(scene_id), external_key=external_key, integration_id=integration_id
+        )
+        return SimpleNamespace(id=uuid.uuid4())
+
+    monkeypatch.setattr(VisitorRepo, "get_or_create", get_or_create)
+    ctx = SceneContext(
+        scene_id=DEFAULT_SCENE_ID,
+        code=DEFAULT_SCENE_CODE,
+        is_default=True,
+        router_mode="direct",
+        agent_names=("default_assistant",),
+        direct_agent="default_assistant",
+    )
+    actor = await ChatService._resolve_actor(ctx, None, "cust-42", "i-1")
+    # 带接入方时，同一客户标识落在该接入方的命名空间
+    assert captured == {
+        "scene_id": DEFAULT_SCENE_ID,
+        "external_key": "cust-42",
+        "integration_id": "i-1",
+    }
+    assert actor.type is ActorType.VISITOR
 
 
 # ===== SceneRepo.set_agents 的事务归属 =====

@@ -29,6 +29,8 @@ from app.models.entities import (  # noqa: E402
     CannedScript,
     CustomerUser,
     Document,
+    Integration,
+    IntegrationScene,
     Scene,
     SceneAgent,
     StaffUser,
@@ -208,6 +210,18 @@ DEMO_DYNAMIC_AGENTS = [
         ],
     },
 ]
+
+# 演示场景：客服场景（LLM 路由到投诉 / 知识问答 / 订单三个动态 Agent，仅 SEED_DEMO=true 写入）
+DEMO_SCENE_ID = "00000000-0000-0000-0000-000000000002"
+DEMO_SCENE_CODE = "customer_service"
+DEMO_SCENE_NAME = "客服场景"
+DEMO_SCENE_DESCRIPTION = "演示用客服场景：投诉处理 / 通用知识问答 / 订单服务三个 Agent 按 LLM 路由"
+DEMO_SCENE_AGENT_NAMES = ("complaint_handler", "knowledge_qa", "order_service")
+# 单租户降级：保留唯一默认接入方作为 Key 容器，授权全部场景；嵌入代码不再传 data-integration
+DEMO_INTEGRATION_ID = "00000000-0000-0000-0000-000000000003"
+DEMO_INTEGRATION_NAME = "默认接入方"
+DEMO_INTEGRATION_PUBLIC_CODE = "ic_default"
+DEMO_INTEGRATION_DESCRIPTION = "单租户默认接入方：持有 API Key 并授权全部场景；多接入方/多租户时再启用"
 
 
 def _custom_tool_seed(name: str) -> dict:
@@ -605,6 +619,68 @@ async def main() -> None:
                         sort_order=0,
                     )
                 )
+
+        # 演示场景：客服场景（仅 SEED_DEMO=true），绑定三个演示动态 Agent
+        if DEMO_MODE:
+            demo_scene = (
+                await db.execute(select(Scene).where(Scene.code == DEMO_SCENE_CODE))
+            ).scalar_one_or_none()
+            if demo_scene is None:
+                demo_scene = Scene(
+                    id=uuid.UUID(DEMO_SCENE_ID),
+                    code=DEMO_SCENE_CODE,
+                    display_name=DEMO_SCENE_NAME,
+                    description=DEMO_SCENE_DESCRIPTION,
+                    router_mode="llm",
+                )
+                db.add(demo_scene)
+                await db.flush()
+            for order, agent_name in enumerate(DEMO_SCENE_AGENT_NAMES):
+                agent = (
+                    await db.execute(
+                        select(AgentMeta).where(
+                            AgentMeta.name == agent_name, AgentMeta.scene_id.is_(None)
+                        )
+                    )
+                ).scalar_one_or_none()
+                if agent is None:
+                    continue
+                link = await db.get(SceneAgent, (demo_scene.id, agent.id))
+                if link is None:
+                    db.add(
+                        SceneAgent(
+                            scene_id=demo_scene.id,
+                            agent_id=agent.id,
+                            enabled=True,
+                            sort_order=order,
+                        )
+                    )
+
+            # 单租户降级：默认接入方授权全部场景，已有 Key 调用任意场景都不会 403
+            demo_integration = (
+                await db.execute(
+                    select(Integration).where(Integration.name == DEMO_INTEGRATION_NAME)
+                )
+            ).scalar_one_or_none()
+            if demo_integration is None:
+                demo_integration = Integration(
+                    id=uuid.UUID(DEMO_INTEGRATION_ID),
+                    name=DEMO_INTEGRATION_NAME,
+                    public_code=DEMO_INTEGRATION_PUBLIC_CODE,
+                    description=DEMO_INTEGRATION_DESCRIPTION,
+                )
+                db.add(demo_integration)
+                await db.flush()
+            all_scene_ids = (await db.execute(select(Scene.id))).scalars().all()
+            for scene_id in all_scene_ids:
+                link = await db.get(IntegrationScene, (demo_integration.id, scene_id))
+                if link is None:
+                    db.add(
+                        IntegrationScene(
+                            integration_id=demo_integration.id,
+                            scene_id=scene_id,
+                        )
+                    )
         await db.commit()
     demo_tag = "（演示模式）" if DEMO_MODE else ""
     print(
@@ -616,6 +692,11 @@ async def main() -> None:
     )
     if DEMO_MODE:
         print("   演示账号：admin/Admin@123、service01/Agent@123、alice/Alice@123")
+        print(f"   演示场景：{DEMO_SCENE_CODE}（{DEMO_SCENE_NAME}，3 个 Agent LLM 路由）")
+        print(
+            f"   默认接入方：{DEMO_INTEGRATION_NAME}（{DEMO_INTEGRATION_PUBLIC_CODE}），"
+            "已授权全部场景；嵌入代码无需传 data-integration"
+        )
     elif ADMIN_USERNAME in created_staff:
         print("=" * 64)
         print(f"已创建管理员：{ADMIN_USERNAME}")

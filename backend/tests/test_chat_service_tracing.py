@@ -32,9 +32,18 @@ class FakeSession:
         self.last_route_to = "order_service"
         # 与真实 ORM 默认值保持一致：新建会话标题是占位值，等待首条消息自动补全
         self.title = "新对话"
+        self.attached: list[dict] = []
 
 
-def _install_fakes(monkeypatch, *, events, inserted: list, raiser: Exception | None = None, outcome=OUTCOME_ANSWERED):
+def _install_fakes(
+    monkeypatch,
+    *,
+    events,
+    inserted: list,
+    raiser: Exception | None = None,
+    outcome=OUTCOME_ANSWERED,
+    attach_raiser: Exception | None = None,
+):
     sess = FakeSession()
 
     class FakeDB:
@@ -69,12 +78,18 @@ def _install_fakes(monkeypatch, *, events, inserted: list, raiser: Exception | N
             raise raiser
         inserted.append(row)
 
+    async def fake_attach_identity(**kwargs):
+        if attach_raiser:
+            raise attach_raiser
+        sess.attached.append(kwargs)
+
     monkeypatch.setattr(cs_mod, "SessionLocal", FakeSessionFactory())
     monkeypatch.setattr(cs_mod, "resolve_scene", fake_resolve_scene)
     monkeypatch.setattr(cs_mod.SessionRepo, "get_or_create_for_actor", fake_get_or_create_for_actor)
     monkeypatch.setattr(cs_mod.MessageRepo, "add", fake_add)
     monkeypatch.setattr(cs_mod.MessageRepo, "list_recent", fake_list_recent)
     monkeypatch.setattr(cs_mod.TraceRepo, "insert", fake_insert)
+    monkeypatch.setattr(cs_mod.ChatEventRepo, "attach_identity", fake_attach_identity)
 
     service = ChatService()
 
@@ -147,6 +162,9 @@ async def test_stream_persists_trace_and_returns_trace_id(monkeypatch):
     assert row["outcome"] == "answered"
     # 前端拿到 trace_id 才能跳到链路详情
     assert done == {"message_id": "4" * 32, "trace_id": "abcd1234abcd1234"}
+    # 埋点已在进入 service 前写入，这里按 trace_id 回填首轮真实会话
+    assert sess.attached[0]["trace_id"] == "abcd1234abcd1234"
+    assert sess.attached[0]["session_id"] == sess.id
 
 
 @pytest.mark.asyncio
@@ -268,8 +286,49 @@ async def test_reply_aggregates_and_persists_trace(monkeypatch):
     assert result["routed_to"] == "order_service"
     assert inserted[0]["trace_id"] == "reply-trace"
     assert inserted[0]["response_chars"] == len("已发货")
+    assert sess.attached[0]["trace_id"] == "reply-trace"
     # 追问续接：上一轮 Agent 被透传给路由
     assert sess.last_route_to == "order_service"
+
+
+@pytest.mark.asyncio
+async def test_stream_attaches_visitor_identity(monkeypatch):
+    """匿名访客的 visitor_id 是 v_xxx（external_key），回填时必须换成 visitors.id。"""
+    inserted: list[dict] = []
+    service, sess = _install_fakes(
+        monkeypatch, events=[{"type": "text", "data": {"content": "x"}}], inserted=inserted
+    )
+    sess.user_id = None
+    sess.visitor_id = "33333333-3333-3333-3333-333333333333"
+    await _drain(
+        service.stream(
+            user_id=None, visitor_id="v_demo", session_id=None, message="x", trace_id="tid-visitor"
+        )
+    )
+    assert sess.attached == [
+        {
+            "trace_id": "tid-visitor",
+            "session_id": sess.id,
+            "visitor_id": sess.visitor_id,
+            "user_id": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_attach_failure_does_not_break_stream(monkeypatch):
+    """回填是旁路：DB 失败只能告警，对话照常收尾。"""
+    inserted: list[dict] = []
+    service, sess = _install_fakes(
+        monkeypatch,
+        events=[{"type": "text", "data": {"content": "x"}}],
+        inserted=inserted,
+        attach_raiser=RuntimeError("db down"),
+    )
+    chunks = await _drain(
+        service.stream(user_id=sess.user_id, session_id=None, message="x", trace_id="tid-fail")
+    )
+    assert _payload(chunks[-1], "done")["trace_id"] == "tid-fail"
 
 
 @pytest.mark.asyncio

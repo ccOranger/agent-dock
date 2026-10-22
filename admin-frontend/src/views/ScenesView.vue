@@ -225,12 +225,7 @@
     </template>
   </el-drawer>
 
-  <el-drawer
-    v-model="embedVisible"
-    :title="embedTitle"
-    size="760px"
-    @closed="rotatedKey = ''"
-  >
+  <el-drawer v-model="embedVisible" :title="embedTitle" size="760px">
     <div v-loading="embedLoading" class="embed-body">
       <el-alert
         type="info"
@@ -293,41 +288,59 @@
           <el-button link size="small" @click="copyText(embedForm.publish_key)">复制</el-button>
           <div class="rule-tip">公开标识，会下发给嵌入组件；真正防滥用靠来源白名单与限流。</div>
         </el-form-item>
-        <el-form-item label="服务端 Key">
-          <el-tag size="small" :type="embedForm.api_key_set ? 'success' : 'info'">
-            {{ embedForm.api_key_set ? '已配置' : '未配置' }}
-          </el-tag>
-          <el-button
-            link
-            type="warning"
-            size="small"
-            style="margin-left: 8px"
-            :loading="rotating"
-            @click="rotateKey"
-          >换发 Key</el-button>
-          <div v-if="rotatedKey" class="rotate-result">
-            <code>{{ rotatedKey }}</code>
-            <el-button link size="small" @click="copyText(rotatedKey)">复制</el-button>
-            <div class="rule-tip">明文只显示这一次，换发后旧 Key 立即失效。</div>
+        <el-form-item v-if="SHOW_INTEGRATION_UI" label="归属接入方">
+          <el-select
+            v-model="embedForm.integrationCode"
+            clearable
+            placeholder="不指定（落在场景级匿名池）"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in embedIntegrations"
+              :key="item.id"
+              :label="integrationOptionLabel(item)"
+              :value="item.public_code"
+            />
+          </el-select>
+          <div class="rule-tip">
+            匿名访客按此归属到接入方，便于 token 统计与后续定制；公开标识不是密钥。
+            需先在接入方管理里授权当前场景。
           </div>
+        </el-form-item>
+        <el-form-item v-if="SHOW_INTEGRATION_UI" label="服务端 Key">
+          <span class="rule-tip embed-inline">
+            服务端调用凭证按接入方统一管理：一个接入方可持多把 Key，并被授权到多个场景。
+          </span>
+          <el-button link type="primary" size="small" @click="goIntegrations">去接入方管理</el-button>
         </el-form-item>
       </el-form>
 
-      <el-divider content-position="left">嵌入代码</el-divider>
-      <div class="embed-item">
-        <div class="embed-item-title">悬浮气泡（推荐）</div>
-        <div class="rule-tip">
-          整站生效：在左下 / 右下悬浮气泡，点击展开对话窗；位置跟随上方「气泡位置」。
+      <el-divider content-position="left">接入方式</el-divider>
+      <div class="track-params">
+        <div class="track-row">
+          <span class="track-label">埋点 ext</span>
+          <el-input
+            v-model="trackExtText"
+            size="small"
+            style="width: 330px"
+            placeholder='data-ext JSON，如 {"platform":"web","channel":"purchase"}'
+          />
         </div>
-        <div class="embed-code">
-          <pre>{{ embedSnippet }}</pre>
-          <el-button size="small" @click="copyText(embedSnippet)">复制 script 代码</el-button>
+        <div class="rule-tip">
+          只用来生成下面四段代码里的 data-ext 与请求体 ext，不写进场景配置；
+          渠道等设备信息直接作为 ext 的普通键（如 platform），服务端不单独建列。
+          ext 为扁平 JSON：最多 10 个字段，字段名小写字母开头，值只能是字符串/整数/布尔，
+          不能出现 token/secret 等敏感键；它只是客户端声明，不参与身份、隔离与限流。
+          <span v-if="trackExtError" class="track-error">当前：{{ trackExtError }}</span>
         </div>
       </div>
-      <div class="embed-item">
-        <div class="embed-item-title">直接内嵌聊天窗（不悬浮）</div>
-        <div class="rule-tip">适合独立客服页面：固定尺寸内嵌对话窗，不出现气泡。</div>
-        <pre class="embed-pre">{{ iframeSnippet }}</pre>
+      <div v-for="item in accessMethods" :key="item.key" class="embed-item">
+        <div class="embed-item-title">{{ item.title }}</div>
+        <div class="rule-tip">{{ item.tip }}</div>
+        <div class="embed-code">
+          <pre>{{ item.code }}</pre>
+          <el-button size="small" @click="copyText(item.code)">{{ item.copyLabel }}</el-button>
+        </div>
       </div>
 
       <el-divider content-position="left">效果预览</el-divider>
@@ -345,19 +358,21 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   apiCreateScene,
   apiDeleteScene,
   apiGetScene,
+  apiListIntegrations,
   apiListScenes,
-  apiRotateSceneKey,
   apiSceneAgentOptions,
   apiSetSceneAgents,
   apiUpdateScene,
   apiUpdateSceneWidget,
 } from '@/api'
 import type {
+  Integration,
   Scene,
   SceneAgentOption,
   SceneCreatePayload,
@@ -365,6 +380,8 @@ import type {
   SceneStatus,
   SceneUpdatePayload,
 } from '@/types'
+
+const router = useRouter()
 
 const ROUTER_MODE_LABELS: Record<SceneRouterMode, string> = {
   auto: '自动',
@@ -607,6 +624,7 @@ async function saveBind() {
 interface EmbedForm {
   sceneId: string
   sceneCode: string
+  integrationCode: string
   title: string
   welcome: string
   placeholder: string
@@ -616,7 +634,6 @@ interface EmbedForm {
   originsText: string
   allow_anonymous: boolean
   publish_key: string
-  api_key_set: boolean
 }
 
 // 与后端 DEFAULT_WIDGET_CONFIG 对齐：只在场景没有覆盖值时使用
@@ -626,16 +643,21 @@ const embedDefaults = {
   theme_color: '#2b5aa0',
 }
 
+// 单租户降级：接入方相关入口在后台隐藏，嵌入代码不再带 data-integration；
+// 恢复多接入方/多租户时把开关改回 true 即可，后端能力未删。
+const SHOW_INTEGRATION_UI = false
+
 const embedVisible = ref(false)
 const embedLoading = ref(false)
 const embedSaving = ref(false)
-const rotating = ref(false)
 const embedScene = ref<Scene | null>(null)
-const rotatedKey = ref('')
+// 仅列出已授权当前场景且启用中的接入方
+const embedIntegrations = ref<Integration[]>([])
 
 const embedForm = reactive<EmbedForm>({
   sceneId: '',
   sceneCode: '',
+  integrationCode: '',
   title: '',
   welcome: embedDefaults.welcome,
   placeholder: embedDefaults.placeholder,
@@ -645,7 +667,6 @@ const embedForm = reactive<EmbedForm>({
   originsText: '',
   allow_anonymous: false,
   publish_key: '',
-  api_key_set: false,
 })
 
 const embedTitle = computed(() =>
@@ -661,29 +682,177 @@ const embedBase = computed(() => {
   )
 })
 
+const integrationParam = computed(() =>
+  SHOW_INTEGRATION_UI && embedForm.integrationCode
+    ? `&integration=${encodeURIComponent(embedForm.integrationCode)}`
+    : '',
+)
+
 const previewUrl = computed(() =>
   embedForm.sceneCode
-    ? `${embedBase.value}/embed.html?scene=${encodeURIComponent(embedForm.sceneCode)}`
+    ? `${embedBase.value}/embed.html?scene=${encodeURIComponent(embedForm.sceneCode)}${integrationParam.value}`
     : 'about:blank',
 )
 
 // 预览用模拟宿主页：真实加载 widget.js，能直接看到气泡悬浮在哪一侧
 const bubblePreviewUrl = computed(() =>
   embedForm.sceneCode
-    ? `${embedBase.value}/embed-preview.html?scene=${encodeURIComponent(embedForm.sceneCode)}`
+    ? `${embedBase.value}/embed-preview.html?scene=${encodeURIComponent(embedForm.sceneCode)}${integrationParam.value}`
     : 'about:blank',
 )
 
-const embedSnippet = computed(() => {
-  // 拼接结束标签，避免 SFC 解析器把它当成 script 块结尾
-  const close = '<' + '/script>'
-  return `<script src="${embedBase.value}/widget.js" data-scene="${embedForm.sceneCode}">${close}`
+// ===== 接入方式四选一：代码示例里的埋点 ext（只生成代码，不写进场景配置） =====
+// 渠道等设备信息不单独建字段，直接作为 ext 的普通键传入
+const trackExtText = ref('{"platform":"web","channel":"purchase"}')
+
+type TrackExt = Record<string, string | number | boolean>
+
+/** 与后端 ext 契约同构的前端预校：非法时不把它写进示例代码。 */
+const parsedTrackExt = computed<{ ext: TrackExt; error: string }>(() => {
+  const raw = trackExtText.value.trim()
+  if (!raw) return { ext: {}, error: '' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { ext: {}, error: 'data-ext 不是合法 JSON' }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ext: {}, error: 'data-ext 必须是扁平 JSON 对象' }
+  }
+  const entries = Object.entries(parsed as Record<string, unknown>)
+  if (entries.length > 10) return { ext: {}, error: 'data-ext 最多 10 个字段' }
+  const ext: TrackExt = {}
+  for (const [key, value] of entries) {
+    if (!/^[a-z][a-z0-9_]{0,31}$/.test(key)) {
+      return { ext: {}, error: `data-ext 字段名不合法：${key}` }
+    }
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+      return { ext: {}, error: `data-ext.${key} 只支持字符串/整数/布尔值` }
+    }
+    ext[key] = value
+  }
+  return { ext, error: '' }
 })
 
-const iframeSnippet = computed(
-  () =>
-    `<iframe src="${previewUrl.value}" style="width:380px;height:620px;border:0" title="在线客服"></iframe>`,
-)
+const trackExtError = computed(() => parsedTrackExt.value.error)
+
+const trackAttrs = computed(() => {
+  const raw = trackExtText.value.trim()
+  return raw && !trackExtError.value ? [`data-ext='${raw.replace(/'/g, '&#39;')}'`] : []
+})
+
+/** script 标签属性：scene + 埋点 ext + （非单租户降级时）integration。 */
+const widgetAttrs = computed(() => {
+  const attrs = [`data-scene="${embedForm.sceneCode}"`, ...trackAttrs.value]
+  if (SHOW_INTEGRATION_UI && embedForm.integrationCode) {
+    attrs.push(`data-integration="${embedForm.integrationCode}"`)
+  }
+  return attrs.join(' ')
+})
+
+/** API 基址：生产同域由 Caddy 反代，开发由 Vite 的 /api 代理转发到后端。 */
+const apiBase = computed(() => {
+  const env = import.meta.env as Record<string, string | undefined>
+  const raw = env.VITE_API_BASE_URL || window.location.origin
+  return `${String(raw).replace(/\/$/, '')}/api/v1`
+})
+
+/** 内嵌页地址：scene / integration 与 ext 一起走 query，由嵌入组件透传到请求体。 */
+const embedPageUrl = computed(() => {
+  const params = new URLSearchParams({ scene: embedForm.sceneCode })
+  if (SHOW_INTEGRATION_UI && embedForm.integrationCode) {
+    params.set('integration', embedForm.integrationCode)
+  }
+  const rawExt = trackExtText.value.trim()
+  if (rawExt && !trackExtError.value) params.set('ext', rawExt)
+  return `${embedBase.value}/embed.html?${params.toString()}`
+})
+
+function chatBody(visitorId: string, message: string): string {
+  const ext = parsedTrackExt.value.ext
+  return JSON.stringify({
+    scene_code: embedForm.sceneCode,
+    ...(visitorId ? { visitor_id: visitorId } : {}),
+    message,
+    ...(Object.keys(ext).length ? { ext } : {}),
+  })
+}
+
+const accessMethods = computed(() => {
+  // 拼接结束标签，避免 SFC 解析器把 script/iframe 当成模板块结尾
+  const closeScript = '<' + '/script>'
+  const closeIframe = '</' + 'iframe>'
+  const publishKey = embedForm.publish_key || 'pk_xxx'
+  const sceneUrl = `${apiBase.value}/public/scenes/${embedForm.sceneCode}`
+  const messageUrl = `${apiBase.value}/chat/message?scene_code=${embedForm.sceneCode}`
+  const streamUrl = `${apiBase.value}/chat/stream?scene_code=${embedForm.sceneCode}`
+  const anonymousHeaders = `-H "Content-Type: application/json" \\\n  -H "X-Scene-Code: ${embedForm.sceneCode}" \\\n  -H "X-Publish-Key: ${publishKey}"`
+  return [
+    {
+      key: 'widget',
+      title: '方式一：一行 script 嵌入（悬浮气泡）',
+      tip: '整站生效：页面左下 / 右下挂气泡，点击展开对话窗；位置跟随上方「气泡位置」。',
+      copyLabel: '复制 script 代码',
+      code: `<script src="${embedBase.value}/widget.js" ${widgetAttrs.value}>${closeScript}`,
+    },
+    {
+      key: 'iframe',
+      title: '方式二：iframe 内嵌聊天窗',
+      tip: '适合独立客服页面：固定尺寸内嵌对话窗，不出现气泡。',
+      copyLabel: '复制 iframe 代码',
+      code: `<iframe src="${embedPageUrl.value}" style="width:380px;height:620px;border:0" title="在线客服">${closeIframe}`,
+    },
+    {
+      key: 'anonymous',
+      title: '方式三：匿名 API 对接（发布标识，无需服务端 Key）',
+      tip: embedForm.allow_anonymous
+        ? '宿主自研前端使用：读公开配置 → 用 X-Publish-Key 签发访客标识（存浏览器本地复用）→ 调对话接口。'
+        : '当前场景未开放匿名对话：先打开上方「开放匿名」并保存，否则调用返回 3004 场景未开放匿名对话。',
+      copyLabel: '复制 curl 示例',
+      code: [
+        `# 1) 读取公开配置（标题/气泡/是否开放匿名/publish_key）`,
+        `curl ${sceneUrl}`,
+        '',
+        `# 2) 签发匿名访客标识（同一访客反复使用，否则每轮都是新会话）`,
+        `curl -X POST -H "X-Publish-Key: ${publishKey}" ${sceneUrl}/visitors`,
+        '',
+        `# 3) 非流式对话`,
+        `curl -X POST "${messageUrl}" \\`,
+        `  ${anonymousHeaders} \\`,
+        `  -d '${chatBody('v_xxx', '我的订单到哪了')}'`,
+        '',
+        `# 4) 流式对话（SSE）：换成 /chat/stream 并加 -N`,
+        `curl -N -X POST "${streamUrl}" \\`,
+        `  ${anonymousHeaders} \\`,
+        `  -d '${chatBody('v_xxx', '我的订单到哪了')}'`,
+        '',
+        `# SSE 事件：session / route / text / tool_call / tool_result / memory_write / handover / done / error`,
+        `# done 携带 trace_id，排障时把它交给管理员在「调用链」里定位本轮`,
+      ].join('\n'),
+    },
+    {
+      key: 'server',
+      title: '方式四：服务端 API 对接（X-API-Key / 客户 token）',
+      tip: 'BFF 代理或后端直连：Key 在「接入方」直达页签发；宿主已登录客户则带 customer token，身份优先于任何匿名标识。',
+      copyLabel: '复制 curl 示例',
+      code: [
+        `# A) 服务端到服务端：X-API-Key（Key 仅创建时明文返回一次）`,
+        `#     自己保管宿主客户 id 作为 visitor_id（BFF 模式），不要把浏览器侧标识当身份`,
+        `curl -N -X POST "${apiBase.value}/chat/stream" \\`,
+        `  -H "Content-Type: application/json" \\`,
+        `  -H "X-API-Key: sk_xxx" \\`,
+        `  -d '${chatBody('<宿主客户 id>', '你好')}'`,
+        '',
+        `# B) 宿主已登录客户：带 customer token（scene_code 可省，由后台配置推导）`,
+        `curl -X POST "${apiBase.value}/chat/message" \\`,
+        `  -H "Content-Type: application/json" \\`,
+        `  -H "Authorization: Bearer <customer token>" \\`,
+        `  -d '${chatBody('', '你好')}'`,
+      ].join('\n'),
+    },
+  ]
+})
 
 function applyEmbedScene(scene: Scene) {
   embedScene.value = scene
@@ -700,22 +869,37 @@ function applyEmbedScene(scene: Scene) {
   embedForm.originsText = (scene.allowed_origins || []).join('\n')
   embedForm.allow_anonymous = Boolean(scene.publish_key)
   embedForm.publish_key = scene.publish_key || ''
-  embedForm.api_key_set = Boolean(scene.api_key_set)
 }
 
 async function openEmbed(row: Scene) {
-  rotatedKey.value = ''
   // 列表字段可能被精简：先用行数据顶住，再用详情校准
   applyEmbedScene(row)
+  embedForm.integrationCode = ''
+  embedIntegrations.value = []
   embedVisible.value = true
   embedLoading.value = true
   try {
-    applyEmbedScene(await apiGetScene(row.id))
+    const [scene, integrations] = await Promise.all([
+      apiGetScene(row.id),
+      SHOW_INTEGRATION_UI ? apiListIntegrations() : Promise.resolve([] as Integration[]),
+    ])
+    applyEmbedScene(scene)
+    embedIntegrations.value = integrations.filter(
+      (item) => item.status === 'active' && item.scenes.some((s) => s.id === row.id),
+    )
+    // 默认选第一个已授权接入方；没有则保持空，落回场景级匿名池
+    embedForm.integrationCode = SHOW_INTEGRATION_UI
+      ? embedIntegrations.value[0]?.public_code || ''
+      : ''
   } catch (e: any) {
     ElMessage.error(e?.message || '读取接入配置失败')
   } finally {
     embedLoading.value = false
   }
+}
+
+function integrationOptionLabel(item: Integration) {
+  return `${item.name}（${item.public_code}）`
 }
 
 async function saveEmbed() {
@@ -754,30 +938,8 @@ async function saveEmbed() {
   }
 }
 
-async function rotateKey() {
-  if (!embedScene.value) return
-  try {
-    await ElMessageBox.confirm(
-      '换发后旧 API Key 立即失效，仍在使用旧 Key 的服务端调用会返回 401。确认换发？',
-      '换发 API Key',
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
-  rotating.value = true
-  try {
-    const result = await apiRotateSceneKey(embedScene.value.id)
-    rotatedKey.value = result.api_key
-    embedForm.api_key_set = true
-    const row = scenes.value.find((s) => s.id === embedForm.sceneId)
-    if (row) row.api_key_set = true
-    ElMessage.success('已换发，请立即保存新 Key')
-  } catch (e: any) {
-    ElMessage.error(e?.message || '换发失败')
-  } finally {
-    rotating.value = false
-  }
+function goIntegrations() {
+  router.push('/integrations')
 }
 
 function copyText(text: string) {
@@ -914,6 +1076,27 @@ onMounted(load)
   font-weight: 600;
   font-size: 13px;
 }
+/* 埋点 ext：只驱动代码示例生成，不写进场景配置 */
+.track-params {
+  margin-bottom: 14px;
+}
+.track-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.track-label {
+  flex: none;
+  font-size: 13px;
+  color: #606266;
+}
+.track-error {
+  display: block;
+  margin-top: 2px;
+  color: #f56c6c;
+}
 .embed-code pre,
 .embed-pre {
   width: 100%;
@@ -926,16 +1109,6 @@ onMounted(load)
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
-  word-break: break-all;
-}
-.rotate-result {
-  width: 100%;
-  margin-top: 6px;
-  padding: 8px 10px;
-  background: #fdf6ec;
-  border-radius: 6px;
-}
-.rotate-result code {
   word-break: break-all;
 }
 .embed-preview {

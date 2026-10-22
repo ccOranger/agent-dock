@@ -86,7 +86,7 @@ docker compose logs backend | grep -i "密码"
 
 如果错过了当时的输出：`docker compose logs backend` 是累积日志，首次创建的那段通常还在，可以从头查找；确定已丢失时，可用初始化向导重置（见 [FAQ「管理员密码丢了怎么办」](faq.md#管理员密码丢了怎么办)）。仅本地演示环境也可以 `docker compose down -v` 后重新启动。
 
-> 想在本地看演示数据，在**首次启动前**把 `SEED_DEMO=true` 写入根 `.env`。演示账号为 `admin / Admin@123`、`service01 / Agent@123`、`alice / Alice@123`，仅用于演示，生产必须关闭。
+> 想在本地看演示数据，在**首次启动前**把 `SEED_DEMO=true` 写入根 `.env`。演示账号为 `admin / Admin@123`、`service01 / Agent@123`、`alice / Alice@123`；同时会创建一个 `customer_service` 客服场景（LLM 路由到投诉处理 / 通用知识问答 / 订单服务三个 Agent）和默认接入方（公开标识 `ic_default`，已授权全部场景；单租户嵌入无需传 `data-integration`）。仅用于演示，生产必须关闭。
 
 ## 5. 第一次验证
 
