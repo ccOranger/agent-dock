@@ -314,20 +314,27 @@
       </el-form>
 
       <el-divider content-position="left">嵌入代码</el-divider>
-      <div class="embed-code">
-        <pre>{{ embedSnippet }}</pre>
-        <el-button size="small" @click="copyText(embedSnippet)">复制 script 代码</el-button>
+      <div class="embed-item">
+        <div class="embed-item-title">悬浮气泡（推荐）</div>
+        <div class="rule-tip">
+          整站生效：在左下 / 右下悬浮气泡，点击展开对话窗；位置跟随上方「气泡位置」。
+        </div>
+        <div class="embed-code">
+          <pre>{{ embedSnippet }}</pre>
+          <el-button size="small" @click="copyText(embedSnippet)">复制 script 代码</el-button>
+        </div>
       </div>
-      <div class="rule-tip" style="margin: 8px 0 4px">
-        任何页面加这一行即可；组件用 iframe 隔离样式，只额外暴露 window.AgentDockWidget。
+      <div class="embed-item">
+        <div class="embed-item-title">直接内嵌聊天窗（不悬浮）</div>
+        <div class="rule-tip">适合独立客服页面：固定尺寸内嵌对话窗，不出现气泡。</div>
+        <pre class="embed-pre">{{ iframeSnippet }}</pre>
       </div>
-      <pre class="embed-pre">{{ iframeSnippet }}</pre>
 
       <el-divider content-position="left">效果预览</el-divider>
       <div class="rule-tip" style="margin-bottom: 8px">
-        预览读取的是已保存配置；改完先保存再看。未开放匿名时，预览页会提示无法开始对话。
+        模拟宿主页：气泡悬浮在{{ embedForm.position === 'left' ? '左下角' : '右下角' }}，点开即可对话。预览读取已保存配置，改完先保存再看。
       </div>
-      <iframe :src="previewUrl" class="embed-preview" title="嵌入效果预览" />
+      <iframe :src="bubblePreviewUrl" class="embed-preview" title="嵌入效果预览" />
     </div>
     <template #footer>
       <el-button @click="embedVisible = false">关闭</el-button>
@@ -660,6 +667,13 @@ const previewUrl = computed(() =>
     : 'about:blank',
 )
 
+// 预览用模拟宿主页：真实加载 widget.js，能直接看到气泡悬浮在哪一侧
+const bubblePreviewUrl = computed(() =>
+  embedForm.sceneCode
+    ? `${embedBase.value}/embed-preview.html?scene=${encodeURIComponent(embedForm.sceneCode)}`
+    : 'about:blank',
+)
+
 const embedSnippet = computed(() => {
   // 拼接结束标签，避免 SFC 解析器把它当成 script 块结尾
   const close = '<' + '/script>'
@@ -891,6 +905,14 @@ onMounted(load)
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+}
+.embed-item {
+  margin-bottom: 12px;
+}
+.embed-item-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  font-size: 13px;
 }
 .embed-code pre,
 .embed-pre {

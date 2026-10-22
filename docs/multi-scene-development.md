@@ -442,7 +442,7 @@ SSE 事件保持现有 `text/status/route/done/error`，新增字段只增不改
 - [x] `embed.html` + `src/embed/main.ts` 独立 Vite entry，不引入 Element Plus（构建产物约 5KB）。
 - [x] `public/widget.js`：一行 script，创建气泡 + iframe；移动端自动全屏。
 - [x] postMessage 通知（`cs:widget:ready/done/close/error`）驱动关闭与未读角标；主题、访客标识由 iframe 内公开配置自主管理，不经宿主传递。
-- [x] 后台接入页：嵌入配置、允许来源、匿名开关、嵌入代码、实时预览、key 换发。
+- [x] 后台接入页：嵌入配置、允许来源、匿名开关、嵌入代码（悬浮气泡 / 直嵌两种）、模拟宿主页的悬浮气泡实时预览、key 换发。
 - [x] 移动端全屏、样式隔离（iframe + 独立入口，宿主 CSS 不进入组件）。
 - [x] 第三方静态宿主页 E2E（`/embed-demo.html`，气泡/欢迎语/流式回复/关闭均实测通过）。
 
@@ -450,6 +450,7 @@ SSE 事件保持现有 `text/status/route/done/error`，新增字段只增不改
 
 - 嵌入对话固定带 `?scene_code=` 与 `X-Scene-Code`，与动态 CORS 的场景识别约定一致；请求 body 里的 `scene_code` 不参与 CORS 判定。
 - 访客标识存 `localStorage: cs_embed_visitor_{scene}`，同一浏览器复用；未开放匿名且 URL 无 `?token=` 时，组件内直接提示无法开始对话。
+- 气泡只服务匿名访客：`visitor_id` 无鉴权，不用于承载宿主站客户 id；需要登录客户身份时，由宿主站自研前端（customer token）或宿主后端 BFF（`X-API-Key`）直接对接聊天接口。
 - 气泡标题/主题色/位置来自 `GET /public/scenes/{code}` 的 `widget`，保存后刷新宿主页生效；`data-*` 属性只作为配置读取失败时的兜底。
 - 后台 `PUT /admin/scenes/{id}/widget` 对 `widget_config` 是整份替换；来源归一化失败返回 2002；`allow_anonymous` 由 false→true 生成 `pk_`，true→false 清空。
 - 本地联调：两个前端 vite 均支持 `VITE_API_TARGET`（默认 8000）；嵌入地址可用 `VITE_EMBED_URL` 覆盖，未配置时复用 `VITE_PUBLIC_CHAT_URL`。

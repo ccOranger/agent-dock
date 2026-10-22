@@ -56,12 +56,14 @@
     var panelSide = state.position === 'left' ? { left: '20px' } : { right: '20px' };
     var bottom = '84px';
     if (isMobile()) {
-      side = { left: '16px' };
+      // 选左边还是右边由后台配置决定；面板在移动端全屏，左右贴边无意义
+      side = state.position === 'left' ? { left: '16px' } : { right: '16px' };
       panelSide = { left: '0px' };
       bottom = '0px';
     }
-    Object.assign(state.button.style, side, { bottom: '20px' });
-    Object.assign(state.panel.style, panelSide, { bottom: bottom });
+    // 先清空对侧：只改一侧会留下旧的 left/right，宽度固定时后设的那侧不生效
+    Object.assign(state.button.style, { left: '', right: '' }, side, { bottom: '20px' });
+    Object.assign(state.panel.style, { left: '', right: '' }, panelSide, { bottom: bottom });
     if (isMobile()) {
       state.panel.style.width = '100%';
       state.panel.style.height = '100%';

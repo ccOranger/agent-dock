@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>嵌入效果预览（模拟宿主页）</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+        background: #f2f5fa;
+        color: #1f2329;
+      }
+      .wrap {
+        max-width: 560px;
+        padding: 24px;
+      }
+      .card {
+        background: #fff;
+        border-radius: 12px;
+        padding: 16px 18px;
+        box-shadow: 0 6px 24px rgba(31, 35, 41, 0.06);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      p {
+        margin: 0 0 6px;
+        font-size: 13px;
+        line-height: 1.7;
+        color: #6b7280;
+      }
+      code {
+        background: #f2f5fa;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>模拟宿主页</h1>
+        <p>气泡悬浮在角落，点开即可对话；主题色、标题与位置都来自后台已保存的接入配置。</p>
+        <p>真实接入只需一行：<code>&lt;script src="/widget.js" data-scene="..."&gt;</code></p>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var scene = new URLSearchParams(window.location.search).get('scene');
+        var missing = document.createElement('p');
+        missing.style.padding = '0 24px';
+        if (!scene) {
+          missing.textContent = '缺少 scene 参数';
+          document.body.appendChild(missing);
+          return;
+        }
+        var script = document.createElement('script');
+        script.src = '/widget.js';
+        script.setAttribute('data-scene', scene);
+        document.body.appendChild(script);
+      })();
+    </script>
+  </body>
+</html>
