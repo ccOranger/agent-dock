@@ -303,6 +303,16 @@ def test_format_rules_appended_to_business_agent_prompt():
     assert "工具使用要求" not in without_tools
 
 
+def test_current_time_injected_into_business_agent_prompt():
+    """模型不自知今天几号：系统提示必须注入当轮服务器时间，否则时间类问题只能致歉"""
+    from datetime import datetime
+
+    agent = DefaultAssistantAgent(user_id="u1", session_id="s1")
+    prompt = agent._final_system_prompt([])
+    assert "当前时间" in prompt
+    assert datetime.now().strftime("%Y-%m-%d") in prompt
+
+
 def test_seed_rules_shape():
     """种子规则本身即建库数据源：探听优先级默认最高，且探听靠关键词兜住新写法"""
     by_key = {r.key: r for r in SEED_RULES}
