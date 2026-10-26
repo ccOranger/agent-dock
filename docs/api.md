@@ -110,7 +110,7 @@ POST   /api/v1/chat/message             # 非流式备用，返回 {data, trace_
 
 > 登录客户优先于接入方标识：带客户 token 时不会解析 `X-API-Key` / `X-Integration-Code`。公开标识仅做归属，不是安全凭证；强隔离请用 `X-API-Key`。
 
-**限流**：Redis 分钟频次 / 日配额 / 并发流三档（默认 30 次/分、2000 次/日、3 条并发），按 `scene + user/visitor/ip` 分桶；超限 4029/429，Redis 故障时放行（fail-open）。SSE 在流结束（含异常/断连）时释放并发槽位。
+**限流**：Redis 分钟频次 / 日配额 / 并发流三档（默认 30 次/分、2000 次/日、3 条并发），按 `scene + user/visitor/ip` 分桶；超限 4029/429，Redis 故障时放行（fail-open）。此外还有**场景总额度**（`runtime_config.quota`，默认 0 = 不限），与主体限流同为 5 个桶一次 pipeline 提交，任一超限对本次已自增的键回滚。SSE 在流结束（含异常/断连）时释放并发槽位。
 
 **对话埋点**：鉴权通过后、限流之前旁路写入 `chat_events`（全量，不受 `request_traces` 采样影响），记录 `trace_id`、场景、身份、`ext` 与消息长度；不存消息正文与 IP。被限流的请求同样留痕；写入失败只告警，不影响对话。首轮 `session_id` 与匿名 `visitor_id` 在进入 service 拿到真实会话/访客后按 `trace_id` 回填，旧值与无效值不会被写成 NULL（[U20](updates/20-single-tenant-degradation.md)）。
 
@@ -188,15 +188,41 @@ PATCH  /api/v1/admin/agents/{name}/toggle   # 启用/禁用（body: enabled；�
 （[多场景开发文档](multi-scene-development.md) M2–M5）
 
 ```
-GET    /api/v1/admin/scenes                         # 列表（含状态、Agent 数、路由模式、publish_key）
+GET    /api/v1/admin/scenes                         # 列表（含状态、Agent 数、路由模式、publish_key、今日请求/日额度）
 GET    /api/v1/admin/scenes/options                 # 启用中的场景下拉（聊天入口/资源归属回显）
 POST   /api/v1/admin/scenes                         # 新建（code 全局唯一；默认场景标识保留）
-GET    /api/v1/admin/scenes/{id}                    # 详情（含 widget_config/allowed_origins；服务端 Key 见接入方管理）
-PATCH  /api/v1/admin/scenes/{id}                    # 编辑（默认场景只允许改展示名/描述）
+GET    /api/v1/admin/scenes/{id}                    # 详情（含 widget_config/allowed_origins/runtime_effective；服务端 Key 见接入方管理）
+PATCH  /api/v1/admin/scenes/{id}                    # 编辑（默认场景只允许改展示名/描述/runtime_config）
 PUT    /api/v1/admin/scenes/{id}/agents             # 绑定 Agent（全量替换，顺序即路由候选顺序）
 GET    /api/v1/admin/scenes/{id}/agents             # 可绑定 Agent + 当前绑定状态
 PUT    /api/v1/admin/scenes/{id}/widget             # 嵌入配置/允许来源/发布开关
 DELETE /api/v1/admin/scenes/{id}                    # 删除（默认场景不可删；有关联会话等→3002）
+```
+
+**运行参数 `runtime_config`**（[U21](updates/21-scene-identity-runtime-quota.md)）：JSONB，只存显式覆盖项，`{}` / 缺失 = 全部继承全局。
+
+```json
+{
+  "rag": {"inject": true, "top_k": 5, "min_score": 0.3, "timeout": 15, "namespaces": ["cs_order"]},
+  "history_limit": 50,
+  "quota": {"per_minute": 60, "daily": 5000}
+}
+```
+
+- 白名单键：`rag.inject/top_k/min_score/timeout/namespaces`、`history_limit`、`quota.per_minute/daily`；未知键→400/1001（不静默丢弃）；
+- 范围：`top_k` 1–20、`min_score` 0–1、`timeout` 1–60、`history_limit` 1–50、`quota.per_minute` 0–600、`quota.daily` 0–100000；
+- `rag.namespaces` 必须是存在且启用中的知识库，最多 10 个；**显式配置时以场景为准**（覆盖 Agent 自身的 `rag_namespace(s)`，包括 `search_all_knowledge_bases`），与实际检索范围保持一致；未配置时才回到 Agent 声明；
+- 整对象替换：`PATCH` 传 `{}` 或 `null` = 恢复全部继承；
+- `quota.*` 例外：默认 `0`（不限），**不继承** `PUBLIC_CHAT_*`（两者统计对象不同：环境变量限单主体，场景额度限整场景）；
+- 详情接口额外返回 `runtime_effective`（合并全局后的生效值）与 `runtime_sources`（每键 `scene`/`global`/`default`）。
+
+```json
+// GET /admin/scenes 列表新增字段
+{
+  "today_requests": 128,     // 本场景今日 chat_events 条数
+  "quota_daily": 5000,       // 生效的日额度，0 = 不限
+  "quota_source": "scene"    // scene=本场景覆盖 / default=未配置（不限）
+}
 ```
 
 `PUT /widget` 请求体（未传字段保持原值）：
@@ -263,14 +289,48 @@ DELETE /api/v1/admin/custom-tools/{name}     # 取消登记（被动态 Agent �
 归一化后至少 2 字），**不开放正则**；两者全空→1001。列表长度上限 `patterns` 100 / `keywords` 60（超→422；
 该上限必须高于种子规模，因为后台保存是把整份列表原样提交回来）。
 
+**内容与来源**（[U21](updates/21-scene-identity-runtime-quota.md)）：
+
+- `answer_source`：`text`（默认，逐字下发 `reply_text`）/ `kb`（检索知识库后按固定格式拼接，不经模型改写）；
+- `kb_namespaces`：`kb` 模式的检索范围，去重后不能为空，且必须是启用中的知识库；切回 `text` 时保留不报错；
+- `reply_text`：`text` 模式必填；`kb` 模式只当引导语/兜底文案，可为空。
+- 更新接口按**合并后的最终状态**校验：单独把 `text` 模式的正文改成空串同样 400（否则该行仍会命中却产出空串，本轮静默走路由）。
+- 占位符：`{{scene_name}}` / `{{scene_code}}` / `{{agent_names}}` 在命中时渲染；
+- 身份/能力话术按场景独立：场景行（`scene_id` 非空）覆盖同 key 全局行，新建场景自动复制模板（只补缺失 key）。
+
 ```
-GET    /api/v1/admin/canned-scripts            # 全量（含停用项），按 priority 升序，与运行时判定顺序一致
-POST   /api/v1/admin/canned-scripts            # 新增（key 重复→3002；空规则/单字关键词/问法归一化后为空→1001）
+GET    /api/v1/admin/canned-scripts            # 全量（含停用项），按 priority 升序；每行带 scene_code（场景已停用/归档也能定位行）
+POST   /api/v1/admin/canned-scripts            # 新增（key 重复→3002；空规则/单字关键词/问法归一化后为空→1001；kb 未选库→1001）
 PUT    /api/v1/admin/canned-scripts/{key}      # 更新（只改一侧时另一侧沿用已存值，避免改空规则）
 PATCH  /api/v1/admin/canned-scripts/{key}/toggle  # 启用/停用（body: enabled）
 DELETE /api/v1/admin/canned-scripts/{key}      # 删除（is_builtin 种子三条不可删→1001，只能停用）
-POST   /api/v1/admin/canned-scripts/match      # 命中测试（body: query；不写库，返回 normalized/matched/key/reply_text，未命中即本轮走路由）
+POST   /api/v1/admin/canned-scripts/match      # 命中测试（body: query, scene_code?；不写库，返回 normalized/matched/key/reply_text/answer_source/kb_namespaces）
 ```
+
+## Admin · Staff（人员与配额，require_admin）
+
+（[U21](updates/21-scene-identity-runtime-quota.md)）配额只统计 `created_by = 当前登录人` 的资源；`created_by IS NULL` 的 seed 数据不占额度。
+
+```
+GET    /api/v1/admin/staff                   # 人员列表 + 配额 + 已用 + 剩余（remaining=null 表示不限）
+POST   /api/v1/admin/staff                   # 新建（username 唯一、password ≥ 8、role ∈ {admin, agent}）
+PATCH  /api/v1/admin/staff/{id}              # 改 display_name / role / is_active / quota（quota 整对象替换）
+POST   /api/v1/admin/staff/{id}/password     # 重置密码
+```
+
+```json
+// 配额语义：键缺失或 null = 不限，0 = 禁止创建，> 0 = 上限
+{
+  "quota": {"max_scenes": 1, "max_agents": 2, "max_knowledge_bases": 2},
+  "used": {"scenes": 1, "agents": 0, "knowledge_bases": 2},
+  "remaining": {"scenes": 0, "agents": 2, "knowledge_bases": 0}
+}
+```
+
+- 防自锁：不能停用/降级自己，不能修改自己的配额（→400/1001）；
+- 不提供物理删除（历史资源仍挂 `created_by`），只停用；
+- 已用数量由 3 条 `GROUP BY created_by` 一次取回，不按人循环 count；
+- 超限创建在 `POST /admin/scenes`、`POST /admin/agents`、`POST /knowledge/bases` 返回 3006/403。
 
 ## Admin · MCP Servers（require_admin 写 / require_staff 读）
 
@@ -364,6 +424,7 @@ GET    /metrics                             # Prometheus 全局抓取端点
 | 3003 | 404 | SceneNotFound | 场景不存在（scene_code 错误） |
 | 3004 | 404 | SceneDisabled | 场景已停用/归档 |
 | 3005 | 409 | SceneNotConfigured | 场景未配置可用 Agent |
+| 3006 | 403 | QuotaExceeded | 创建数量已达上限（场景/Agent/知识库） |
 | 4001 | 400 | ToolParamError | 工具参数校验失败 |
 | 4003 | 400 | UnsafeInput | 输入含不安全内容 |
 | 4029 | 429 | RateLimited | 请求过于频繁 |

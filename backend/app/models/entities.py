@@ -43,9 +43,13 @@ class Scene(Base, TimestampMixin):
     fallback_agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     fallback_text: Mapped[str | None] = mapped_column(Text)
     extra_router_prompt: Mapped[str | None] = mapped_column(Text)
+    # 场景级运行参数（检索/历史/额度等）；空对象 = 全部继承全局 Settings，解析见 services/runtime_config.py
+    runtime_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     widget_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     allowed_origins: Mapped[list] = mapped_column(JSONB, default=list)
     publish_key: Mapped[str | None] = mapped_column(String(64))
+    # 创建人：NULL=系统/种子资源，不计入任何人的配额；不建外键，避免人员删除阻塞资源
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
 
@@ -143,6 +147,8 @@ class StaffUser(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String(16), default="agent")
     display_name: Mapped[str | None] = mapped_column(String(64))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    # 资源创建配额：键缺失/null=不限，0=禁止创建，正数=上限（语义见 services/quota_service.py）
+    quota: Mapped[dict] = mapped_column(JSONB, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
@@ -254,6 +260,8 @@ class KnowledgeBase(Base, TimestampMixin):
     display_name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 创建人：NULL=初始化种子；不计入任何人的配额
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
 class CannedScript(Base, TimestampMixin):
@@ -277,8 +285,12 @@ class CannedScript(Base, TimestampMixin):
     patterns: Mapped[list] = mapped_column(JSONB, default=list)
     # 关键词（字符串数组）：整句里出现即命中，用于“提示词”“内部指令”这类强特征词
     keywords: Mapped[list] = mapped_column(JSONB, default=list)
-    # 逐字下发的应答正文（支持 markdown，前端 StreamRenderer 已渲染）
+    # 逐字下发的应答正文（支持 markdown，前端 StreamRenderer 已渲染）；kb 模式下作为引导语/兜底
     reply_text: Mapped[str] = mapped_column(Text, default="")
+    # 回答来源：text=直接下发 reply_text；kb=检索 kb_namespaces 后按固定框架拼接（不走模型）
+    answer_source: Mapped[str] = mapped_column(String(16), default="text")
+    # answer_source=kb 时的检索范围（知识库 namespace 数组）
+    kb_namespaces: Mapped[list] = mapped_column(JSONB, default=list)
     # 小者优先；多条都能命中时决定哪一条胜出
     priority: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -317,6 +329,8 @@ class AgentMeta(Base, TimestampMixin):
     mcp_tool_names: Mapped[list] = mapped_column(JSONB, default=list)
     # Agent ↔ 代码自定义工具绑定（仅存名称，实现来自代码目录 custom_catalog，登记见 tools 表 type=custom）
     custom_tool_names: Mapped[list] = mapped_column(JSONB, default=list)
+    # 创建人：代码 Agent / 种子的 created_by 为 NULL，不计入任何人的配额
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
 class ToolMeta(Base, TimestampMixin):

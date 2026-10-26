@@ -20,6 +20,7 @@ from app.schemas.api import (
 )
 from app.schemas.common import ApiResponse
 from app.schemas.scene import DEFAULT_ASSISTANT_NAME
+from app.services.quota_service import KIND_AGENT, create_guard
 from app.tools import custom_catalog
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -165,22 +166,24 @@ async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
     await _validate_rag_namespaces(body.rag_namespaces)
     await _validate_custom_tool_bindings(body.custom_tool_names)
 
-    row = await AgentRepo.create_dynamic(
-        name=body.name,
-        display_name=body.display_name,
-        description=body.description,
-        routing_keywords=[k.strip() for k in body.routing_keywords if str(k).strip()],
-        routing_examples=[e.strip() for e in body.routing_examples if str(e).strip()],
-        system_prompt=body.system_prompt,
-        llm_model=body.llm_model,
-        rag_namespace=body.rag_namespace,
-        rag_namespaces=body.rag_namespaces,
-        search_all_knowledge_bases=body.search_all_knowledge_bases,
-        mcp_tool_names=body.mcp_tool_names,
-        custom_tool_names=body.custom_tool_names,
-        enabled=body.enabled,
-        sort_order=body.sort_order,
-    )
+    async with create_guard(user, KIND_AGENT):
+        row = await AgentRepo.create_dynamic(
+            name=body.name,
+            display_name=body.display_name,
+            description=body.description,
+            routing_keywords=[k.strip() for k in body.routing_keywords if str(k).strip()],
+            routing_examples=[e.strip() for e in body.routing_examples if str(e).strip()],
+            system_prompt=body.system_prompt,
+            llm_model=body.llm_model,
+            rag_namespace=body.rag_namespace,
+            rag_namespaces=body.rag_namespaces,
+            search_all_knowledge_bases=body.search_all_knowledge_bases,
+            mcp_tool_names=body.mcp_tool_names,
+            custom_tool_names=body.custom_tool_names,
+            enabled=body.enabled,
+            sort_order=body.sort_order,
+            created_by=user.id,
+        )
     await AuditRepo.write(action="admin.agent.create", user_id=str(user.id), target_type="agent", target_id=row.name)
     return ApiResponse(data={"name": row.name})
 

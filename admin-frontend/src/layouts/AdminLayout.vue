@@ -22,6 +22,9 @@
         <el-menu-item index="/agents" v-if="isAdmin">
           <span>Agent 管理</span>
         </el-menu-item>
+        <el-menu-item index="/staff" v-if="isAdmin">
+          <span>人员与配额</span>
+        </el-menu-item>
         <el-menu-item index="/router" v-if="isAdmin">
           <span>路由分发器</span>
         </el-menu-item>

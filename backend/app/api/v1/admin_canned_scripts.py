@@ -13,10 +13,21 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 
-from app.agents.canned_scripts import match_canned_script, normalize_query
+from app.agents.canned_scripts import (
+    ANSWER_SOURCE_KB,
+    ANSWER_SOURCE_TEXT,
+    ANSWER_SOURCES,
+    match_canned_script,
+    normalize_query,
+)
 from app.api.deps import require_admin, require_staff
 from app.core.exceptions import Conflict, NotFound, ParamError
-from app.models.repositories import AuditRepo, CannedScriptRepo, SceneRepo
+from app.models.repositories import (
+    AuditRepo,
+    CannedScriptRepo,
+    KnowledgeBaseRepo,
+    SceneRepo,
+)
 from app.schemas.api import (
     CannedScriptCreate,
     CannedScriptMatchRequest,
@@ -56,6 +67,35 @@ def _validate_rule_fields(patterns: list[str] | None, keywords: list[str] | None
     return pats, keys
 
 
+async def _validate_answer(
+    answer_source: str,
+    reply_text: str,
+    kb_namespaces: list[str],
+) -> tuple[str, list[str]]:
+    """校验“回答来源 + 内容”：两种模式下“可下发内容”都不能为空。
+
+    - text：必须有正文（否则命中后什么也不回）；
+    - kb：至少 1 个存在且启用中的知识库，正文只当引导语/兜底，可空。
+    切回 text 时保留 kb_namespaces 不报错，便于来回切换（运行时忽略）。
+    """
+    if answer_source not in ANSWER_SOURCES:
+        raise ParamError(f"回答来源只能是 {'/'.join(ANSWER_SOURCES)}")
+    cleaned = list(dict.fromkeys(ns.strip() for ns in kb_namespaces if ns and ns.strip()))
+    if answer_source == ANSWER_SOURCE_TEXT:
+        if not reply_text.strip():
+            raise ParamError("文本模式的回答正文不能为空")
+        return ANSWER_SOURCE_TEXT, cleaned
+
+    if not cleaned:
+        raise ParamError("知识库模式至少选择一个知识库")
+    rows = await KnowledgeBaseRepo.list_all()
+    active = {row.namespace for row in rows if row.is_active}
+    missing = [ns for ns in cleaned if ns not in active]
+    if missing:
+        raise ParamError(f"以下知识库不存在或已停用: {missing}")
+    return ANSWER_SOURCE_KB, cleaned
+
+
 async def _resolve_scene_id(scene_code: str | None) -> str | None:
     """scene_code → scene_id；空表示全局话术，未知场景直接报错（静默当全局会串场）。"""
     if not scene_code:
@@ -70,6 +110,12 @@ def _audit_target(key: str, scene_code: str | None) -> str:
     return f"{scene_code}:{key}" if scene_code else key
 
 
+def _with_scene_code(item: dict, scene_code: str | None) -> dict:
+    """回包补 scene_code：前端要靠它定位行，scene_id 可能属于已停用/归档场景。"""
+    item["scene_code"] = scene_code
+    return item
+
+
 @router.get("", response_model=ApiResponse[list])
 async def list_canned_scripts(
     scene_code: str | None = Query(None, description="只看某场景生效的全局行 + 场景覆盖行"),
@@ -80,7 +126,15 @@ async def list_canned_scripts(
     if scene_code:
         scene_id = await _resolve_scene_id(scene_code)
         rows = [r for r in rows if r.scene_id is None or str(r.scene_id) == scene_id]
-    return ApiResponse(data=[CannedScriptRepo.to_dict(r) for r in rows])
+    # 一次取出全部场景码建映射：列表含已停用/归档场景的行，只靠 /scenes/options
+    # （仅启用场景）会让前端拿不到 scene_code 而误把场景行当成全局行编辑
+    codes = {str(s.id): s.code for s in await SceneRepo.list_all()}
+    data = []
+    for row in rows:
+        item = CannedScriptRepo.to_dict(row)
+        item["scene_code"] = codes.get(item["scene_id"]) if item["scene_id"] else None
+        data.append(item)
+    return ApiResponse(data=data)
 
 
 @router.post("", response_model=ApiResponse[dict])
@@ -90,6 +144,9 @@ async def create_canned_script(body: CannedScriptCreate, user=Depends(require_ad
         where = f"（场景 {body.scene_code}）" if body.scene_code else "（全局）"
         raise Conflict(f"话术标识已存在{where}: {body.key}")
     patterns, keywords = _validate_rule_fields(body.patterns, body.keywords)
+    answer_source, kb_namespaces = await _validate_answer(
+        body.answer_source, body.reply_text, body.kb_namespaces
+    )
     row = await CannedScriptRepo.create(
         scene_id=uuid.UUID(scene_id) if scene_id else None,
         key=body.key,
@@ -98,6 +155,8 @@ async def create_canned_script(body: CannedScriptCreate, user=Depends(require_ad
         patterns=patterns,
         keywords=keywords,
         reply_text=body.reply_text.strip(),
+        answer_source=answer_source,
+        kb_namespaces=kb_namespaces,
         priority=body.priority,
         enabled=body.enabled,
         is_builtin=False,
@@ -108,7 +167,7 @@ async def create_canned_script(body: CannedScriptCreate, user=Depends(require_ad
         target_type="canned_script",
         target_id=_audit_target(row.key, body.scene_code),
     )
-    return ApiResponse(data=CannedScriptRepo.to_dict(row))
+    return ApiResponse(data=_with_scene_code(CannedScriptRepo.to_dict(row), body.scene_code))
 
 
 @router.put("/{key}", response_model=ApiResponse[dict])
@@ -136,6 +195,18 @@ async def update_canned_script(
         fields["category"] = body.category
     if body.reply_text is not None:
         fields["reply_text"] = body.reply_text.strip()
+    if body.answer_source is not None or body.kb_namespaces is not None or body.reply_text is not None:
+        # 三种入参都按“合并后的最终状态”校验：单独把 text 模式正文改成空串
+        # 也必须 400，否则该行仍会命中却产出空串，本轮静默走路由
+        answer_source, kb_namespaces = await _validate_answer(
+            body.answer_source or row.answer_source or ANSWER_SOURCE_TEXT,
+            body.reply_text if body.reply_text is not None else (row.reply_text or ""),
+            body.kb_namespaces
+            if body.kb_namespaces is not None
+            else list(row.kb_namespaces or []),
+        )
+        fields["answer_source"] = answer_source
+        fields["kb_namespaces"] = kb_namespaces
     if body.priority is not None:
         fields["priority"] = body.priority
     updated = await CannedScriptRepo.update(key, scene_id, **fields)
@@ -147,7 +218,7 @@ async def update_canned_script(
         target_type="canned_script",
         target_id=_audit_target(key, scene_code),
     )
-    return ApiResponse(data=CannedScriptRepo.to_dict(updated))
+    return ApiResponse(data=_with_scene_code(CannedScriptRepo.to_dict(updated), scene_code))
 
 
 @router.patch("/{key}/toggle", response_model=ApiResponse[dict])
@@ -167,7 +238,7 @@ async def toggle_canned_script(
         target_type="canned_script",
         target_id=_audit_target(key, scene_code),
     )
-    return ApiResponse(data=CannedScriptRepo.to_dict(row))
+    return ApiResponse(data=_with_scene_code(CannedScriptRepo.to_dict(row), scene_code))
 
 
 @router.delete("/{key}", response_model=ApiResponse)
@@ -214,6 +285,8 @@ async def match_canned_script_test(body: CannedScriptMatchRequest, user=Depends(
             "category": hit.category if hit else None,
             "title": matched_row.title if matched_row else None,
             "reply_text": hit.text if hit else None,
+            "answer_source": hit.answer_source if hit else None,
+            "kb_namespaces": list(hit.kb_namespaces) if hit else [],
             "rule_snapshot": [CannedScriptRepo.to_dict(r) for r in rows.values()][:50],
         }
     )

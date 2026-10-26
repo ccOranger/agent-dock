@@ -14,7 +14,13 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import require_admin, require_staff
 from app.core.cors import invalidate_origin_cache
 from app.core.exceptions import Conflict, NotFound, ParamError
-from app.models.repositories import AgentRepo, AuditRepo, IntegrationRepo, SceneRepo
+from app.models.repositories import (
+    AgentRepo,
+    AuditRepo,
+    ChatEventRepo,
+    IntegrationRepo,
+    SceneRepo,
+)
 from app.schemas.common import ApiResponse
 from app.schemas.scene import DEFAULT_SCENE_CODE, SceneStatus
 from app.schemas.scene_admin import (
@@ -23,13 +29,23 @@ from app.schemas.scene_admin import (
     SceneUpdate,
     SceneWidgetUpdate,
 )
+from app.services.canned_templates import ensure_scene_templates_committed
+from app.services.quota_service import KIND_SCENE, create_guard
+from app.services.runtime_config import (
+    normalize_runtime_config,
+    resolve_runtime,
+    runtime_effective_dict,
+    validate_runtime_namespaces,
+)
 from app.services.widget_config import normalize_origins, normalize_widget_config
 
 router = APIRouter(prefix="/admin/scenes", tags=["admin-scenes"])
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_READONLY_HINT = "默认场景只允许修改展示名与描述"
+_DEFAULT_READONLY_HINT = "默认场景只允许修改展示名、描述与运行参数（检索/历史/额度）"
+# 默认场景可变字段：运行参数不影响路由与绑定（路由仍固定直连 default_assistant）
+_DEFAULT_EDITABLE = {"display_name", "description", "runtime_config"}
 
 
 def _uuid_or_400(value: str, field: str) -> uuid.UUID:
@@ -52,6 +68,13 @@ async def _get_scene_or_404(scene_id: str):
     return scene
 
 
+async def _normalize_runtime(payload: dict | None) -> dict:
+    """校验并归一化 runtime_config；知识库引用必须是存在且启用中的库。"""
+    config = normalize_runtime_config(payload)
+    await validate_runtime_namespaces(config)
+    return config
+
+
 async def _validate_bound_agents(scene_id, agent_ids: list[str]) -> list[str]:
     """绑定白名单：只允许全局 Agent 或本场景专属 Agent。"""
     allowed = {item["id"] for item in await SceneRepo.list_agents_for_admin(scene_id)}
@@ -63,7 +86,15 @@ async def _validate_bound_agents(scene_id, agent_ids: list[str]) -> list[str]:
 
 @router.get("", response_model=ApiResponse[list])
 async def list_scenes(user=Depends(require_admin)):
-    return ApiResponse(data=await SceneRepo.list_with_agent_counts())
+    """场景列表 + 今日请求量与日额度（一次聚合，不逐场景查 chat_events）。"""
+    rows = await SceneRepo.list_with_agent_counts()
+    today = await ChatEventRepo.count_by_scene_today()
+    for row in rows:
+        runtime = resolve_runtime(row.get("runtime_config"))
+        row["today_requests"] = today.get(row["code"], 0)
+        row["quota_daily"] = runtime.quota.daily
+        row["quota_source"] = runtime.sources.get("quota.daily", "default")
+    return ApiResponse(data=rows)
 
 
 @router.get("/options", response_model=ApiResponse[list])
@@ -105,15 +136,19 @@ async def create_scene(body: SceneCreate, user=Depends(require_admin)):
         if body.fallback_agent_id
         else None
     )
-    scene = await SceneRepo.create(
-        code=body.code,
-        display_name=body.display_name,
-        description=body.description,
-        router_mode=body.router_mode,
-        fallback_agent_id=fallback_id,
-        fallback_text=body.fallback_text,
-        extra_router_prompt=body.extra_router_prompt,
-    )
+    runtime_config = await _normalize_runtime(body.runtime_config)
+    async with create_guard(user, KIND_SCENE):
+        scene = await SceneRepo.create(
+            code=body.code,
+            display_name=body.display_name,
+            description=body.description,
+            router_mode=body.router_mode,
+            fallback_agent_id=fallback_id,
+            fallback_text=body.fallback_text,
+            extra_router_prompt=body.extra_router_prompt,
+            runtime_config=runtime_config,
+            created_by=user.id,
+        )
     if agent_ids:
         await SceneRepo.set_agents(scene.id, agent_ids)
     # 单租户降级：新场景自动授权给全部接入方，避免已有 Key 调用新场景 403
@@ -121,6 +156,11 @@ async def create_scene(body: SceneCreate, user=Depends(require_admin)):
         await IntegrationRepo.grant_scene_to_all(scene.id)
     except Exception as exc:  # noqa: BLE001 - 授权失败不回滚已创建的场景
         logger.warning(f"新场景自动授权接入方失败（不影响场景创建）: {exc}")
+    # 新场景自动获得自己的身份/能力话术：否则客户问“你是谁”永远回平台统一文案
+    try:
+        await ensure_scene_templates_committed(scene.id)
+    except Exception as exc:  # noqa: BLE001 - 话术补齐失败不回滚已创建的场景
+        logger.warning(f"新场景初始化固定话术失败（不影响场景创建）: {exc}")
     await AuditRepo.write(
         "scene.create", user_id=user.id, target_type="scene", target_id=str(scene.id)
     )
@@ -133,6 +173,10 @@ async def get_scene(scene_id: str, user=Depends(require_admin)):
     agents = await SceneRepo.list_bound_agents(scene.id)
     data = SceneRepo.to_dict(scene, len(agents))
     data["bound_agent_ids"] = await SceneRepo.get_bound_agent_ids(scene.id)
+    # 后台展示“生效值 + 每个键的来源”，与运行时 resolve_runtime 同源
+    runtime = resolve_runtime(data["runtime_config"])
+    data["runtime_effective"] = runtime_effective_dict(runtime)
+    data["runtime_sources"] = dict(runtime.sources)
     return ApiResponse(data=data)
 
 
@@ -143,9 +187,12 @@ async def update_scene(scene_id: str, body: SceneUpdate, user=Depends(require_ad
     agent_ids = fields.pop("agent_ids", None)
 
     if scene.is_default:
-        blocked = set(fields) - {"display_name", "description"}
+        blocked = set(fields) - _DEFAULT_EDITABLE
         if blocked or agent_ids is not None:
             raise ParamError(_DEFAULT_READONLY_HINT)
+    if "runtime_config" in fields:
+        # 整对象替换：null 等于清空覆盖项（列是 NOT NULL，这里转成空对象）
+        fields["runtime_config"] = await _normalize_runtime(fields["runtime_config"])
     if "fallback_agent_id" in fields:
         raw = fields["fallback_agent_id"]
         fields["fallback_agent_id"] = (

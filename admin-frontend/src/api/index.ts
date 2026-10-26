@@ -38,6 +38,9 @@ import type {
   SceneUpdatePayload,
   SceneWidgetPayload,
   SearchResult,
+  StaffCreatePayload,
+  StaffMember,
+  StaffUpdatePayload,
   TicketDetail,
   TicketSummary,
   TraceUsageItem,
@@ -253,6 +256,23 @@ export const apiUpdateScene = (id: string, body: SceneUpdatePayload) =>
   unwrap(http.patch<never, { data: { data: Scene } }>(`/admin/scenes/${id}`, body))
 
 export const apiDeleteScene = (id: string) => http.delete(`/admin/scenes/${id}`)
+
+// ===== Admin：人员与配额 =====
+// 已用数量由后端按 created_by 分组一次取回（禁止逐人 count）；remaining=null 表示不限
+export const apiListStaff = () =>
+  unwrap(http.get<never, { data: { data: StaffMember[] } }>('/admin/staff'))
+
+export const apiCreateStaff = (body: StaffCreatePayload) =>
+  unwrap(http.post<never, { data: { data: StaffMember } }>('/admin/staff', body))
+
+/** quota 传了就是整对象替换；自己不能改自己的 quota 与角色/启用状态 */
+export const apiUpdateStaff = (id: string, body: StaffUpdatePayload) =>
+  unwrap(http.patch<never, { data: { data: StaffMember } }>(`/admin/staff/${id}`, body))
+
+export const apiResetStaffPassword = (id: string, password: string) =>
+  unwrap(http.post<never, { data: { data: { reset: boolean } } }>(`/admin/staff/${id}/password`, {
+    password,
+  }))
 
 /** 全量替换绑定；顺序即路由候选顺序 */
 export const apiSetSceneAgents = (id: string, agentIds: string[]) =>

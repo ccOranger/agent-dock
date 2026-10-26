@@ -4,6 +4,7 @@
 要挡在写入前（空规则、单字关键词、标识冲突），种子三条不能被删掉，
 命中测试给出的结论要和运行时用的是同一套归一化与优先级。
 """
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +24,8 @@ def _row_obj(
     enabled=True,
     is_builtin=False,
     scene_id=None,
+    answer_source="text",
+    kb_namespaces=None,
 ):
     return SimpleNamespace(
         id=f"id-{key}",
@@ -32,6 +35,8 @@ def _row_obj(
         patterns=list(patterns) if patterns is not None else [],
         keywords=list(keywords) if keywords is not None else [],
         reply_text=text,
+        answer_source=answer_source,
+        kb_namespaces=list(kb_namespaces) if kb_namespaces is not None else [],
         priority=priority,
         enabled=enabled,
         is_builtin=is_builtin,
@@ -44,6 +49,17 @@ def _row_obj(
 def _client(make_test_app, role="admin"):
     app = make_test_app([acs.router], prefix="")
     return TestClient(make_test_app.as_role(app, role))
+
+
+@pytest.fixture(autouse=True)
+def _stub_scene_codes(monkeypatch):
+    """列表要拼 scene_code 映射，但本模块默认“不碰真实库”：
+    默认返回空场景表，个别用例需要验证映射时自行覆盖"""
+
+    async def fake_scene_list_all():
+        return []
+
+    monkeypatch.setattr(acs.SceneRepo, "list_all", fake_scene_list_all)
 
 
 @pytest.fixture
@@ -74,6 +90,25 @@ async def test_list_returns_rows_in_runtime_order(admin_client, make_test_app, m
     data = resp.json()["data"]
     assert [r["key"] for r in data] == ["probing", "identity"]
     assert data[0]["enabled"] is True and data[0]["is_builtin"] is False
+
+
+def test_list_includes_scene_code_for_inactive_scene(admin_client, monkeypatch):
+    """已停用/归档场景不在 /scenes/options 里：列表必须自带 scene_code，
+    否则前端把场景行当全局行编辑，会覆盖所有继承该行的场景"""
+    scene_id = uuid.uuid4()
+
+    async def fake_list_all():
+        return [_row_obj(key="identity", scene_id=scene_id)]
+
+    async def fake_scene_list_all():
+        return [SimpleNamespace(id=scene_id, code="it_helpdesk")]
+
+    monkeypatch.setattr(CannedScriptRepo, "list_all", fake_list_all)
+    monkeypatch.setattr(acs.SceneRepo, "list_all", fake_scene_list_all)
+
+    data = admin_client.get("/admin/canned-scripts").json()["data"]
+    assert data[0]["scene_id"] == str(scene_id)
+    assert data[0]["scene_code"] == "it_helpdesk"
 
 
 def test_agent_role_can_read_but_not_write(staff_client, admin_client, monkeypatch):
@@ -237,6 +272,20 @@ def test_update_clearing_both_sides_is_rejected(admin_client, monkeypatch):
     assert resp.status_code == 400
 
 
+def test_update_clearing_text_reply_is_rejected(admin_client, monkeypatch):
+    """text 模式正文被单独改成空串也要 400：否则该行仍会命中却产出空串，
+    运行时静默改走路由，规则形同虚设"""
+
+    async def fake_get_by_key(key, scene_id=None):
+        return _row_obj(
+            key="business_hours", category="business", patterns=["营业时间"], text="9 点上班。"
+        )
+
+    monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
+    resp = admin_client.put("/admin/canned-scripts/business_hours", json={"reply_text": "   "})
+    assert resp.status_code == 400
+
+
 def test_update_missing_script_returns_404(admin_client, monkeypatch):
     _mute_audit(monkeypatch)
 
@@ -390,3 +439,139 @@ def test_match_on_empty_table_reports_no_hit(admin_client, monkeypatch):
     assert data["reply_text"] is None
     # 不再有 db/builtin 来源区分（代码兜底已取消）
     assert "source" not in data
+
+
+# ===== 回答来源：文本 / 知识库 =====
+def _stub_kbs(monkeypatch, rows):
+    async def fake_list_all():
+        return rows
+
+    monkeypatch.setattr(acs.KnowledgeBaseRepo, "list_all", fake_list_all)
+
+
+def _stub_create(monkeypatch, captured: dict):
+    async def fake_get_by_key(key, scene_id=None):
+        return None
+
+    async def fake_create(**fields):
+        captured.update(fields)
+        return _row_obj(key=fields["key"], category=fields["category"], text=fields["reply_text"])
+
+    monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
+    monkeypatch.setattr(CannedScriptRepo, "create", fake_create)
+
+
+def test_text_source_requires_reply_text(admin_client, monkeypatch):
+    """文本模式没有正文 = 命中后什么都不回，必须卡在写入前"""
+    _mute_audit(monkeypatch)
+    _stub_create(monkeypatch, {})
+    resp = admin_client.post(
+        "/admin/canned-scripts",
+        json={"key": "empty_text", "patterns": ["营业时间"], "reply_text": "   "},
+    )
+    assert resp.status_code == 400
+    assert "正文" in resp.json()["detail"]["message"]
+
+
+def test_kb_source_allows_empty_text(admin_client, monkeypatch):
+    """知识库模式的正文只当引导语：可以为空，但必须选库"""
+    _mute_audit(monkeypatch)
+    captured: dict = {}
+    _stub_create(monkeypatch, captured)
+    _stub_kbs(monkeypatch, [SimpleNamespace(namespace="cs_order", is_active=True)])
+
+    resp = admin_client.post(
+        "/admin/canned-scripts",
+        json={
+            "key": "after_sales_policy",
+            "patterns": ["退换货政策"],
+            "answer_source": "kb",
+            "kb_namespaces": [" cs_order ", "cs_order"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured["answer_source"] == "kb"
+    # 去空白 + 去重：重复的库会让同一批片段被检索两次再被去重丢掉
+    assert captured["kb_namespaces"] == ["cs_order"]
+
+
+def test_kb_source_requires_namespace(admin_client, monkeypatch):
+    _mute_audit(monkeypatch)
+    _stub_create(monkeypatch, {})
+    resp = admin_client.post(
+        "/admin/canned-scripts",
+        json={"key": "kb_empty", "patterns": ["退换货政策"], "answer_source": "kb"},
+    )
+    assert resp.status_code == 400
+    assert "至少选择一个知识库" in resp.json()["detail"]["message"]
+
+
+def test_kb_source_rejects_inactive_namespace(admin_client, monkeypatch):
+    """指向已停用/不存在的库等于永远零命中，比报错更难排查"""
+    _mute_audit(monkeypatch)
+    _stub_create(monkeypatch, {})
+    _stub_kbs(
+        monkeypatch,
+        [
+            SimpleNamespace(namespace="cs_order", is_active=True),
+            SimpleNamespace(namespace="cs_legacy", is_active=False),
+        ],
+    )
+    resp = admin_client.post(
+        "/admin/canned-scripts",
+        json={
+            "key": "kb_bad_ns",
+            "patterns": ["退换货政策"],
+            "answer_source": "kb",
+            "kb_namespaces": ["cs_order", "cs_legacy", "cs_missing"],
+        },
+    )
+    assert resp.status_code == 400
+    message = resp.json()["detail"]["message"]
+    assert "cs_legacy" in message and "cs_missing" in message
+
+
+def test_switch_to_text_keeps_namespaces(admin_client, monkeypatch):
+    """来回切换不丢已选知识库：切回 kb 时不用重选"""
+    _mute_audit(monkeypatch)
+    captured: dict = {}
+
+    async def fake_get_by_key(key, scene_id=None):
+        return _row_obj(key="after_sales_policy", category="business", patterns=["退换货政策"])
+
+    async def fake_update(key, scene_id=None, **fields):
+        captured.update(fields)
+        return _row_obj(key=key, category="business", text=fields.get("reply_text", ""))
+
+    monkeypatch.setattr(CannedScriptRepo, "get_by_key", fake_get_by_key)
+    monkeypatch.setattr(CannedScriptRepo, "update", fake_update)
+    _stub_kbs(monkeypatch, [SimpleNamespace(namespace="cs_order", is_active=True)])
+
+    resp = admin_client.put(
+        "/admin/canned-scripts/after_sales_policy",
+        json={"answer_source": "text", "reply_text": "7 天无理由退换。"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured["answer_source"] == "text"
+
+
+def test_match_reports_answer_source(admin_client, monkeypatch):
+    """命中测试要告诉后台“这句话会怎么答”：直接下发还是去查库"""
+
+    async def fake_list_enabled(scene_id=None):
+        row = _row_obj(
+            key="after_sales_policy",
+            category="business",
+            keywords=["退换货政策"],
+            answer_source="kb",
+            kb_namespaces=["cs_order"],
+        )
+        return [row]
+
+    monkeypatch.setattr(CannedScriptRepo, "list_enabled", fake_list_enabled)
+    data = admin_client.post(
+        "/admin/canned-scripts/match", json={"query": "退换货政策是什么"}
+    ).json()["data"]
+    assert data["matched"] is True
+    assert data["answer_source"] == "kb"
+    assert data["kb_namespaces"] == ["cs_order"]

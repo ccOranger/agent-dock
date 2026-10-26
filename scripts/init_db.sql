@@ -30,9 +30,11 @@ CREATE TABLE scenes (
     fallback_agent_id UUID,                               -- 不建外键，见上方说明
     fallback_text   TEXT,
     extra_router_prompt TEXT,                             -- 场景补充识别规则
+    runtime_config  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- 场景运行参数（空对象=全部继承全局）
     widget_config   JSONB NOT NULL DEFAULT '{}'::jsonb,   -- 标题/欢迎语/主题/位置等
     allowed_origins JSONB NOT NULL DEFAULT '[]'::jsonb,   -- 嵌入允许来源
     publish_key     VARCHAR(64),                          -- 前端嵌入公开标识（非密钥）
+    created_by      UUID,                                 -- 创建人（不建外键，与 audit_logs 一致）
     metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -41,6 +43,8 @@ CREATE TABLE scenes (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_scenes_single_default ON scenes(is_default) WHERE is_default;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_scenes_publish_key ON scenes(publish_key) WHERE publish_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_scenes_status ON scenes(status);
+-- 登录人配额：按 created_by 统计已创建数量
+CREATE INDEX IF NOT EXISTS idx_scenes_created_by ON scenes(created_by);
 
 -- 默认场景：无 scene_code 的请求落到这里。
 -- 固定 UUID 便于初始化脚本、排障脚本与文档引用；改动需同步 backend/app/schemas/scene.py。
@@ -64,6 +68,8 @@ CREATE TABLE staff_users (
                     CHECK (role IN ('agent','admin')),
     display_name    VARCHAR(64),
     metadata        JSONB DEFAULT '{}'::jsonb,
+    -- 资源创建配额：键缺失/null=不限，0=禁止创建，正数=上限
+    quota           JSONB NOT NULL DEFAULT '{}'::jsonb,
     is_active       BOOLEAN DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -165,6 +171,7 @@ CREATE TABLE agents (
     search_all_knowledge_bases BOOLEAN NOT NULL DEFAULT FALSE,
     mcp_tool_names  JSONB NOT NULL DEFAULT '[]'::jsonb,     -- Agent ↔ MCP 工具绑定
     custom_tool_names JSONB NOT NULL DEFAULT '[]'::jsonb,   -- Agent ↔ 代码自定义工具绑定
+    created_by      UUID,                                   -- 创建人（代码 Agent 为 NULL）
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- 场景内同名；scene_id NULL 表示全局共享，NULLS NOT DISTINCT 保证全局名也唯一
@@ -172,6 +179,7 @@ CREATE TABLE agents (
     -- 代码 Agent 是内核能力，必须全局注册，不能挂在某个场景下
     CONSTRAINT ck_agents_code_global CHECK (source <> 'code' OR scene_id IS NULL)
 );
+CREATE INDEX IF NOT EXISTS idx_agents_created_by ON agents(created_by);
 
 -- ========== 场景 ↔ Agent（多对多；enabled 只影响本场景） ==========
 CREATE TABLE scene_agents (
@@ -265,9 +273,11 @@ CREATE TABLE knowledge_bases (
     display_name  VARCHAR(128) NOT NULL,
     description   TEXT,
     is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by    UUID,                                   -- 创建人（初始化种子为 NULL）
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_created_by ON knowledge_bases(created_by);
 
 -- 知识库命名空间种子（与现有代码 Agent 的 rag_namespace 一致）
 INSERT INTO knowledge_bases (namespace, display_name, description) VALUES
@@ -432,6 +442,9 @@ CREATE INDEX IF NOT EXISTS idx_chat_events_integration_created
 -- 身份回填按 trace_id 定位请求行：无索引会随埋点增长退化为全表扫描
 CREATE INDEX IF NOT EXISTS idx_chat_events_trace
     ON chat_events(trace_id);
+-- 后台“当日全场景用量”按时间范围分组：现有 idx 前导列是场景，扫不了时间范围
+CREATE INDEX IF NOT EXISTS idx_chat_events_created_scene
+    ON chat_events(created_at DESC, scene_code);
 
 -- ========== 高频固定话术（硬模板，后台可维护） ==========
 -- scene_id NULL=全局（probing 等）；非空=场景覆盖。
@@ -445,6 +458,10 @@ CREATE TABLE IF NOT EXISTS canned_scripts (
     patterns    JSONB NOT NULL DEFAULT '[]'::jsonb,      -- 问法主干数组（整句全等）
     keywords    JSONB NOT NULL DEFAULT '[]'::jsonb,      -- 关键词数组（包含即命中）
     reply_text  TEXT NOT NULL DEFAULT '',
+    -- 回答来源：text=下发 reply_text；kb=检索 kb_namespaces 后按固定框架拼接（不走模型）
+    answer_source VARCHAR(16) NOT NULL DEFAULT 'text'
+                  CHECK (answer_source IN ('text','kb')),
+    kb_namespaces JSONB NOT NULL DEFAULT '[]'::jsonb,    -- answer_source=kb 时的检索范围
     priority    INT NOT NULL DEFAULT 0,                  -- 小者优先
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
     is_builtin  BOOLEAN NOT NULL DEFAULT FALSE,          -- 内置项可改文案/停用，不可删
@@ -461,5 +478,5 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     value       TEXT NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO schema_meta (key, value) VALUES ('version', '5')
+INSERT INTO schema_meta (key, value) VALUES ('version', '6')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

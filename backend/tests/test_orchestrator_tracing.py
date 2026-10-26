@@ -44,7 +44,7 @@ class FakeRouter:
 
 
 class FakeCtx:
-    async def build(self, user_id, query, rag_namespaces, collector=None):
+    async def build(self, user_id, query, rag_namespaces, collector=None, runtime=None):
         if collector:
             collector.memory_hit_count = 2
             collector.add(SPAN_MEMORY, "memory_search", hit_count=2)

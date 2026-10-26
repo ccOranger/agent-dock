@@ -478,6 +478,45 @@ export type SceneRouterMode = 'auto' | 'llm' | 'direct'
  * 路由不是实体：每个场景的「路由档案」由 router_mode + 绑定 Agent 派生。
  * auto 下 0 个=未配置、1 个=直连、>=2 个=LLM 路由；llm 永不直连；direct 强制直连。
  */
+/**
+ * 场景运行参数覆盖项：只放显式覆盖的键，缺省即继承全局。
+ * quota.* 是例外——缺省为 0（不限），不继承 PUBLIC_CHAT_* 单主体限流。
+ */
+export interface SceneRuntimeConfig {
+  rag?: {
+    /** false 只关闭自动注入，模型仍可主动调用 RAG 工具 */
+    inject?: boolean
+    top_k?: number
+    min_score?: number
+    timeout?: number
+    /** Agent 自身未声明知识库时的兜底检索范围 */
+    namespaces?: string[]
+  }
+  history_limit?: number
+  quota?: {
+    /** 场景总量分钟桶；0 = 不限 */
+    per_minute?: number | null
+    /** 场景总量日桶；0 = 不限 */
+    daily?: number | null
+  }
+}
+
+/** 详情接口返回的生效值：已与全局默认合并，后台只需展示不必再算 */
+export interface SceneRuntimeEffective {
+  rag: {
+    inject: boolean
+    top_k: number
+    min_score: number
+    timeout: number
+    namespaces: string[]
+  }
+  history_limit: number
+  quota: { per_minute: number; daily: number }
+}
+
+/** 单个运行参数的来源：scene=本场景覆盖、global=继承全局、default=固定缺省 */
+export type SceneRuntimeSource = 'scene' | 'global' | 'default'
+
 export interface Scene {
   id: string
   /** 对外唯一标识：chat 请求用它区分场景，创建后不可修改 */
@@ -494,6 +533,15 @@ export interface Scene {
   fallback_agent_id?: string | null
   fallback_text?: string | null
   extra_router_prompt?: string | null
+  /** 只含显式覆盖项；{}/缺省 = 全部继承全局 */
+  runtime_config?: SceneRuntimeConfig
+  /** 仅详情接口返回 */
+  runtime_effective?: SceneRuntimeEffective
+  runtime_sources?: Record<string, SceneRuntimeSource>
+  /** 列表接口返回：本场景今日请求数与生效的日额度（0 = 不限） */
+  today_requests?: number
+  quota_daily?: number
+  quota_source?: 'scene' | 'default'
   publish_key?: string | null
   allowed_origins: string[]
   /** 嵌入组件外观；只含后台显式保存过的键，缺省值以后端为准 */
@@ -549,6 +597,7 @@ export interface SceneCreatePayload {
   fallback_agent_id?: string | null
   fallback_text?: string | null
   extra_router_prompt?: string | null
+  runtime_config?: SceneRuntimeConfig | null
   agent_ids?: string[]
 }
 
@@ -563,6 +612,8 @@ export interface SceneUpdatePayload {
   fallback_agent_id?: string | null
   fallback_text?: string | null
   extra_router_prompt?: string | null
+  /** 整对象替换：传 null 或 {} 等于恢复“全部继承全局” */
+  runtime_config?: SceneRuntimeConfig | null
   /** 传了才全量替换绑定；顺序即路由候选顺序 */
   agent_ids?: string[]
 }
@@ -624,12 +675,16 @@ export interface IntegrationKeyIssueResult {
 
 // ===== 高频固定话术（硬模板）=====
 export type CannedScriptCategory = 'identity' | 'capability' | 'probing' | 'business'
+/** 回答来源：文本逐字下发 / 知识库检索拼接 */
+export type CannedAnswerSource = 'text' | 'kb'
 
 export interface CannedScript {
   id: string
   key: string
   /** 归属场景：NULL=全局（如 probing），非空=该场景覆盖行（同 key 覆盖全局） */
   scene_id?: string | null
+  /** 归属场景码（服务端下发）：场景可能已停用/归档，不能靠启用场景列表反查 */
+  scene_code?: string | null
   title?: string | null
   category: CannedScriptCategory
   /** 问法主干：归一化后整句全等才命中 */
@@ -637,6 +692,10 @@ export interface CannedScript {
   /** 关键词：整句包含即命中，判定更宽，误吞风险也更高 */
   keywords: string[]
   reply_text: string
+  /** text=逐字下发 reply_text；kb=检索知识库后按固定框架拼接（不经模型改写） */
+  answer_source: CannedAnswerSource
+  /** kb 模式检索范围；切回 text 时保留不报错，运行时忽略 */
+  kb_namespaces: string[]
   priority: number
   enabled: boolean
   /** 种子三条（建库时写入）：可改文案、可停用，不可删除；运行时只读这张表，代码里无兜底规则 */
@@ -653,6 +712,8 @@ export interface CannedScriptPayload {
   patterns: string[]
   keywords: string[]
   reply_text: string
+  answer_source?: CannedAnswerSource
+  kb_namespaces?: string[]
   priority: number
   enabled: boolean
 }
@@ -666,7 +727,70 @@ export interface CannedMatchResult {
   category?: CannedScriptCategory | null
   title?: string | null
   reply_text?: string | null
+  /** 命中后实际走哪条路径：text 直接下发，kb 检索拼接 */
+  answer_source?: CannedAnswerSource | null
+  kb_namespaces?: string[]
   rule_snapshot: CannedScript[]
+}
+
+// ===== 后台人员与配额（仅 admin）=====
+export type StaffRole = 'admin' | 'agent'
+
+/** 键缺失 / null = 不限，0 = 禁止创建，正数 = 上限 */
+export interface StaffQuota {
+  max_scenes?: number | null
+  max_agents?: number | null
+  max_knowledge_bases?: number | null
+}
+
+/** 已用数量：按 created_by 统计，与限额同键 */
+export interface StaffUsage {
+  scenes: number
+  agents: number
+  knowledge_bases: number
+}
+
+/** null = 不限（与 used 同键，便于直接展示“已用/上限”） */
+export interface StaffRemaining {
+  scenes: number | null
+  agents: number | null
+  knowledge_bases: number | null
+}
+
+export interface StaffMember {
+  id: string
+  username: string
+  role: StaffRole
+  display_name?: string | null
+  is_active: boolean
+  /** 只包含已配置的键；空对象 = 全部不限 */
+  quota: StaffQuota
+  used: StaffUsage
+  remaining: StaffRemaining
+  created_at?: string | null
+}
+
+export interface StaffCreatePayload {
+  username: string
+  password: string
+  role: StaffRole
+  display_name?: string | null
+  quota?: StaffQuota | null
+}
+
+/** quota 传了就是整对象替换（传 {} 清空全部限制） */
+export interface StaffUpdatePayload {
+  display_name?: string | null
+  role?: StaffRole
+  is_active?: boolean
+  quota?: StaffQuota | null
+}
+
+/** 三个配额键的中文标签（表格列与表单共用） */
+export const STAFF_QUOTA_LABELS: Record<keyof StaffQuota, string> = {
+  max_scenes: '业务场景',
+  max_agents: 'Agent',
+  max_knowledge_bases: '知识库',
 }
 
 export const CANNED_CATEGORY_LABELS: Record<CannedScriptCategory, string> = {

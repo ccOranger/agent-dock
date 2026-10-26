@@ -16,6 +16,7 @@ import time
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from app.agents.canned_scripts import KEY_IDENTITY
 from app.agents.router_agent import RouterAgent, describe_router_agent, render_router_prompt
 from app.agents.scene_router import (
     build_scene_router_profile,
@@ -24,12 +25,38 @@ from app.agents.scene_router import (
 )
 from app.api.deps import require_admin
 from app.core.exceptions import ParamError, SceneNotConfigured, SceneNotFound
-from app.models.repositories import SceneRepo, TraceRepo
+from app.models.repositories import CannedScriptRepo, SceneRepo, TraceRepo
 from app.schemas.common import ApiResponse
-from app.schemas.scene import RouterEffectiveMode
+from app.schemas.scene import RouterEffectiveMode, SceneWarningCode
 from app.services.scene_service import load_scene_context
 
 router = APIRouter(prefix="/admin/router", tags=["admin-router"])
+
+
+def _scene_script_keys(rows) -> dict[str, set[str]]:
+    """按场景归组“本场景自有且启用”的话术 key（全局行不计）。
+
+    在后台批量算一次：警告只看本场景是否配了自己的身份话术，
+    与“运行时全局行仍能抵住”无关——继承全局文案正是要提醒的事。
+    """
+    by_scene: dict[str, set[str]] = {}
+    for row in rows:
+        if row.scene_id is None or not row.enabled:
+            continue
+        by_scene.setdefault(str(row.scene_id), set()).add(row.key)
+    return by_scene
+
+
+def _append_identity_warning(data: dict, enabled_keys: set[str]) -> dict:
+    """没有本场景身份话术时补一条警告：客户问“你是谁”会落到全局文案。"""
+    if KEY_IDENTITY in enabled_keys:
+        return data
+    warnings = list(data.get("warnings") or [])
+    code = SceneWarningCode.NO_IDENTITY_SCRIPT.value
+    if code not in warnings:
+        warnings.append(code)
+    data["warnings"] = warnings
+    return data
 
 
 class RouterTestRequest(BaseModel):
@@ -61,9 +88,14 @@ async def router_effective_prompt(user=Depends(require_admin)):
 async def router_scenes(user=Depends(require_admin)):
     """场景路由摘要列表：只给结论与警告，不渲染提示词正文。"""
     summaries = []
+    # 一次取全表：场景多时避免“每个场景一次话术查询”的 N+1
+    scene_keys = _scene_script_keys(await CannedScriptRepo.list_all())
     for scene in await SceneRepo.list_all():
         context = await load_scene_context(scene.code, require_active=False)
-        summaries.append(profile_summary(build_scene_router_profile(context)))
+        summary = profile_summary(build_scene_router_profile(context))
+        summaries.append(
+            _append_identity_warning(summary, scene_keys.get(str(scene.id), set()))
+        )
     return ApiResponse(data=summaries)
 
 
@@ -71,7 +103,13 @@ async def router_scenes(user=Depends(require_admin)):
 async def router_scene_detail(code: str, user=Depends(require_admin)):
     """单个场景的生效配置 + 候选明细 + 健康警告（提示词正文走 /prompt）。"""
     context = await load_scene_context(code, require_active=False)
-    return ApiResponse(data=profile_to_dict(build_scene_router_profile(context)))
+    scene_keys = _scene_script_keys(await CannedScriptRepo.list_all())
+    return ApiResponse(
+        data=_append_identity_warning(
+            profile_to_dict(build_scene_router_profile(context)),
+            scene_keys.get(context.scene_id, set()),
+        )
+    )
 
 
 @router.get("/scenes/{code}/prompt", response_model=ApiResponse[dict])

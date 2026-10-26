@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import admin_router as ar
 from app.core.config import settings
-from app.models.repositories import AgentRepo
+from app.models.repositories import AgentRepo, CannedScriptRepo
 from app.schemas.scene import DEFAULT_ASSISTANT_NAME, DEFAULT_SCENE_ID, SceneContext
 
 PATH = ar.router.prefix  # /admin/router
@@ -25,6 +25,15 @@ def _dyn_row(name="refund_service", **kw):
         rag_namespace=kw.get("rag_namespace", None),
         mcp_tool_names=kw.get("mcp_tool_names", []),
     )
+
+
+def _stub_scene_scripts(monkeypatch, rows=None):
+    """身份话术警告要读 canned_scripts：按场景归组，测试里不落库。"""
+
+    async def fake_list_all():
+        return rows or []
+
+    monkeypatch.setattr(CannedScriptRepo, "list_all", fake_list_all)
 
 
 def _stub_agents(monkeypatch, *, dynamic_rows=None, code_rows=None):
@@ -188,7 +197,7 @@ def test_router_scenes_lists_summaries(admin_client, monkeypatch):
     ctx = _ctx(candidates=[_cand("order_service"), _cand("refund_service")])
 
     async def fake_list_all():
-        return [SimpleNamespace(code="mall_order", display_name="商城订单")]
+        return [SimpleNamespace(id=DEFAULT_SCENE_ID, code="mall_order", display_name="商城订单")]
 
     async def fake_load(code, require_active=True):
         assert code == "mall_order"
@@ -197,6 +206,7 @@ def test_router_scenes_lists_summaries(admin_client, monkeypatch):
 
     monkeypatch.setattr(ar.SceneRepo, "list_all", fake_list_all)
     monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(monkeypatch)
 
     data = admin_client.get(f"{PATH}/scenes").json()["data"]
     assert len(data) == 1
@@ -215,12 +225,104 @@ def test_router_scene_detail_returns_candidates(admin_client, monkeypatch):
         return ctx
 
     monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(monkeypatch)
     data = admin_client.get(f"{PATH}/scenes/mall_order").json()["data"]
     assert data["scene_name"] == "商城订单"
     assert data["candidate_count"] == 2
     assert {c["name"] for c in data["candidates"]} == {"order_service", "refund_service"}
     assert isinstance(data["warnings"], list)
     assert len(data["prompt_hash"]) == 12
+
+
+# ===== 身份话术警告：没配本场景身份话术就提醒 =====
+def _scene_detail(client):
+    return client.get(f"{PATH}/scenes/mall_order").json()["data"]
+
+
+def test_scene_detail_warns_without_identity_script(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(monkeypatch)
+
+    data = _scene_detail(admin_client)
+    assert "no_identity_script" in data["warnings"]
+
+
+def test_scene_detail_clears_warning_with_scene_row(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(
+        monkeypatch,
+        [
+            SimpleNamespace(
+                scene_id=uuid.UUID(DEFAULT_SCENE_ID), key="identity", enabled=True
+            )
+        ],
+    )
+
+    data = _scene_detail(admin_client)
+    assert "no_identity_script" not in data["warnings"]
+
+
+def test_global_identity_row_does_not_clear_warning(admin_client, monkeypatch):
+    """只有全局行时仍要提醒：继承全局文案正是要让运营看到的事"""
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(
+        monkeypatch, [SimpleNamespace(scene_id=None, key="identity", enabled=True)]
+    )
+
+    data = _scene_detail(admin_client)
+    assert "no_identity_script" in data["warnings"]
+
+
+def test_disabled_scene_identity_row_still_warns(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(
+        monkeypatch,
+        [
+            SimpleNamespace(
+                scene_id=uuid.UUID(DEFAULT_SCENE_ID), key="identity", enabled=False
+            )
+        ],
+    )
+
+    data = _scene_detail(admin_client)
+    assert "no_identity_script" in data["warnings"]
+
+
+def test_scene_list_warns_per_scene(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_list_all():
+        return [SimpleNamespace(id=DEFAULT_SCENE_ID, code="mall_order", display_name="商城订单")]
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar.SceneRepo, "list_all", fake_list_all)
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(monkeypatch)
+
+    summaries = admin_client.get(f"{PATH}/scenes").json()["data"]
+    assert "no_identity_script" in summaries[0]["warnings"]
 
 
 def test_router_scene_prompt_is_scene_scoped(admin_client, monkeypatch):

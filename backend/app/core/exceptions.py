@@ -73,6 +73,12 @@ class SceneNotConfigured(BizError):
     __doc__ = "场景未配置可用 Agent"
 
 
+class QuotaExceeded(BizError):
+    code = 3006
+    http_status = status.HTTP_403_FORBIDDEN
+    __doc__ = "资源创建配额已满"
+
+
 class ToolParamError(BizError):
     code = 4001
     http_status = status.HTTP_400_BAD_REQUEST

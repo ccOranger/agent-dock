@@ -70,7 +70,7 @@ def test_create_base_success_and_conflict(admin_client, monkeypatch):
     async def fake_get(namespace):
         return SimpleNamespace(namespace=namespace) if namespace in existing else None
 
-    async def fake_create(namespace, display_name, description):
+    async def fake_create(namespace, display_name, description, created_by=None):
         existing.add(namespace)
         return SimpleNamespace(
             namespace=namespace, display_name=display_name, is_active=True

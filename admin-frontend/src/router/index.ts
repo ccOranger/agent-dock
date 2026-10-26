@@ -16,6 +16,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'scenes', component: () => import('@/views/ScenesView.vue'), meta: { title: '业务场景', roles: ['admin'] } },
       { path: 'integrations', component: () => import('@/views/IntegrationsView.vue'), meta: { title: '接入方管理', roles: ['admin'] } },
       { path: 'agents', component: () => import('@/views/AgentList.vue'), meta: { title: 'Agent 管理', roles: ['admin'] } },
+      { path: 'staff', component: () => import('@/views/StaffQuotaView.vue'), meta: { title: '人员与配额', roles: ['admin'] } },
       { path: 'router', component: () => import('@/views/RouterInfoView.vue'), meta: { title: '路由分发器', roles: ['admin'] } },
       { path: 'mcp-servers', component: () => import('@/views/McpServersView.vue'), meta: { title: 'MCP 服务管理', roles: ['admin'] } },
       { path: 'custom-tools', component: () => import('@/views/CustomToolsView.vue'), meta: { title: '自定义工具', roles: ['admin'] } },

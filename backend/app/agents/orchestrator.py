@@ -19,7 +19,11 @@ from typing import Any
 from hello_agents import Message
 from hello_agents.agents import SimpleAgent
 
-from app.agents.canned_scripts import match_canned_script
+from app.agents.canned_scripts import (
+    ANSWER_SOURCE_KB,
+    match_canned_script,
+    render_script_text,
+)
 from app.agents.registry import AGENT_REGISTRY, resolve_business_agent
 from app.agents.router_agent import RouterAgent
 from app.agents.scene_router import build_scene_router_profile
@@ -36,6 +40,8 @@ from app.core.tracing import (
     SPAN_RUN,
 )
 from app.schemas.scene import SceneContext, SceneRouterProfile
+from app.services.canned_answer import answer_from_kb
+from app.services.runtime_config import effective_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -337,6 +343,50 @@ class Orchestrator:
             # 避免断开后继续消耗 LLM token，并避免事件堆入无人消费的队列
             stop.set()
 
+    @staticmethod
+    async def _resolve_canned_answer(
+        scene: SceneContext | None,
+        canned,
+        query: str,
+        collector=None,
+    ) -> str:
+        """取一条命中话术本轮要下发的正文；空串表示本轮继续走路由。
+
+        - text 模式：渲染占位符后直接下发（毫秒级，不查库）；
+        - kb 模式：检索绑定的知识库并按固定框架拼接，零命中/超时/异常都回退到正文。
+        """
+        rendered = render_script_text(canned.text, scene)
+        if canned.answer_source != ANSWER_SOURCE_KB:
+            if collector:
+                collector.add(
+                    SPAN_CANNED,
+                    canned.key,
+                    category=canned.category,
+                    answer_source=canned.answer_source,
+                    text_chars=len(rendered),
+                )
+            return rendered
+
+        kb = await answer_from_kb(scene, canned, effective_runtime(scene), query)
+        answer = kb.text or rendered
+        if collector:
+            collector.add(
+                SPAN_CANNED,
+                canned.key,
+                category=canned.category,
+                answer_source="kb",
+                kb_namespaces=list(kb.namespaces),
+                kb_chunks=kb.chunks,
+                kb_status=kb.status,
+                text_chars=len(answer),
+                status="error" if kb.status == "error" else "ok",
+            )
+            # 知识库命中的分块计入本轮 RAG 统计（与 ContextEngineer 自动注入同一口径）
+            collector.rag_chunk_count += kb.chunks
+            for ns in kb.namespaces:
+                collector.add_unique("rag_namespaces", ns)
+        return answer
+
     async def dispatch(
         self,
         user_id: str,
@@ -375,6 +425,8 @@ class Orchestrator:
         threshold = (
             profile.confidence_threshold if profile is not None else CONFIDENCE_THRESHOLD
         )
+        # 运行参数只解析一次：同一轮所有意图/环节共享，避免热路径重复合并全局默认
+        runtime = effective_runtime(scene)
         self._ctx_cache.clear()
 
         # ---- 0. 高频固定话术（身份 / 能力 / 探听配置）：命中则逐字下发硬模板 ----
@@ -386,13 +438,22 @@ class Orchestrator:
             query, scene.scene_id if scene is not None else None
         )
         if canned is not None:
-            logger.info(f"[canned] 命中固定话术 {canned.key}，跳过路由与 Agent 执行")
-            if collector:
-                collector.add(SPAN_CANNED, canned.key, category=canned.category, text_chars=len(canned.text))
-                collector.mark_first_token()
-                collector.record_outcome(OUTCOME_ANSWERED)
-            yield {"type": "text", "data": {"content": canned.text}}
-            return
+            # 知识库模式需要一次异步检索：先发状态事件，避免 1–3 秒静默
+            if canned.answer_source == ANSWER_SOURCE_KB:
+                yield {
+                    "type": "status",
+                    "data": {"stage": "preparing", "text": "正在查询知识库…"},
+                }
+            answer = await self._resolve_canned_answer(scene, canned, query, collector)
+            if answer:
+                logger.info(f"[canned] 命中固定话术 {canned.key}，跳过路由与 Agent 执行")
+                if collector:
+                    collector.mark_first_token()
+                    collector.record_outcome(OUTCOME_ANSWERED)
+                yield {"type": "text", "data": {"content": answer}}
+                return
+            # 知识库零命中且没有兜底文案：不拦截本轮，继续走路由
+            logger.info(f"[canned] 命中 {canned.key} 但无可用答案，本轮继续正常路由")
 
         # ---- 1. 路由（场景直连则跳过；否则可多意图） ----
         direct_agent = (
@@ -584,6 +645,7 @@ class Orchestrator:
                 history=history,
                 collector=collector,
                 intent_index=index,
+                runtime=runtime,
             ):
                 etype = event.get("type")
                 data = event.get("data") or {}
@@ -666,6 +728,7 @@ class Orchestrator:
         history: list[dict] | None = None,
         collector=None,
         intent_index: int = 0,
+        runtime=None,
     ) -> AsyncIterator[dict]:
         """构建并流式执行单个业务 Agent（含 MCP 预取与上下文工程）。"""
         agent_name = getattr(business_agent, "name", "?")
@@ -682,7 +745,7 @@ class Orchestrator:
 
         # ---- 上下文工程 ----
         # 多意图共享同一 query：按 (用户, query, 命名空间) 缓存，第二个意图不再重复检索
-        rag_namespaces = await self._resolve_rag_namespaces(business_agent)
+        rag_namespaces = await self._resolve_rag_namespaces(business_agent, runtime)
         cache_key = (user_id, query, tuple(rag_namespaces))
         enriched_query = self._ctx_cache.get(cache_key)
         if enriched_query is None:
@@ -691,6 +754,7 @@ class Orchestrator:
                 query=query,
                 rag_namespaces=rag_namespaces,
                 collector=collector,
+                runtime=runtime,
             )
             self._ctx_cache[cache_key] = enriched_query
 
@@ -747,16 +811,21 @@ class Orchestrator:
                 simple_agent._history.append(Message(content, role))
 
     @staticmethod
-    async def _resolve_rag_namespaces(business_agent) -> list[str]:
+    async def _resolve_rag_namespaces(business_agent, runtime=None) -> list[str]:
         """解析业务 Agent 实际检索的知识库命名空间列表。
 
-        知识库不记场景归属：检索范围完全由 Agent 自己声明，同库可被多个场景的 Agent 复用。
+        知识库不记场景归属：检索范围默认由 Agent 自己声明，同库可被多个场景的 Agent 复用。
 
         优先级：
+        - 场景运行参数显式配置了 rag.namespaces：以场景为准（后台已校验库存在且启用，
+          否则“来源=本场景覆盖”的展示与实际行为不一致）；
         - search_all_knowledge_bases=True：覆盖全部启用知识库（后台默认不开启该开关，
-          跨业务检索靠 namespace 命名与配置纪律控制）。
+          跨业务检索靠 namespace 命名与配置纪律控制）；
         - 否则：rag_namespace（单库）与 rag_namespaces（显式多库）合并去重，按声明顺序检索。
         """
+        if runtime is not None and runtime.rag_namespaces:
+            return list(runtime.rag_namespaces)
+
         own = business_agent.rag_namespace
         extra = list(getattr(business_agent, "rag_namespaces", []) or [])
 
@@ -776,4 +845,5 @@ class Orchestrator:
             namespaces = [b.namespace for b in bases if b.is_active]
             # 自身默认空间与显式多库前置（优先级更高），再补齐其余启用库
             return _dedupe(([own] if own else []) + extra + namespaces)
-        return _dedupe(([own] if own else []) + extra)
+        resolved = _dedupe(([own] if own else []) + extra)
+        return resolved

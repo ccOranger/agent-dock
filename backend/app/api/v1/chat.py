@@ -31,6 +31,12 @@ def _rate_actor(user, body: ChatRequest, request: Request) -> str:
     return f"ip:{client_ip(request)}"
 
 
+def _scene_quota(scene):
+    """场景总额度：未配置（0）时由限流层自行跳过这两个桶。"""
+    runtime = getattr(scene, "runtime", None)
+    return runtime.quota if runtime is not None else None
+
+
 async def _resolve_and_authorize(request: Request, scene, user) -> dict | None:
     """按身份强度解析接入方：登录客户 > API Key > 嵌入公开标识。
 
@@ -99,7 +105,9 @@ async def chat_stream(
         user=user,
         integration_id=integration_id,
     )
-    slot: ChatSlot = await acquire_chat_slot(scene.code, _rate_actor(user, body, request))
+    slot: ChatSlot = await acquire_chat_slot(
+        scene.code, _rate_actor(user, body, request), _scene_quota(scene)
+    )
 
     async def gen():
         try:
@@ -166,7 +174,9 @@ async def chat_message(
         user=user,
         integration_id=integration_id,
     )
-    slot = await acquire_chat_slot(scene.code, _rate_actor(user, body, request))
+    slot = await acquire_chat_slot(
+        scene.code, _rate_actor(user, body, request), _scene_quota(scene)
+    )
     try:
         result = await service.reply(
             user_id=str(user.id) if user is not None else None,

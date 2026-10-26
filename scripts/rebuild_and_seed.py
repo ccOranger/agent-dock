@@ -49,6 +49,7 @@ from seed_data import (  # noqa: E402
 )
 
 from app.agents.canned_scripts import SEED_RULES  # noqa: E402
+from app.services.canned_templates import TEMPLATE_KEYS  # noqa: E402
 
 # 需要删除的表（含遗留单表 users）；先删子表再删父表，CASCADE 兜底依赖
 DROP_TABLES = [
@@ -180,6 +181,20 @@ def build_sql() -> str:
             f"{lit(sorted(rule.patterns))}, {lit(list(rule.keywords))}, {lit(rule.text)}, "
             f"{lit(rule.priority)}, TRUE, TRUE);"
         )
+    # 场景身份/能力话术：按全局模板复制一份到每个场景（与 seed_data.py、
+    # 后台新建场景走同一套规则：只补缺失 key，不覆盖运营改过的行）。
+    parts.append(
+        "INSERT INTO canned_scripts "
+        "(scene_id, key, title, category, patterns, keywords, reply_text, "
+        "answer_source, kb_namespaces, priority, enabled, is_builtin) "
+        "SELECT s.id, c.key, c.title, c.category, c.patterns, c.keywords, c.reply_text, "
+        "c.answer_source, c.kb_namespaces, c.priority, TRUE, FALSE "
+        "FROM scenes s CROSS JOIN canned_scripts c "
+        f"WHERE c.scene_id IS NULL AND c.key IN ({', '.join(lit(k) for k in TEMPLATE_KEYS)}) "
+        "AND NOT EXISTS (SELECT 1 FROM canned_scripts x "
+        "WHERE x.scene_id = s.id AND x.key = c.key) "
+        "ON CONFLICT (scene_id, key) DO NOTHING;"
+    )
     for d in ACTIVE_DOCUMENTS:
         parts.append(
             "INSERT INTO documents (title, source, content_type, status, rag_namespace, chunk_count, kind) VALUES "

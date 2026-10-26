@@ -49,6 +49,15 @@
           <span :class="{ muted: !row.agent_count }">{{ row.agent_count }} 个</span>
         </template>
       </el-table-column>
+      <el-table-column label="今日请求" width="150">
+        <template #default="{ row }">
+          <span :class="quotaTextClass(row)">{{ row.today_requests ?? 0 }}</span>
+          <span class="muted small"> / {{ row.quota_daily ? row.quota_daily : '不限' }}</span>
+          <div class="muted small">
+            {{ row.quota_daily ? (row.quota_source === 'scene' ? '场景日额度' : '继承额度') : '未配置额度' }}
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="说明" min-width="220" show-overflow-tooltip>
         <template #default="{ row }">
           {{ row.description || '—' }}
@@ -65,7 +74,7 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="300" fixed="right">
+      <el-table-column label="操作" width="380" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button
@@ -75,6 +84,7 @@
             :disabled="row.is_default"
             @click="openBind(row)"
           >绑定 Agent</el-button>
+          <el-button link type="primary" size="small" @click="openScripts(row)">固定话术</el-button>
           <el-button link type="primary" size="small" @click="openEmbed(row)">接入</el-button>
           <el-button link type="primary" size="small" @click="openChat(row)">试聊</el-button>
           <el-button
@@ -152,6 +162,71 @@
           placeholder="例如：这个问题我先帮您转给人工客服，请稍等。"
         />
       </el-form-item>
+      <el-divider content-position="left">运行参数</el-divider>
+      <div class="rule-tip runtime-intro">
+        只影响本场景的检索、历史与额度；留空即继承全局。场景额度缺省为 0（不限），
+        不继承 PUBLIC_CHAT_* 的单主体限流——两者统计的对象不同。
+      </div>
+      <el-form-item label="自动注入知识库">
+        <el-select
+          v-model="runtimeForm.ragInject"
+          clearable
+          placeholder="继承全局"
+          style="width: 220px"
+        >
+          <el-option label="开启" :value="true" />
+          <el-option label="关闭（模型仍可主动调 RAG 工具）" :value="false" />
+        </el-select>
+        <el-tag size="small" class="src-tag" :type="sourceOf('rag.inject').type">
+          {{ sourceOf('rag.inject').text }}
+        </el-tag>
+      </el-form-item>
+      <el-form-item v-for="field in runtimeNumberFields" :key="field.key" :label="field.label">
+        <el-input-number
+          v-model="runtimeForm.numbers[field.key]"
+          :min="field.min"
+          :max="field.max"
+          :step="field.step"
+          :precision="field.precision"
+          :controls="false"
+          placeholder="继承"
+          style="width: 150px"
+        />
+        <el-tag size="small" class="src-tag" :type="sourceOf(field.key).type">
+          {{ sourceOf(field.key).text }}
+        </el-tag>
+        <span class="muted small">生效：{{ effectiveText(field.key) }}</span>
+      </el-form-item>
+      <el-form-item>
+        <template #label>
+          兜底知识库
+          <el-tooltip
+            placement="top"
+            content="只在绑定 Agent 自身没声明知识库时生效；Agent 显式声明优先，留空则不遮挡。"
+          >
+            <span class="q-help">?</span>
+          </el-tooltip>
+        </template>
+        <el-select
+          v-model="runtimeForm.namespaces"
+          multiple
+          clearable
+          collapse-tags
+          placeholder="继承（不额外指定）"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="kb in activeBases"
+            :key="kb.namespace"
+            :label="`${kb.display_name}（${kb.namespace}）`"
+            :value="kb.namespace"
+          />
+        </el-select>
+        <div class="rule-tip">必须是启用中的知识库，最多 10 个；停用的库后端会拒绝保存。</div>
+      </el-form-item>
+      <el-form-item>
+        <el-button link size="small" @click="resetRuntimeForm">恢复全部继承</el-button>
+      </el-form-item>
       <el-form-item v-if="editing && !isDefaultEditing" label="状态">
         <el-select v-model="form.status" style="width: 100%">
           <el-option label="启用" value="active" />
@@ -161,7 +236,7 @@
       </el-form-item>
       <el-form-item v-if="isDefaultEditing">
         <span class="muted small">
-          默认场景承担「无 scene_code」的全部请求，只允许修改展示名与说明；路由模式、绑定 Agent、启停由平台固定。
+          默认场景承担「无 scene_code」的全部请求，只允许修改展示名、说明与运行参数；路由模式、绑定 Agent、启停由平台固定。
         </span>
       </el-form-item>
     </el-form>
@@ -354,6 +429,75 @@
       <el-button type="primary" :loading="embedSaving" @click="saveEmbed">保存接入配置</el-button>
     </template>
   </el-drawer>
+
+  <el-drawer v-model="scriptsVisible" :title="scriptsTitle" size="820px">
+    <div v-loading="scriptsLoading" class="scripts-body">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="身份/能力话术按场景独立：本场景没有自己的行时，继承全局文案"
+        description="固定话术在路由与大模型之前命中并逐字下发；回答来源选知识库时，检索结果按固定格式拼接，不经过模型改写。同标识的场景行会覆盖全局行。"
+        style="margin-bottom: 12px"
+      />
+      <el-alert
+        v-if="missingTemplateKeys.length"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="本场景还没有自己的身份/能力话术，当前继承全局文案"
+        style="margin-bottom: 12px"
+      >
+        <div class="missing-row">
+          <span>缺少：{{ missingTemplateKeys.map((k) => CANNED_CATEGORY_LABELS[k]).join('、') }}</span>
+          <el-button
+            type="primary"
+            size="small"
+            :loading="templateCreating"
+            @click="createSceneTemplates"
+          >
+            从模板生成本场景话术
+          </el-button>
+        </div>
+      </el-alert>
+
+      <el-table :data="sceneScripts" size="small">
+        <el-table-column label="标识" width="140">
+          <template #default="{ row }">
+            <span>{{ row.key }}</span>
+            <el-tag v-if="row.scene_id" size="small" type="success" class="own-tag">本场景</el-tag>
+            <el-tag v-else size="small" type="info" class="own-tag">全局</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="分组" width="100">
+          <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
+        </el-table-column>
+        <el-table-column label="回答来源" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.answer_source === 'kb'" size="small" type="warning">知识库</el-tag>
+            <span v-else class="muted">文本</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="规则 / 正文" min-width="240">
+          <template #default="{ row }">
+            <span class="muted small">
+              问法 {{ row.patterns.length }} · 关键词 {{ row.keywords.length }}
+            </span>
+            <div class="script-text">{{ scriptSummary(row) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="启用" width="70">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" @change="() => toggleSceneScript(row)" />
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+    <template #footer>
+      <el-button @click="scriptsVisible = false">关闭</el-button>
+      <el-button type="primary" @click="gotoCannedScripts">去固定话术页维护</el-button>
+    </template>
+  </el-drawer>
 </template>
 
 <script setup lang="ts">
@@ -361,25 +505,36 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  apiCreateCannedScript,
   apiCreateScene,
   apiDeleteScene,
   apiGetScene,
+  apiListBases,
+  apiListCannedScripts,
   apiListIntegrations,
   apiListScenes,
   apiSceneAgentOptions,
   apiSetSceneAgents,
+  apiToggleCannedScript,
   apiUpdateScene,
   apiUpdateSceneWidget,
 } from '@/api'
 import type {
+  CannedScript,
+  CannedScriptCategory,
   Integration,
+  KnowledgeBase,
   Scene,
   SceneAgentOption,
   SceneCreatePayload,
   SceneRouterMode,
+  SceneRuntimeConfig,
+  SceneRuntimeEffective,
+  SceneRuntimeSource,
   SceneStatus,
   SceneUpdatePayload,
 } from '@/types'
+import { CANNED_CATEGORY_LABELS } from '@/types'
 
 const router = useRouter()
 
@@ -394,6 +549,8 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
+// 详情回包序号：防止“等详情期间已换了场景/已开始输入”被旧回包覆盖
+let editSeq = 0
 
 interface SceneForm {
   id: string
@@ -419,6 +576,117 @@ const isDefaultEditing = computed(() => {
   if (!editing.value) return false
   return scenes.value.find((s) => s.id === form.id)?.is_default === true
 })
+
+// ===== 运行参数（runtime_config）=====
+// null / '' / 空数组 = 不覆盖该键（继承全局）；提交时只收集真正填写的项
+const runtimeForm = reactive({
+  ragInject: '' as boolean | '',
+  numbers: {
+    'rag.top_k': null,
+    'rag.min_score': null,
+    'rag.timeout': null,
+    history_limit: null,
+    'quota.per_minute': null,
+    'quota.daily': null,
+  } as Record<string, number | null>,
+  namespaces: [] as string[],
+})
+
+// 详情接口返回的生效值与来源：直接用后端算好的，前端不重复推导继承逻辑
+const runtimeEffective = ref<SceneRuntimeEffective | null>(null)
+const runtimeSources = ref<Record<string, SceneRuntimeSource>>({})
+const activeBases = ref<KnowledgeBase[]>([])
+
+// 取值范围与后端 runtime_config._RANGES 同源，越界由前端先拦一层
+const runtimeNumberFields = [
+  { key: 'rag.top_k', label: '检索条数', min: 1, max: 20, step: 1, precision: 0 },
+  { key: 'rag.min_score', label: '最低相关分', min: 0, max: 1, step: 0.05, precision: 2 },
+  { key: 'rag.timeout', label: '检索超时(秒)', min: 1, max: 60, step: 1, precision: 0 },
+  { key: 'history_limit', label: '历史条数', min: 1, max: 50, step: 1, precision: 0 },
+  { key: 'quota.per_minute', label: '分钟额度', min: 0, max: 600, step: 10, precision: 0 },
+  { key: 'quota.daily', label: '日额度', min: 0, max: 100000, step: 100, precision: 0 },
+]
+
+function sourceOf(key: string): { text: string; type: 'success' | 'info' } {
+  const source = runtimeSources.value[key]
+  if (source === 'scene') return { text: '本场景覆盖', type: 'success' }
+  if (source === 'default') return { text: '默认值', type: 'info' }
+  return { text: '继承全局', type: 'info' }
+}
+
+function effectiveText(key: string): string {
+  const eff = runtimeEffective.value
+  if (!eff) return '全局默认'
+  if (key === 'rag.inject') return eff.rag.inject ? '开启' : '关闭'
+  if (key === 'rag.top_k') return `${eff.rag.top_k} 条`
+  if (key === 'rag.min_score') return String(eff.rag.min_score)
+  if (key === 'rag.timeout') return `${eff.rag.timeout} 秒`
+  if (key === 'history_limit') return `${eff.history_limit} 条`
+  if (key === 'quota.per_minute') return eff.quota.per_minute ? `${eff.quota.per_minute} 次/分` : '不限'
+  if (key === 'quota.daily') return eff.quota.daily ? `${eff.quota.daily} 次/日` : '不限'
+  return '—'
+}
+
+function resetRuntimeForm() {
+  runtimeForm.ragInject = ''
+  runtimeForm.namespaces = []
+  for (const key of Object.keys(runtimeForm.numbers)) runtimeForm.numbers[key] = null
+}
+
+function applyRuntime(scene: Scene) {
+  const cfg = scene.runtime_config || {}
+  runtimeForm.ragInject = typeof cfg.rag?.inject === 'boolean' ? cfg.rag.inject : ''
+  runtimeForm.numbers['rag.top_k'] = cfg.rag?.top_k ?? null
+  runtimeForm.numbers['rag.min_score'] = cfg.rag?.min_score ?? null
+  runtimeForm.numbers['rag.timeout'] = cfg.rag?.timeout ?? null
+  runtimeForm.numbers['history_limit'] = cfg.history_limit ?? null
+  runtimeForm.numbers['quota.per_minute'] = cfg.quota?.per_minute ?? null
+  runtimeForm.numbers['quota.daily'] = cfg.quota?.daily ?? null
+  runtimeForm.namespaces = [...(cfg.rag?.namespaces || [])]
+  runtimeEffective.value = scene.runtime_effective ?? null
+  runtimeSources.value = scene.runtime_sources ?? {}
+}
+
+function numberOrNull(key: string): number | null {
+  const value = runtimeForm.numbers[key]
+  return value === null || value === undefined ? null : Number(value)
+}
+
+/** 只组装显式覆盖项；返回 {} 表示全部继承（后端会把空对象当“清空覆盖”） */
+function buildRuntimeConfig(): SceneRuntimeConfig {
+  const out: SceneRuntimeConfig = {}
+  const rag: NonNullable<SceneRuntimeConfig['rag']> = {}
+  if (runtimeForm.ragInject !== '') rag.inject = runtimeForm.ragInject
+  const topK = numberOrNull('rag.top_k')
+  if (topK !== null) rag.top_k = topK
+  const minScore = numberOrNull('rag.min_score')
+  if (minScore !== null) rag.min_score = minScore
+  const timeout = numberOrNull('rag.timeout')
+  if (timeout !== null) rag.timeout = timeout
+  if (runtimeForm.namespaces.length) rag.namespaces = [...runtimeForm.namespaces]
+  if (Object.keys(rag).length) out.rag = rag
+
+  const historyLimit = numberOrNull('history_limit')
+  if (historyLimit !== null) out.history_limit = historyLimit
+
+  const quota: NonNullable<SceneRuntimeConfig['quota']> = {}
+  const perMinute = numberOrNull('quota.per_minute')
+  if (perMinute !== null) quota.per_minute = perMinute
+  const daily = numberOrNull('quota.daily')
+  if (daily !== null) quota.daily = daily
+  if (Object.keys(quota).length) out.quota = quota
+  return out
+}
+
+/** 今日请求/日额度着色：达上限标红，超 80% 标黄；未配额度不着色 */
+function quotaTextClass(row: Scene) {
+  const limit = row.quota_daily || 0
+  if (!limit) return ''
+  const used = row.today_requests || 0
+  if (used >= limit) return 'quota-full'
+  if (used * 5 >= limit * 4) return 'quota-warn'
+  return ''
+}
 
 function modeLabel(mode: SceneRouterMode) {
   return ROUTER_MODE_LABELS[mode] || mode
@@ -454,6 +722,9 @@ function resetForm() {
   form.status = 'active'
   form.router_mode = 'auto'
   form.fallback_text = ''
+  resetRuntimeForm()
+  runtimeEffective.value = null
+  runtimeSources.value = {}
 }
 
 function openCreate() {
@@ -462,7 +733,8 @@ function openCreate() {
   dialogVisible.value = true
 }
 
-function openEdit(row: Scene) {
+async function openEdit(row: Scene) {
+  const seq = ++editSeq
   editing.value = true
   form.id = row.id
   form.code = row.code
@@ -471,7 +743,22 @@ function openEdit(row: Scene) {
   form.status = row.status
   form.router_mode = row.router_mode
   form.fallback_text = row.fallback_text || ''
+  applyRuntime(row)
   dialogVisible.value = true
+  // 列表接口不带 runtime_effective/runtime_sources，打开弹窗后再用详情校准
+  try {
+    const detail = await apiGetScene(row.id)
+    // 序号变化说明期间又打开了别的场景；id 再兜一层，避免覆盖用户已输入的内容
+    if (seq !== editSeq || form.id !== detail.id) return
+    form.display_name = detail.display_name
+    form.description = detail.description || ''
+    form.status = detail.status
+    form.router_mode = detail.router_mode
+    form.fallback_text = detail.fallback_text || ''
+    applyRuntime(detail)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '读取场景详情失败')
+  }
 }
 
 async function submit() {
@@ -483,15 +770,17 @@ async function submit() {
   try {
     const description = form.description.trim() || null
     const fallbackText = form.fallback_text.trim() || null
+    const runtimeConfig = buildRuntimeConfig()
     if (editing.value) {
       const payload: SceneUpdatePayload = isDefaultEditing.value
-        ? { display_name: form.display_name.trim(), description }
+        ? { display_name: form.display_name.trim(), description, runtime_config: runtimeConfig }
         : {
             display_name: form.display_name.trim(),
             description,
             status: form.status,
             router_mode: form.router_mode,
             fallback_text: fallbackText,
+            runtime_config: runtimeConfig,
           }
       await apiUpdateScene(form.id, payload)
     } else {
@@ -501,6 +790,7 @@ async function submit() {
         description,
         router_mode: form.router_mode,
         fallback_text: fallbackText,
+        runtime_config: runtimeConfig,
       }
       await apiCreateScene(payload)
     }
@@ -947,7 +1237,119 @@ function copyText(text: string) {
   ElMessage.success('已复制')
 }
 
-onMounted(load)
+// ===== 固定话术抽屉（按场景）=====
+// 与后端 no_identity_script 警告同源：只有本场景自有行才算“已配置”，全局行不算
+const SCENE_TEMPLATE_KEYS = ['identity', 'capability'] as const
+
+const scriptsVisible = ref(false)
+const scriptsLoading = ref(false)
+const scriptsScene = ref<Scene | null>(null)
+const sceneScripts = ref<CannedScript[]>([])
+const templateCreating = ref(false)
+
+const scriptsTitle = computed(() =>
+  scriptsScene.value ? `固定话术：${scriptsScene.value.display_name}` : '固定话术',
+)
+
+const missingTemplateKeys = computed(() => {
+  const sceneId = scriptsScene.value?.id
+  if (!sceneId) return []
+  const own = new Set(sceneScripts.value.filter((s) => s.scene_id === sceneId).map((s) => s.key))
+  return SCENE_TEMPLATE_KEYS.filter((key) => !own.has(key))
+})
+
+function categoryLabel(category: string) {
+  return CANNED_CATEGORY_LABELS[category as CannedScriptCategory] || category || '—'
+}
+
+function scriptSummary(row: CannedScript) {
+  if (row.answer_source === 'kb') {
+    return `检索知识库：${row.kb_namespaces.join('、') || '未选库'}`
+  }
+  return (row.reply_text || '').replace(/\s+/g, ' ').trim().slice(0, 60) || '—'
+}
+
+async function loadSceneScripts() {
+  const scene = scriptsScene.value
+  if (!scene) return
+  scriptsLoading.value = true
+  try {
+    sceneScripts.value = await apiListCannedScripts(scene.code)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载场景话术失败')
+  } finally {
+    scriptsLoading.value = false
+  }
+}
+
+async function openScripts(row: Scene) {
+  scriptsScene.value = row
+  scriptsVisible.value = true
+  sceneScripts.value = []
+  await loadSceneScripts()
+}
+
+/** 从全局模板复制一份到本场景：只补缺失 key，已存在的场景行不覆盖 */
+async function createSceneTemplates() {
+  const scene = scriptsScene.value
+  if (!scene || !missingTemplateKeys.value.length) return
+  templateCreating.value = true
+  try {
+    for (const key of [...missingTemplateKeys.value]) {
+      const base = sceneScripts.value.find((s) => !s.scene_id && s.key === key)
+      if (!base) {
+        ElMessage.warning(`全局模板缺少 ${key}，请先在固定话术页新建`)
+        continue
+      }
+      await apiCreateCannedScript({
+        key,
+        scene_code: scene.code,
+        title: base.title || CANNED_CATEGORY_LABELS[base.category],
+        category: base.category,
+        patterns: [...base.patterns],
+        keywords: [...base.keywords],
+        reply_text: base.reply_text,
+        answer_source: base.answer_source,
+        kb_namespaces: [...base.kb_namespaces],
+        priority: base.priority,
+        enabled: true,
+      })
+    }
+    ElMessage.success('已按模板生成本场景话术')
+    await loadSceneScripts()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '生成失败')
+  } finally {
+    templateCreating.value = false
+  }
+}
+
+async function toggleSceneScript(row: CannedScript) {
+  try {
+    // 本场景行要带 scene_code 才能命中；全局行不传（否则会误改场景行）
+    await apiToggleCannedScript(row.key, row.enabled, row.scene_id ? scriptsScene.value?.code : null)
+    ElMessage.success(`${row.key} 已${row.enabled ? '启用' : '停用'}`)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '操作失败')
+    await loadSceneScripts()
+  }
+}
+
+function gotoCannedScripts() {
+  scriptsVisible.value = false
+  router.push('/canned-scripts')
+}
+
+onMounted(async () => {
+  await load()
+  // 兜底知识库选择器需要启用中的库；失败不阻塞场景页主流程
+  try {
+    const bases = await apiListBases()
+    activeBases.value = bases.filter((b) => b.is_active)
+  } catch {
+    activeBases.value = []
+  }
+})
 </script>
 
 <style scoped>
@@ -1002,6 +1404,43 @@ onMounted(load)
   color: #fff;
   font-size: 11px;
   cursor: help;
+}
+/* 今日请求 / 日额度着色：达上限标红、超 80% 标黄 */
+.quota-warn {
+  color: #e6a23c;
+  font-weight: 600;
+}
+.quota-full {
+  color: #f56c6c;
+  font-weight: 600;
+}
+/* 运行参数：每项右侧的来源标签与生效值 */
+.runtime-intro {
+  margin: -4px 0 10px;
+}
+.src-tag {
+  margin-left: 8px;
+}
+/* 固定话术抽屉 */
+.scripts-body {
+  min-height: 200px;
+}
+.missing-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+.own-tag {
+  margin-left: 6px;
+}
+.script-text {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #606266;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .bind-body {
   min-height: 200px;

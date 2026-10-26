@@ -153,7 +153,22 @@ JWT_SECRET=<≥32 字节随机串>
 
 限流依赖 Redis；Redis 不可用时 fail-open（放行并每分钟告警一次）。公开接口与鉴权说明见 [API 速查](api.md#public无需登录嵌入--api-对接)。
 
-### 3.11 上下文预算
+> 上表是**单主体**限流（`scene + user/visitor/ip`）。场景总额度、场景级 RAG/历史参数、登录人创建配额都在数据库里配，不走环境变量，详见下一节。
+
+### 3.11 数据库配置（后台可改，非环境变量）
+
+| 存储位置 | 内容 | 缺省语义 | 覆盖方式 |
+|---|---|---|---|
+| `scenes.runtime_config.quota` | 场景总额度 `per_minute` / `daily` | `0` = 不限，**不继承** `PUBLIC_CHAT_*` | 后台「业务场景 → 编辑 → 运行参数」 |
+| `scenes.runtime_config.rag` | `inject` / `top_k` / `min_score` / `timeout` / `namespaces` | 缺省继承 `RAG_*` 全局值 | 同上 |
+| `scenes.runtime_config.history_limit` | 取最近 N 条历史 | 缺省 50 | 同上 |
+| `staff_users.quota` | `max_scenes` / `max_agents` / `max_knowledge_bases` | 键缺失或 `null` = 不限；`0` = 禁止创建 | 后台「人员与配额」 |
+
+- `runtime_config` 只存显式覆盖项，写入时白名单校验，未知键直接 400（不静默丢弃）；`PATCH` 传 `{}` 或 `null` = 恢复全部继承。
+- 场景总额度与主体限流统计对象不同：前者是“整个场景所有主体加起来”，后者是“单个 user/visitor/ip”，所以前者不继承 `PUBLIC_CHAT_*`，避免多用户场景被 30 次/分 卡死。
+- 登录人配额只统计 `created_by = 当前登录人` 的资源；默认场景、seed 的代码 Agent 与演示数据 `created_by IS NULL`，不占任何人额度；删除资源立即释放。
+
+### 3.12 上下文预算
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -161,7 +176,7 @@ JWT_SECRET=<≥32 字节随机串>
 | `CONTEXT_SYSTEM_RESERVE` | `800` | 系统提示预留 |
 | `CONTEXT_HISTORY_RESERVE` | `2000` | 历史消息预留 |
 
-### 3.12 链路追踪
+### 3.13 链路追踪
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -171,7 +186,7 @@ JWT_SECRET=<≥32 字节随机串>
 | `TRACE_SAMPLE_RATE` | `1.0` | 正常应答采样率；转人工与异常轮始终全量记录 |
 | `TRACE_RETENTION_DAYS` | `30` | 保留天数，供 `scripts/cleanup_traces.py` 使用 |
 
-### 3.13 Docker Compose 与生产叠加
+### 3.14 Docker Compose 与生产叠加
 
 | 变量 | 默认 | 说明 |
 |---|---|---|

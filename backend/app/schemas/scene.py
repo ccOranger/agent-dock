@@ -74,6 +74,38 @@ def actor_key(actor_type: ActorType, actor_id: str) -> str:
     return f"{actor_type.value}:{actor_id}"
 
 
+# 历史窗口默认值（与旧版 ChatService.HISTORY_FETCH_LIMIT 一致）
+DEFAULT_HISTORY_LIMIT = 50
+
+
+@dataclass(frozen=True)
+class SceneQuota:
+    """场景请求额度：0 = 不限（与全局环境变量语义一致）。"""
+
+    per_minute: int
+    daily: int
+    # 每个限额的来源：scene（场景覆盖）/ global（继承环境变量）
+    sources: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SceneRuntime:
+    """场景运行参数快照。
+
+    由 ``scenes.runtime_config`` 合并全局 Settings 解析而来（services/runtime_config.py），
+    纯数据不查库：同一轮对话多个环节共享，避免热路径重复解析。
+    """
+
+    rag_inject: bool = True
+    rag_top_k: int = 5
+    rag_min_score: float = 0.3
+    rag_timeout: int = 15
+    rag_namespaces: tuple[str, ...] = ()
+    history_limit: int = DEFAULT_HISTORY_LIMIT
+    quota: SceneQuota = field(default_factory=lambda: SceneQuota(per_minute=0, daily=0))
+    sources: dict[str, str] = field(default_factory=dict)
+
+
 @dataclass(frozen=True)
 class Actor:
     """会话/记忆的归属主体。visitor 是匿名的，id 即 visitors.id。"""
@@ -122,6 +154,10 @@ class SceneContext:
     publish_key: str | None = None
     allowed_origins: tuple[str, ...] = ()
     widget_config: dict = field(default_factory=dict)
+    # ---- 场景运行参数（检索/历史/额度）----
+    # runtime_config 是库里的原始配置；runtime 是合并全局后的生效快照
+    runtime_config: dict = field(default_factory=dict)
+    runtime: SceneRuntime | None = None
 
 
 @dataclass(frozen=True)

@@ -255,7 +255,11 @@ class CannedScriptCreate(BaseModel):
     patterns: list[str] = Field(default_factory=list, max_length=100)
     # 关键词：整句包含即命中，判定比问法宽，后台需要命中测试辅助把关
     keywords: list[str] = Field(default_factory=list, max_length=60)
-    reply_text: str = Field(min_length=1, max_length=2000)
+    # 文本模式必填；kb 模式只当引导语/兜底文案，因此允许为空
+    reply_text: str = Field(default="", max_length=2000)
+    # 回答来源：text=逐字下发 reply_text；kb=检索知识库后按固定框架拼接（不走模型改写）
+    answer_source: Literal["text", "kb"] = "text"
+    kb_namespaces: list[str] = Field(default_factory=list, max_length=10)
     priority: int = Field(default=100, ge=0, le=1000)
     enabled: bool = True
 
@@ -265,7 +269,9 @@ class CannedScriptUpdate(BaseModel):
     category: Literal["identity", "capability", "probing", "business"] | None = None
     patterns: list[str] | None = Field(default=None, max_length=100)
     keywords: list[str] | None = Field(default=None, max_length=60)
-    reply_text: str | None = Field(default=None, min_length=1, max_length=2000)
+    reply_text: str | None = Field(default=None, max_length=2000)
+    answer_source: Literal["text", "kb"] | None = None
+    kb_namespaces: list[str] | None = Field(default=None, max_length=10)
     priority: int | None = Field(default=None, ge=0, le=1000)
 
 
@@ -341,3 +347,28 @@ class TicketStatusUpdate(BaseModel):
 
 class TicketNoteCreate(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
+
+
+# ===== 管理后台：人员与配额 =====
+class StaffCreate(BaseModel):
+    """新建后台人员：密码强度由登录环节同一套校验负责，这里只限长度。"""
+
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=8, max_length=128)
+    role: Literal["admin", "agent"] = "agent"
+    display_name: str | None = Field(default=None, max_length=64)
+    # 键缺失/ null = 不限，0 = 禁止创建，正数 = 上限
+    quota: dict[str, int | None] | None = None
+
+
+class StaffUpdate(BaseModel):
+    """局部更新；quota 传了就是整对象替换（传 {} 清空全部限制）。"""
+
+    display_name: str | None = Field(default=None, max_length=64)
+    role: Literal["admin", "agent"] | None = None
+    is_active: bool | None = None
+    quota: dict[str, int | None] | None = None
+
+
+class StaffPasswordReset(BaseModel):
+    password: str = Field(min_length=8, max_length=128)

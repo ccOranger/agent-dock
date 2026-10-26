@@ -18,6 +18,7 @@ from app.schemas.scene import (
     SceneContext,
     SceneStatus,
 )
+from app.services.runtime_config import resolve_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,8 @@ def build_scene_context(scene, agents: list[dict]) -> SceneContext:
     M3 起一次性填满路由档案输入（模型/阈值/意图上限/兜底/补充规则/候选），
     运行时路由与后台查看都基于这份快照，不再二次查库或读全局默认。
     """
+    runtime_config = dict(getattr(scene, "runtime_config", None) or {})
+    runtime = resolve_runtime(runtime_config)
     return SceneContext(
         scene_id=str(scene.id),
         code=scene.code,
@@ -79,6 +82,9 @@ def build_scene_context(scene, agents: list[dict]) -> SceneContext:
         publish_key=getattr(scene, "publish_key", None),
         allowed_origins=tuple(getattr(scene, "allowed_origins", None) or ()),
         widget_config=dict(getattr(scene, "widget_config", None) or {}),
+        # 运行参数：一次纯函数解析成快照，热路径不再重复合并全局默认
+        runtime_config=runtime_config,
+        runtime=runtime,
     )
 
 

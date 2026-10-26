@@ -10,7 +10,7 @@ from sqlalchemy.exc import ProgrammingError
 from app.core.database import engine
 
 # 与 scripts/init_db.sql 末尾 schema_meta 的 version 保持一致
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 _REBUILD_HINT = "本项目不做增量迁移，请全量重建：python scripts/rebuild_and_seed.py"
 

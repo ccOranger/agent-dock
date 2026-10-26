@@ -225,6 +225,12 @@ docker compose stop backend web
 | 401 频繁 | 时钟偏差导致 JWT exp 判定失败；校时 |
 | Agent 无 MCP 工具 / 日志 `MCP 已连接但远端未返回任何工具` 或工具数为 0 | 常见于 **Windows GBK 控制台**：hello_agents 的 MCP 客户端用裸 `print` 输出 emoji 会抛 `UnicodeEncodeError` 并被静默吞掉。`app/main.py` 已在启动时把 stdout/stderr 切到 UTF-8；若手动跑脚本验证，先 `$env:PYTHONIOENCODING="utf-8"` |
 | MCP 服务连不上 / 注册超时 | 确认 `tools` 表里 `mcp_logistics`/`mcp_refund` 的 `config` 为 `transport=stdio`（旧库遗留假域名 `http://mcp-*:9000/sse` 会连不上超时）；重跑 `scripts/seed_data.py` 或 `rebuild_and_seed.py` 即可覆盖为 stdio |
+| 不同场景问「你是谁」答案都一样 | 该场景没有自己的 `identity` 行，继承的是全局文案（[U21](updates/21-scene-identity-runtime-quota.md)）：后台「业务场景 → 固定话术」抽屉若提示“当前继承全局文案”，点「从模板生成本场景话术」；存量库可直接跑 `python scripts/backfill_scene_canned.py`（幂等，只补缺失，不覆盖运营改过的行） |
+| 路由页告警「未配置本场景身份话术」 | 同上；只在后台路由档案发出，运行时不会因此报错。想改成知识库回答时，在「固定话术」把这条的 `answer_source` 设为 `kb` 并选库（检索拼接，不走模型改写） |
+| 创建场景 / Agent / 知识库返回 3006 | 登录人配额不足：后台「人员与配额」看该账号的已用/上限；`0` 表示禁止创建、空表示不限。删除资源立即释放额度，归档场景仍占额度（行还在）；管理员不能改自己的配额，换另一个管理员操作 |
+| 客户收到「本场景今日对话额度已用完」/「本场景请求过于频繁」 | 场景总额度（`scenes.runtime_config.quota`）触顶，不是单主体限流：后台「业务场景」列表看今日请求/日额度（超 80% 标黄、达上限标红），调大 `quota.daily` / `quota.per_minute` 或置空恢复不限。**注意场景额度不继承 `PUBLIC_CHAT_*`，默认 0 = 不限** |
+| 场景运行参数改了不生效 | 先确认保存返回 200：未知键、越界、引用停用知识库都会 400（白名单校验，不静默丢弃）；默认场景只开放 `runtime_config`，改路由模式/绑定会被拦。生效值看「编辑 → 运行参数」右侧的来源标签（本场景覆盖/继承全局/默认值）。`rag.namespaces` 一旦显式配置就以场景为准（覆盖 Agent 声明） |
+| 停用知识库后，kb 话术还能检索到内容 | 启用库清单有 10s 进程内缓存（命中话术在首字节路径，避免每轮全表查知识库）；等 10s 再试，或重启后端立即生效 |
 
 ## 6. 数据维护与重建策略
 

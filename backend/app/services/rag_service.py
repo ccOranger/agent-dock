@@ -16,11 +16,14 @@ class RagService:
         top_k: int | None = None,
         min_score: float | None = None,
         advanced: bool = True,
+        timeout: int | None = None,
     ) -> list[dict]:
         """检索知识库，返回结构化结果列表。
 
         直接调 RAGTool 内部的 pipeline（而非 tool.run("search")），
         因为后者返回的是给人看的格式化字符串，不适合前端渲染。
+
+        timeout 由调用方决定：场景运行参数可覆盖全局 RAG_TIMEOUT（如固定话术只给 3 秒）。
         """
         ns = namespace or settings.rag_default_namespace
         tool = get_rag_tool(ns)
@@ -59,7 +62,9 @@ class RagService:
             return out
 
         # 硬超时：Qdrant/embedding 挂起时抛 TimeoutError，由上层（对话链路）降级为空
-        return await asyncio.wait_for(run_in_pool(_run), timeout=settings.rag_timeout)
+        return await asyncio.wait_for(
+            run_in_pool(_run), timeout=timeout or settings.rag_timeout
+        )
 
     async def list_documents(self, namespace: str):
         tool = get_rag_tool(namespace)

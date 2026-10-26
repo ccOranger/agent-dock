@@ -15,13 +15,14 @@ from app.models.repositories import (
     VisitorRepo,
 )
 from app.schemas.scene import Actor, ActorType, SceneContext
+from app.services.runtime_config import effective_runtime
 from app.services.scene_service import resolve_scene
 from app.utils.sse import sse_event
 
 logger = logging.getLogger(__name__)
 
-# 每轮对话仅取最近 N 条历史作为路由/跨轮记忆上下文，避免长会话全量加载
-HISTORY_FETCH_LIMIT = 50
+# 每轮对话仅取最近 N 条历史作为路由/跨轮记忆上下文，避免长会话全量加载；
+# 默认值与上限统一由场景运行参数管理（schemas/scene.py: DEFAULT_HISTORY_LIMIT）
 
 # 与 SessionRepo/entities 中 Session.title 的默认值保持一致：
 # 只要标题仍是这个占位值，就认为会话还没被命名过，可以用首条消息自动补全
@@ -113,7 +114,9 @@ class ChatService:
                 "session", {"session_id": str(session.id), "scene_code": scene.code}
             )
 
-            history = await MessageRepo.list_recent(session.id, limit=HISTORY_FETCH_LIMIT, db=db)
+            history = await MessageRepo.list_recent(
+                session.id, limit=effective_runtime(scene).history_limit, db=db
+            )
             # 结束只读事务归还连接：LLM 流式生成期间不占用池内连接，
             # 后续写入时由 Session 惰性重新获取
             await db.commit()
@@ -196,7 +199,9 @@ class ChatService:
             await db.commit()
             await self._attach_chat_event_identity(trace_id, session)
 
-            history = await MessageRepo.list_recent(session.id, limit=HISTORY_FETCH_LIMIT, db=db)
+            history = await MessageRepo.list_recent(
+                session.id, limit=effective_runtime(scene).history_limit, db=db
+            )
             # 同 stream：读完成交释放连接，非流式生成期间也可能较长
             await db.commit()
 

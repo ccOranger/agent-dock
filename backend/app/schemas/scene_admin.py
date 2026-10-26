@@ -22,6 +22,8 @@ class SceneCreate(BaseModel):
     fallback_agent_id: str | None = Field(default=None, max_length=36)
     fallback_text: str | None = Field(default=None, max_length=1000)
     extra_router_prompt: str | None = Field(default=None, max_length=4000)
+    # 场景运行参数：空对象/null = 全部继承全局（结构见 services/runtime_config.py）
+    runtime_config: dict[str, Any] | None = None
     # 创建时可直接绑定 Agent，省一次请求
     agent_ids: list[str] = Field(default_factory=list, max_length=50)
 
@@ -39,6 +41,8 @@ class SceneUpdate(BaseModel):
     fallback_agent_id: str | None = Field(default=None, max_length=36)
     fallback_text: str | None = Field(default=None, max_length=1000)
     extra_router_prompt: str | None = Field(default=None, max_length=4000)
+    # 整对象替换：传 null 或 {} 等于恢复“全部继承全局”
+    runtime_config: dict[str, Any] | None = None
     agent_ids: list[str] | None = Field(default=None, max_length=50)
 
 

@@ -681,6 +681,12 @@ async def main() -> None:
                             scene_id=scene_id,
                         )
                     )
+        # 场景身份话术：把全局模板复制成本场景行（只补缺失，不覆盖运营改过的文案）
+        from app.services.canned_templates import ensure_scene_templates
+
+        scene_rows = (await db.execute(select(Scene.id, Scene.code))).all()
+        for scene_id, _scene_code in scene_rows:
+            await ensure_scene_templates(db, scene_id)
         await db.commit()
     demo_tag = "（演示模式）" if DEMO_MODE else ""
     print(

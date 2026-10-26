@@ -30,6 +30,7 @@
 | U18 | 接入方与 Key 归属（integrations） | 服务端 Key 从场景迁到接入方：多 Key 轮换、场景授权、访客按接入方命名空间隔离；移除场景 rotate-key | [18-integration-keys.md](18-integration-keys.md) |
 | U19 | 匿名接入的接入方归属 | `integrations.public_code` + `data-integration` / `X-Integration-Code`：匿名嵌入也能确定接入方，访客写入 `integration_id` | [19-anonymous-integration-attribution.md](19-anonymous-integration-attribution.md) |
 | U20 | 单租户降级与自定义埋点 | 后台隐藏接入方入口、默认接入方授权全部场景、嵌入不再带 `data-integration`；`ChatRequest.ext` + `chat_events` 全量埋点（预留 `tenant_id` / `total_tokens`） | [20-single-tenant-degradation.md](20-single-tenant-degradation.md) |
+| U21 | 场景身份话术、运行参数与登录人配额 | 身份/能力话术按场景复制（可改或改查知识库）；`scenes.runtime_config` 配检索/历史/场景额度；`created_by` + `staff_users.quota` 限创建数量，超限 3006 | [21-scene-identity-runtime-quota.md](21-scene-identity-runtime-quota.md) |
 
 ## 与三份主文档的关系
 

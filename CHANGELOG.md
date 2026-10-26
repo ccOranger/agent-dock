@@ -45,6 +45,17 @@
 - **埋点表**：新增 `chat_events`（全量、不受 trace 采样影响；预留 `tenant_id` / `total_tokens`，不存消息正文与 IP），对话入口在鉴权后、限流前旁路写入，失败只告警；进入 service 拿到真实会话后按 `trace_id` 回填 `session_id` / `visitor_id`，首轮与匿名请求也能按会话/访客聚合。
 - ⚠️ `SCHEMA_VERSION` 由 `4` 升到 `5`（新增 `chat_events`），旧库需执行 `scripts/rebuild_and_seed.py` 全量重建。
 
+### 新增：场景身份话术、运行参数与登录人配额（U21）
+
+- **场景身份/能力话术**：`canned_scripts` 的 `(scene_id, key)` 机制真正启用——新建场景自动复制全局 `identity` / `capability` 模板（`is_builtin=False`，可改文案/停用/删除），存量库跑 `scripts/backfill_scene_canned.py` 幂等补齐（不覆盖运营改过的行）；文案支持 `{{scene_name}}` / `{{scene_code}}` / `{{agent_names}}` 占位符，命中时渲染。后台「业务场景 → 固定话术」抽屉可查看/启停/一键从模板生成；路由档案对缺本场景身份话术的场景告警 `no_identity_script`（全局行存在不算已配置）。
+- **知识库型话术**：`canned_scripts.answer_source`（`text` / `kb`）+ `kb_namespaces`。`kb` 模式检索后按固定序号拼接（`top_k=3`、单块 ≤180 字、总长 ≤800 字、硬超时 `min(场景超时, 3)` 秒、`advanced=False`、**不走模型改写**）；超时/零命中/异常一律回退，不向客户抛错。`reply_text` 在 kb 模式下只当引导语，允许为空。
+- **场景运行参数**：`scenes.runtime_config` 白名单键 `rag.inject` / `rag.top_k` / `rag.min_score` / `rag.timeout` / `rag.namespaces` / `history_limit` / `quota.per_minute` / `quota.daily`；`{}` 或 `null` = 全部继承全局，未知键/越界/引用停用知识库返回 400。热路径零查库（`SceneContext` 已带解析好的 `SceneRuntime`）。`rag.namespaces` 显式配置时以场景为准（覆盖 Agent 声明）；默认场景只开放 `runtime_config`，路由模式/绑定/启停仍只读。
+- **登录人创建配额**：`scenes` / `agents` / `knowledge_bases` 增加 `created_by`，`staff_users.quota`（`max_scenes` / `max_agents` / `max_knowledge_bases`）三态：键缺失/null=不限、`0`=禁止、`>0`=上限；超限返回 `3006` / 403 并写 `audit_logs("quota.reject")`；新增 `/api/v1/admin/staff`（列表/新建/PATCH/重置密码）与后台「人员与配额」页。
+- **场景请求额度**：`acquire_chat_slot` 的 Redis 桶由 3 个扩到 5 个（主体分钟/日 + 场景分钟/日 + 主体并发流），仍一次 pipeline 提交；任一超限就回滚本次自增的全部键后返回 429（否则未参与判定的日桶与并发槽会白扣一个），新增额度不带来额外往返。**`quota.*` 不继承 `PUBLIC_CHAT_*`，默认 `0` = 不限**。
+- **后台体验**：场景列表新增「今日请求 / 日额度」列（一条 `GROUP BY scene_code` 聚合，超 80% 标黄、达上限标红）；固定话术页新增「回答来源」与知识库多选，命中测试回显检索到的库，列表每行带 `scene_code`（场景已停用/归档也能正确定位，不会误改全局模板）；链路中 `canned.script` span 带 `answer_source` 与命中数。
+- ⚠️ `SCHEMA_VERSION` 由 `5` 升到 `6`（`canned_scripts.answer_source/kb_namespaces`、`scenes.runtime_config/created_by`、`agents.created_by`、`knowledge_bases.created_by`、`staff_users.quota`、`idx_chat_events_created_scene`），旧库需 `scripts/rebuild_and_seed.py` 全量重建后跑一次 backfill。
+- Agent 级模型配置（`agents.llm_model` 按场景/按 Agent 独立指定）本期**未落地**，留待下一迭代。
+
 ### 移除：场景包机制
 
 - 删除 `manifest.yaml`、`app/packs/loader.py`、`/api/v1/admin/packs` 与运营台「场景包」页；导航不再按 `features` 显隐（工单入口固定可见）。

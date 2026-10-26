@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.core.cors import SceneCORSMiddleware
 from app.core.exceptions import Forbidden, RateLimited, Unauthorized
 from app.models.repositories import AuditRepo, IntegrationRepo, SceneRepo, VisitorRepo
-from app.schemas.scene import SceneContext
+from app.schemas.scene import SceneContext, SceneQuota
 from app.services.scene_service import authorize_scene_access
 
 PUBLIC_PATH = public_api.router.prefix  # /public/scenes
@@ -369,26 +369,104 @@ async def test_rate_limit_disabled_without_redis(monkeypatch):
 @pytest.mark.asyncio
 async def test_minute_limit_exceeded(redis_on, monkeypatch):
     monkeypatch.setattr(settings, "public_chat_rate_limit_per_minute", 2)
+    rolled_back: list[str] = []
 
-    async def fake_incr(key, ttl):
-        return 3
+    async def fake_incr_many(buckets):
+        return [3 for _ in buckets]
 
-    monkeypatch.setattr(rl, "_incr", fake_incr)
+    async def fake_decr_many(keys):
+        rolled_back.extend(keys)
+
+    monkeypatch.setattr(rl, "_incr_many", fake_incr_many)
+    monkeypatch.setattr(rl, "_decr_many", fake_decr_many)
     with pytest.raises(RateLimited) as exc:
         await rl.acquire_chat_slot("mall", "ip:1.1.1.1")
     assert exc.value.code == 4029
+    # 被拒绝的请求不能白白扣掉次数
+    assert rolled_back and rolled_back[0].startswith("rl:chat:m:mall:ip:1.1.1.1:")
+
+
+@pytest.mark.asyncio
+async def test_over_limit_rolls_back_every_bucket(redis_on, monkeypatch):
+    """超限必须回滚本次 INCR 的全部桶：只回滚到失败桶会让并发槽与场景日额度白扣。
+
+    并发槽带 300s TTL 且每次重试都刷新，若被扣住不放，用户会被
+    “当前对话尚未结束”锁死；场景日额度被白扣则会连累全场景。
+    """
+    monkeypatch.setattr(settings, "public_chat_rate_limit_per_minute", 2)
+    monkeypatch.setattr(settings, "public_chat_daily_quota", 100)
+    monkeypatch.setattr(settings, "public_chat_max_concurrent", 3)
+    rolled_back: list[str] = []
+
+    async def fake_incr_many(buckets):
+        # 第一个桶（主体分钟）就超限，但其后四个桶已经一并 INCR 了
+        return [3] + [1] * (len(buckets) - 1)
+
+    async def fake_decr_many(keys):
+        rolled_back.extend(keys)
+
+    monkeypatch.setattr(rl, "_incr_many", fake_incr_many)
+    monkeypatch.setattr(rl, "_decr_many", fake_decr_many)
+    with pytest.raises(RateLimited):
+        await rl.acquire_chat_slot(
+            "mall", "ip:1.1.1.1", SceneQuota(per_minute=10, daily=100)
+        )
+    assert len(rolled_back) == 5
+    assert any(k.startswith("rl:chat:c:mall:ip:1.1.1.1") for k in rolled_back)
+    assert any(k.startswith("rl:chat:sd:mall:") for k in rolled_back)
+    assert any(k.startswith("rl:chat:d:mall:ip:1.1.1.1:") for k in rolled_back)
 
 
 @pytest.mark.asyncio
 async def test_daily_quota_exceeded(redis_on, monkeypatch):
     monkeypatch.setattr(settings, "public_chat_daily_quota", 1)
 
-    async def fake_incr(key, ttl):
-        return 2
+    async def fake_incr_many(buckets):
+        return [2 for _ in buckets]
 
-    monkeypatch.setattr(rl, "_incr", fake_incr)
+    async def fake_decr_many(keys):
+        return None
+
+    monkeypatch.setattr(rl, "_incr_many", fake_incr_many)
+    monkeypatch.setattr(rl, "_decr_many", fake_decr_many)
     with pytest.raises(RateLimited):
         await rl.acquire_chat_slot("mall", "visitor:v_1")
+
+
+@pytest.mark.asyncio
+async def test_scene_daily_quota_exceeded(redis_on, monkeypatch):
+    """场景总额度是独立于主体的桶：默认不限，配了才生效。"""
+    seen: list[list[str]] = []
+
+    async def fake_incr_many(buckets):
+        seen.append([key for key, _ in buckets])
+        return [3 for _ in buckets]
+
+    async def fake_decr_many(keys):
+        return None
+
+    monkeypatch.setattr(rl, "_incr_many", fake_incr_many)
+    monkeypatch.setattr(rl, "_decr_many", fake_decr_many)
+    quota = SceneQuota(per_minute=0, daily=2)
+    with pytest.raises(RateLimited, match="本场景今日对话额度已用完"):
+        await rl.acquire_chat_slot("mall", "ip:2.2.2.2", quota)
+    assert any(key.startswith("rl:chat:sd:mall:") for key in seen[0])
+
+
+@pytest.mark.asyncio
+async def test_scene_quota_unlimited_by_default(redis_on, monkeypatch):
+    """场景未配额时不应新增任何桶（旧行为不变）。"""
+    monkeypatch.setattr(settings, "public_chat_max_concurrent", 1)
+    seen: list[list[str]] = []
+
+    async def fake_incr_many(buckets):
+        seen.append([key for key, _ in buckets])
+        return [1 for _ in buckets]
+
+    monkeypatch.setattr(rl, "_incr_many", fake_incr_many)
+    slot = await rl.acquire_chat_slot("mall", "ip:1.1.1.1", SceneQuota(per_minute=0, daily=0))
+    assert slot._key == "rl:chat:c:mall:ip:1.1.1.1"
+    assert not any(key.startswith("rl:chat:s") for key in seen[0])
 
 
 @pytest.mark.asyncio
@@ -396,14 +474,14 @@ async def test_concurrent_stream_limit(redis_on, monkeypatch):
     monkeypatch.setattr(settings, "public_chat_max_concurrent", 1)
     released: list[str] = []
 
-    async def fake_incr(key, ttl):
-        return 2
+    async def fake_incr_many(buckets):
+        return [2 for _ in buckets]
 
-    async def fake_decr(key):
-        released.append(key)
+    async def fake_decr_many(keys):
+        released.extend(keys)
 
-    monkeypatch.setattr(rl, "_incr", fake_incr)
-    monkeypatch.setattr(rl, "_decr", fake_decr)
+    monkeypatch.setattr(rl, "_incr_many", fake_incr_many)
+    monkeypatch.setattr(rl, "_decr_many", fake_decr_many)
     with pytest.raises(RateLimited, match="尚未结束"):
         await rl.acquire_chat_slot("mall", "ip:1.1.1.1")
     # 超限时立即归还自己加的计数，不能把后续正常请求也堵死
@@ -415,13 +493,13 @@ async def test_concurrent_slot_released_once(redis_on, monkeypatch):
     monkeypatch.setattr(settings, "public_chat_max_concurrent", 1)
     released: list[str] = []
 
-    async def fake_incr(key, ttl):
-        return 1
+    async def fake_incr_many(buckets):
+        return [1 for _ in buckets]
 
     async def fake_decr(key):
         released.append(key)
 
-    monkeypatch.setattr(rl, "_incr", fake_incr)
+    monkeypatch.setattr(rl, "_incr_many", fake_incr_many)
     monkeypatch.setattr(rl, "_decr", fake_decr)
     slot = await rl.acquire_chat_slot("mall", "ip:1.1.1.1")
     assert slot._key is not None

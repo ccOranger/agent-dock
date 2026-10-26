@@ -341,7 +341,7 @@ const WARNING_LABELS: Record<RouterWarningCode, string> = {
   fallback_not_in_pool: '配置的兜底 Agent 不在候选池，已自动降级',
   agent_description_only: '部分 Agent 只有描述、没有关键词/典型问法，路由命中率会偏低',
   no_knowledge_base: '暂无可检索知识库',
-  no_identity_script: '未配置身份/能力话术',
+  no_identity_script: '未配置本场景身份话术，当前继承全局文案',
   scene_disabled: '场景已停用，当前不接收对话',
 }
 const FALLBACK_LABELS: Record<RouterFallbackSource, string> = {

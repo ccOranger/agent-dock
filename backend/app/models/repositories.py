@@ -61,6 +61,40 @@ class StaffRepo:
             return await db.get(StaffUser, uuid.UUID(str(user_id)))
 
     @staticmethod
+    async def list_all() -> list[StaffUser]:
+        """全部人员（含停用），按创建时间升序：配额页需要看到历史账号。"""
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(select(StaffUser).order_by(StaffUser.created_at))
+            ).scalars().all()
+            return list(rows)
+
+    @staticmethod
+    async def update(user_id: uuid.UUID | str, **fields) -> StaffUser | None:
+        """局部更新；只接受实体上存在的字段（quota / role / is_active / display_name）。"""
+        async with SessionLocal() as db:
+            row = await db.get(StaffUser, uuid.UUID(str(user_id)))
+            if row is None:
+                return None
+            for key, value in fields.items():
+                if value is not None and hasattr(row, key):
+                    setattr(row, key, value)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def set_password(user_id: uuid.UUID | str, password_hash: str) -> bool:
+        """重置密码（不校验旧密码，由后台管理员操作）。"""
+        async with SessionLocal() as db:
+            row = await db.get(StaffUser, uuid.UUID(str(user_id)))
+            if row is None:
+                return False
+            row.password_hash = password_hash
+            await db.commit()
+            return True
+
+    @staticmethod
     async def create(username: str, password_hash: str, role: str = "agent", **kw) -> StaffUser:
         async with SessionLocal() as db:
             user = StaffUser(username=username, password_hash=password_hash, role=role, **kw)
@@ -182,6 +216,7 @@ class SceneRepo:
             "fallback_agent_id": str(scene.fallback_agent_id) if scene.fallback_agent_id else None,
             "fallback_text": scene.fallback_text,
             "extra_router_prompt": scene.extra_router_prompt,
+            "runtime_config": dict(getattr(scene, "runtime_config", None) or {}),
             "publish_key": scene.publish_key,
             "allowed_origins": list(scene.allowed_origins or []),
             "widget_config": dict(getattr(scene, "widget_config", None) or {}),
@@ -1293,13 +1328,18 @@ class KnowledgeBaseRepo:
         namespace: str,
         display_name: str,
         description: str | None = None,
+        created_by: uuid.UUID | str | None = None,
     ) -> KnowledgeBase:
-        """知识库是全局资源：不记场景归属，检索范围由 Agent 的 rag_namespace(s) 决定。"""
+        """知识库是全局资源：不记场景归属，检索范围由 Agent 的 rag_namespace(s) 决定。
+
+        created_by 只用于登录人配额计数，不参与检索与授权。
+        """
         async with SessionLocal() as db:
             row = KnowledgeBase(
                 namespace=namespace,
                 display_name=display_name,
                 description=description,
+                created_by=uuid.UUID(str(created_by)) if created_by else None,
             )
             db.add(row)
             await db.commit()
@@ -1450,6 +1490,9 @@ class CannedScriptRepo:
             "patterns": list(row.patterns or []),
             "keywords": list(row.keywords or []),
             "reply_text": row.reply_text or "",
+            # 测试替身/历史对象可能没有这两个字段，按默认值兜底
+            "answer_source": getattr(row, "answer_source", None) or "text",
+            "kb_namespaces": list(getattr(row, "kb_namespaces", None) or []),
             "priority": row.priority,
             "enabled": row.enabled,
             "is_builtin": row.is_builtin,
@@ -2237,6 +2280,24 @@ class ChatEventRepo:
                 )
             )
             await db.commit()
+
+    @staticmethod
+    async def count_by_scene_today() -> dict[str, int]:
+        """今日各场景请求数（一次 GROUP BY，供后台场景列表展示用量）。
+
+        “今日”按进程本地时区 00:00 起算，与 Redis 日额度桶（time.strftime）同口径；
+        被限流拦住的请求也已在埋点里（埋点在限流之前），所以用量含被拒的请求。
+        """
+        since = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(ChatEvent.scene_code, func.count())
+                    .where(ChatEvent.created_at >= since)
+                    .group_by(ChatEvent.scene_code)
+                )
+            ).all()
+        return {str(code): int(count) for code, count in rows}
 
     @staticmethod
     async def attach_identity(
