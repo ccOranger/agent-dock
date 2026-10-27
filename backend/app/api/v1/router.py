@@ -6,11 +6,13 @@ from app.api.v1 import (
     admin_canned_scripts,
     admin_inquiries,
     admin_integrations,
+    admin_license,
     admin_router,
     admin_scenes,
     admin_staff,
     admin_tickets,
     admin_traces,
+    admin_usage,
     auth,
     chat,
     knowledge,
@@ -34,4 +36,6 @@ api_router.include_router(admin_router.router)
 api_router.include_router(admin_inquiries.router)
 api_router.include_router(admin_tickets.router)
 api_router.include_router(admin_traces.router)
+api_router.include_router(admin_usage.router)
+api_router.include_router(admin_license.router)
 api_router.include_router(admin_canned_scripts.router)

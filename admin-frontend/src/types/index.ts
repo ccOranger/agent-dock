@@ -109,6 +109,83 @@ export interface TraceUsageItem {
   count: number
 }
 
+// ===== 用量报表（账单口径，源表 chat_usage_daily）=====
+export interface UsageMetrics {
+  requests: number
+  tokens: number
+  /** tokens 为估算值的请求数；接入供应商真实 usage 后才会小于 requests */
+  estimated_requests: number
+  handoffs: number
+  errors: number
+}
+
+export interface UsageDayRow extends UsageMetrics {
+  day: string
+}
+
+export interface UsageSceneRow extends UsageMetrics {
+  scene_code: string
+}
+
+export interface UsageIntegrationRow extends UsageMetrics {
+  integration_id: string
+  integration_name: string | null
+  /** 零 UUID 归属：匿名或未携带接入方凭证的请求 */
+  unassigned: boolean
+}
+
+export type UsageRow = UsageDayRow | UsageSceneRow | UsageIntegrationRow
+
+export interface UsageSummary {
+  from: string
+  to: string
+  group_by: UsageGroupBy
+  scene_code?: string | null
+  rows: UsageRow[]
+  totals: UsageMetrics
+  /** 当前 token 口径是否为估算（hello_agents 不回传 usage，故恒为 true） */
+  tokens_estimated: boolean
+}
+
+export type UsageGroupBy = 'day' | 'scene' | 'integration'
+
+// ===== 授权 / 版本分层 =====
+export interface LicenseFeatureMeta {
+  label: string
+  desc: string
+}
+
+export interface LicenseStatus {
+  edition: 'community' | 'enterprise'
+  edition_label: string
+  customer: string
+  /** 授权文件声明的功能位：过期后仍保留，用于展示“曾授权” */
+  features: string[]
+  /** 当前真正生效的功能位：社区版 / 降级时为空 */
+  active_features: string[]
+  /** 授权文件里出现但本版本不认识的功能位（拼写错误 / 新功能位） */
+  unknown_features: string[]
+  issued_at: string | null
+  expires_at: string | null
+  contract_ref: string | null
+  deployment_id: string | null
+  /** 本机是否配置了 DEPLOYMENT_ID，且与授权一致 */
+  deployment_bound: boolean
+  mode: string
+  /** 授权文件路径：排查“文件放错位置”用 */
+  source: string | null
+  /** 授权文件是否存在：社区版开箱即用不该报错，只有放了文件却没生效才提醒 */
+  configured: boolean
+  valid: boolean
+  expired: boolean
+  days_left: number | null
+  reason: string
+  feature_catalog: Record<string, LicenseFeatureMeta>
+  community_scope: string[]
+  expiring_soon: boolean
+  expiring_soon_days: number
+}
+
 // ===== 知识库 =====
 export interface KnowledgeBase {
   namespace: string

@@ -32,6 +32,24 @@ def test_new_request_trace_id_is_16_hex_grepable():
     assert tid != new_request_trace_id()
 
 
+def test_chat_endpoint_reuses_middleware_trace_id():
+    """响应头、日志与 request_traces 必须是同一个 trace_id。
+
+    端点自己再 new 一个会造成“拿着 X-Trace-Id 查不到链路”（运维与
+    评测执行器的 RAG/token 回读都靠这个 id 对齐）。
+    """
+    from types import SimpleNamespace
+
+    from app.api.v1.chat import _request_trace_id
+
+    request = SimpleNamespace(state=SimpleNamespace(trace_id="ab" * 8))
+    assert _request_trace_id(request) == "ab" * 8
+    # 没有中间件（如精简测试应用）时自行生成，仍是可 grep 的 16 位 hex
+    minted = _request_trace_id(SimpleNamespace(state=SimpleNamespace()))
+    assert len(minted) == 16
+    int(minted, 16)
+
+
 def test_disabled_collector_records_nothing():
     c = _collector(enabled=False)
     c.add(SPAN_RUN, "knowledge_qa")

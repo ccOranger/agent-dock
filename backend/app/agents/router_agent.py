@@ -322,6 +322,12 @@ class RouterAgent:
         # SimpleAgent.run 为同步阻塞调用，放入线程池避免阻塞事件循环
         started_ms = collector.now_ms() if collector else 0
         raw = await asyncio.to_thread(agent.run, query)
+        if collector:
+            # 路由是一次真实 LLM 调用：系统提示词 + 用户句算输入，JSON 意图算输出。
+            # _format_conversation 已把 query 嵌进 system_prompt，run(query) 又发了一次，
+            # 这里按实际下发内容计（宁多算不漏算）。
+            collector.record_prompt(f"{system_prompt}\n{query}")
+            collector.record_completion(raw)
         intents = self._parse_intents(raw, valid_names, fallback_agent)
         # 回显「意图依据」：这句话命中了目标 Agent 的哪几个关键词（本地子串匹配，仅供链路参考）
         annotate_intent_evidence(intents, agents, query)

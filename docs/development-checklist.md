@@ -195,6 +195,9 @@
 
 - [ ] **M5-1 全量验收**（0.5d）
   - 跑 [开源发布检查清单](./open-source-release.md) 第 10 节
+  - 带 schema 变更的版本：`python -m app.migrate --check` 无待执行 + `python scripts/verify_schema.py` 通过
+  - 改提示词 / 换模型 / 调 RAG 参数的版本：`scripts/eval.py --scene <场景> --baseline latest` **退出码必须为 0 或 1**；
+    退出码 2（指标退化）要么回滚要么在发布说明里逐项解释（口径见 [评测与回归](./evaluation.md)）
 - [ ] **M5-2 Release Notes 与 CHANGELOG**（0.5d）
 - [ ] **M5-3 打 tag 与构建镜像**（0.5d）
 - [ ] **M5-4 GitHub/Gitee 发布**（0.5d）
@@ -210,8 +213,9 @@
 3. 聊天挂件 iframe 化（v0.2）、按需 Web Component
 4. `context_engineer` 信号规则下沉到包
 5. `canned_scripts` → `response_templates`，后台 IA 去客服化
-6. Alembic/版本化迁移
-7. 评测与回归（用 `request_traces` 建 golden set）
+6. ~~Alembic/版本化迁移~~ → 已落地（W1：`scripts/migrations/NNNN_*.sql` + `python -m app.migrate`，非 Alembic）
+7. ~~评测与回归（用 `request_traces` 建 golden set）~~ → 已落地（W4：用例集 + 真实链路执行器 + `eval_runs`，见 [evaluation.md](./evaluation.md)；
+   `trace_sample` 仍需在客户现场按真实链路回填）
 8. RBAC、SSO、审计增强（企业版）
 9. `app_users` 合并、Ticket 迁包
 10. `tenant_id` 预留与多租户（仅 SaaS 时）

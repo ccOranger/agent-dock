@@ -1,0 +1,10 @@
+# ============ 可选依赖（默认不随镜像安装） ============
+# 用量计量的 token 估算：装了 tiktoken 则按 cl100k_base 分词计数，
+# 没装则用 app/utils/tokens.py 里的字符加权估算（CJK 1 字 ≈ 1 token）。
+#
+# 为什么不进 requirements.txt：
+# - Docker 镜像默认不装（决策 D3）：首次使用要下载 BPE 词表，离线/内网部署会失败；
+# - 估算只影响"账目的精度"，不影响功能，社区版必须开箱可用。
+#
+# 安装：pip install -r requirements-optional.txt
+tiktoken>=0.8.0

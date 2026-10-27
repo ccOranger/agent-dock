@@ -13,6 +13,7 @@
 | 只补种子数据 | `seed_data.py` |
 | 重建后校验结构、约束、种子与版本 | `verify_schema.py` |
 | 清理过期请求链路 | `cleanup_traces.py` |
+| 跑评测与回归（改提示词/换模型/调 RAG 后的发布闸门） | `eval.py` |
 | 生产环境备份 | `backup.sh` |
 | 发布前校验 / 离线包 / 打 tag | `release.py` |
 
@@ -91,8 +92,31 @@ start_all.bat -Install
 **注意事项**：
 
 - 末尾写入的 `schema_meta.version` 必须与 `backend/app/core/schema.py` 的 `SCHEMA_VERSION` 一致，否则后端启动会被守卫拦下。
-- 项目不做增量迁移，结构性变更只改这里 + 全量重建。
+- 该写入用 `ON CONFLICT DO NOTHING`：只在版本行缺失时生效，存量库的版本由迁移推进，重复执行本脚本不会把版本降回去。
+- 结构性变更：改这里（空库快路径）+ 新增 `scripts/migrations/NNNN_*.sql`（存量库升级），并同步 `SCHEMA_VERSION`。
 - 文件本身不含业务数据。
+
+### migrations/（增量迁移）
+
+**作用**：存量库的 schema 升级包，命名 `NNNN_slug.sql`，只增不改。
+
+**执行方式**（必须在 `backend` 目录，`DATABASE_URL` 指向目标库）：
+
+```bash
+python -m app.migrate --check      # 当前版本 + 待执行列表（有待执行时退出码 1）
+python -m app.migrate --dry-run    # 事务内试跑后回滚
+python -m app.migrate --backup     # 有待执行时先 pg_dump
+python -m app.migrate              # 正式执行
+```
+
+**注意事项**：
+
+- 空库不需要 baseline 文件：`migrate` 检测到 `schema_meta` 不存在时会直接执行 `init_db.sql` 建到最新结构。
+- 每个增量必须幂等（`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`），因为可能在“已经是新结构”的库上重放。
+- 历史文件不可修改：`schema_migrations.checksum` 会校验，checksum 按 LF 归一化以保证跨平台一致。
+- 新增迁移时必须同步 `init_db.sql` 的结构与末尾版本号、`schema.py` 的 `SCHEMA_VERSION`。
+- `--backup` 依赖 `pg_dump`：backend 镜像里没有 postgresql 客户端，找不到时会**跳过备份并提示**（不中止迁移）。生产升级请用宿主机的 `scripts/backup.sh`，或本机安装客户端后单独跑 `--backup`。
+- 详细规范见 [migrations/README.md](./migrations/README.md)。
 
 ### init_db.py
 
@@ -136,7 +160,9 @@ bash scripts/init_db.sh
 
 ### rebuild_and_seed.py
 
-**作用**：全量重建数据库——`DROP` 全部业务表 → 执行 `init_db.sql` → 写入种子。用于开发期重置数据、切换 schema 版本（如 `SCHEMA_VERSION 3 → 4`）。
+**作用**：全量重建数据库——`DROP` 全部业务表 → 执行 `init_db.sql` → 写入种子。**仅用于开发/演示**：重置数据、切换 `SCHEMA_VERSION`。
+
+`APP_ENV=production` 时默认拒绝执行（避免误删生产数据），确需重建必须追加 `--force`；生产升级一律用 `python -m app.migrate`。
 
 **执行步骤**（必须在 `backend` 目录）：
 
@@ -286,13 +312,41 @@ python scripts/release.py tag --push
 - `tag` 只有显式 `--push` 才会推送到 origin；`--force` 会覆盖已存在的同名 tag，慎用。
 - `bundle` 需要本机 Docker；`--no-build` 只导出已有镜像，`--out` 可改输出目录（默认 `dist/`）。
 
+### eval.py
+
+**作用**：评测与回归执行器。跑 `backend/tests/fixtures/eval/<scene>.json` 里的用例，**走真实 HTTP 链路**
+（`POST /api/v1/chat/stream`）而不是 import Agent，以便覆盖鉴权 / 限流 / 场景路由 / 固定话术 / 链路回读；
+RAG 与 token 按 `trace_id` 从 `request_traces` / `chat_events` 回读（服务端实测，不是模型自述）。
+产出 `reports/eval-<timestamp>.md` + 同名 `.json`，并写一行 `eval_runs`。
+
+**执行步骤**（`backend` 目录）：
+
+```powershell
+.\.venv\Scripts\python.exe ..\scripts\eval.py --dry-run                    # 只校验并列出用例，不发请求
+.\.venv\Scripts\python.exe ..\scripts\eval.py --scene customer_service      # 建基线
+.\.venv\Scripts\python.exe ..\scripts\eval.py --scene customer_service --baseline latest
+.\.venv\Scripts\python.exe ..\scripts\eval.py --scene default --customer alice --password Alice@123 --concurrency 2
+.\.venv\Scripts\python.exe ..\scripts\eval.py --tag 知识 --limit 5 --no-db   # 子集冒烟，不写库
+```
+
+**退出码**：`0` 全通过 / `1` 有失败（或 `--dry-run` 用例集不合法）/ **`2` 相对基线退化** / `3` 全部用例都没跑通。
+
+**注意事项**：
+
+- 需要先有服务在跑且 `/health` 可达（它挂在根路径，不带 `/api/v1`）；模型有速率限制，`--concurrency` 别无脑拉高。
+- `--baseline latest` 取的是 `eval_runs` 里**同用例集指纹 + 同场景**的最近一次；也可传 sidecar `.json` 路径做离线对比。
+- 用例集进 Git、评审后才可改；**不得改期望迁就结果**（口径修正要在 `note` 里写清依据），详见 [docs/evaluation.md](../docs/evaluation.md)。
+- 不进 CI：真实链路要打模型；打分/聚合/diff/报告渲染的回归由 `backend/tests/test_eval_runner.py`（全部 mock）覆盖。
+- `reports/` 已在 `.gitignore`：报告随交付单归档，跨时间对照看 `eval_runs`。
+
 ---
 
 ## 通用注意事项
 
 1. **工作目录决定读哪份 `.env`**：后端类脚本在 `backend` 目录执行；`init_db.py` 不读 `.env`，需显式提供 `DATABASE_URL`。
-2. **不做增量迁移**：`SCHEMA_VERSION` 变化（如新增表 / 列）必须用 `rebuild_and_seed.py` 全量重建，再由启动守卫放行。
+2. **schema 变更走迁移**：新增表/列时写 `scripts/migrations/NNNN_*.sql`，并同步 `init_db.sql` 与 `SCHEMA_VERSION`，用 `python -m app.migrate` 升级；`rebuild_and_seed.py` 仅用于开发/演示，生产环境拒绝执行。
 3. **密码与凭据**：`.env` 不要提交；重建生成的随机密码只显示一次；演示账号口令仅用于本地演示。
 4. **Windows 终端**：PowerShell 用 `;` 连接命令（不支持 `&&`）；跨目录执行时用绝对路径或先 `cd`。
 5. **端口冲突**：默认 8000 / 5173 / 5174；异常时先用 `stop_all.ps1 -WhatIf` 看占用，再决定是否清理。
 6. **Docker 依赖异常**：Qdrant / Redis 端口连通但自检失败时，先 `docker compose restart qdrant redis`（Windows 版 Docker 端口代理偶发失效）。
+7. **评测不在 CI 里跑**：`eval.py` 要打真实模型，不适合做持续集成；发布前手动跑一次带 `--baseline latest` 的运行，退出码 2 即回滚（见 runbook 6.1）。

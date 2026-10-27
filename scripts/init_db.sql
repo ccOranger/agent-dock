@@ -430,7 +430,8 @@ CREATE TABLE IF NOT EXISTS chat_events (
     tenant_id       UUID,
     ext             JSONB NOT NULL DEFAULT '{}'::jsonb,
     message_chars   INT NOT NULL DEFAULT 0,
-    total_tokens    INT,                            -- 预留：LLM usage 采集后回填
+    total_tokens    INT,                            -- 输入+输出估算合计（供应商 usage 不可得时为估算）
+    tokens_estimated BOOLEAN NOT NULL DEFAULT FALSE, -- total_tokens 是否为估算值
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_chat_events_scene_created
@@ -445,6 +446,26 @@ CREATE INDEX IF NOT EXISTS idx_chat_events_trace
 -- 后台“当日全场景用量”按时间范围分组：现有 idx 前导列是场景，扫不了时间范围
 CREATE INDEX IF NOT EXISTS idx_chat_events_created_scene
     ON chat_events(created_at DESC, scene_code);
+
+-- ========== 用量日聚合（账单依据，长期保留） ==========
+-- chat_events 明细会按保留期清理，本表不跟清；写入由 ChatService 在每轮结束后 upsert。
+-- integration_id 用零 UUID 表示“未归属”：唯一约束里 NULL 互不相等，用零值才能稳定 ON CONFLICT。
+CREATE TABLE IF NOT EXISTS chat_usage_daily (
+    day                 DATE        NOT NULL,
+    scene_code          VARCHAR(32) NOT NULL DEFAULT 'default',
+    integration_id      UUID        NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+    requests            BIGINT      NOT NULL DEFAULT 0,   -- 走完整服务链路的轮次
+    tokens              BIGINT      NOT NULL DEFAULT 0,   -- 输入 + 输出估算合计
+    estimated_requests  BIGINT      NOT NULL DEFAULT 0,   -- 其中带估算标记的轮次
+    handoffs            BIGINT      NOT NULL DEFAULT 0,
+    errors              BIGINT      NOT NULL DEFAULT 0,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (day, scene_code, integration_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_usage_daily_scene
+    ON chat_usage_daily(scene_code, day DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_usage_daily_integration
+    ON chat_usage_daily(integration_id, day DESC);
 
 -- ========== 高频固定话术（硬模板，后台可维护） ==========
 -- scene_id NULL=全局（probing 等）；非空=场景覆盖。
@@ -472,11 +493,38 @@ CREATE TABLE IF NOT EXISTS canned_scripts (
 CREATE INDEX IF NOT EXISTS idx_canned_scripts_scene_enabled_priority
     ON canned_scripts(scene_id, enabled, priority);
 
--- ========== schema 版本（启动时断言；不匹配请全量重建） ==========
+-- ========== 评测运行记录（scripts/eval.py 写入，后台看板属企业版 eval_pro） ==========
+-- 报告本身是文件（reports/eval-*.md/json），但交付周期里要能回答“上一次跑是多少”，
+-- fixture_hash 是用例集内容指纹：指纹不同的两次运行指标不可直接比较（用例变了）。
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_tag         VARCHAR(64) NOT NULL DEFAULT '',      -- 人工标注：对应哪个版本/哪次变更
+    scene_code      VARCHAR(32) NOT NULL DEFAULT 'default',
+    base_url        VARCHAR(255) NOT NULL DEFAULT '',      -- 被测服务地址
+    model_name      VARCHAR(64) NOT NULL DEFAULT '',       -- 当时的对话模型：换模型即换基线
+    fixture_hash    VARCHAR(16) NOT NULL DEFAULT '',       -- 用例集指纹（sha256 前 16 位）
+    case_count      INT         NOT NULL DEFAULT 0,
+    passed_count    INT         NOT NULL DEFAULT 0,
+    metrics         JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    detail          JSONB       NOT NULL DEFAULT '[]'::jsonb,  -- 逐用例结果（应答截断）
+    report_path     VARCHAR(255) NOT NULL DEFAULT '',
+    baseline_run_id UUID,                                  -- 本次对比的基线运行；首次为 NULL
+    duration_ms     INT         NOT NULL DEFAULT 0,
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at     TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_scene_started
+    ON eval_runs(scene_code, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_fixture
+    ON eval_runs(fixture_hash, started_at DESC);
+
+-- ========== schema 版本（启动时断言；不匹配请执行 python -m app.migrate） ==========
 CREATE TABLE IF NOT EXISTS schema_meta (
     key         VARCHAR(64) PRIMARY KEY,
     value       TEXT NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO schema_meta (key, value) VALUES ('version', '6')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+-- 只在缺失时写入：存量库的版本由迁移推进，重复执行本脚本不得把版本降回去
+INSERT INTO schema_meta (key, value) VALUES ('version', '8')
+ON CONFLICT (key) DO NOTHING;

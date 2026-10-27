@@ -26,9 +26,12 @@ AgentDock 把这些做成平台能力，而不是某个业务里的临时代码�
 | **跨轮记忆** | working / episodic / perceptual 三层开箱可用；semantic 需 Neo4j；工单可跨轮补录 | `MEMORY_*` / `MEMORY_TYPES` |
 | **上下文工程** | 按系统提示、历史、记忆、知识分配 token 预算，超限按优先级裁剪 | `CONTEXT_*` |
 | **全链路追踪** | 每轮对话的路由、LLM、工具、RAG、记忆调用都有 spans 与耗时；可采样、可设保留期 | `TRACE_*` |
+| **用量计量** | 每轮 token 与日聚合（按日 × 场景 × 接入方）与链路采样解耦，后台报表 + CSV 导出可当账目依据 | `TOKEN_ESTIMATE_FACTOR` / `USAGE_QUERY_MAX_DAYS` |
+| **版本分层** | 离线 Ed25519 授权文件（不联网）；任何校验失败只降级不阻断，社区版保留完整对话能力 | `LICENSE_FILE` / `LICENSE_PUBLIC_KEY` / `DEPLOYMENT_ID` |
+| **评测与回归** | 用例集进 Git，走真实 HTTP 链路跑意图/工具/RAG/兜底/转人工/P95/token 七类指标，与基线逐项 diff，退化即退出码 2 | `scripts/eval.py`、[评测与回归](docs/evaluation.md) |
 | **固定话术** | 高频确定性问题在路由与大模型之前逐字命中，后台可测命中、可停用 | 运营台「固定话术」 |
 | **双端身份** | 后台人员与客户分表、分登录入口、Token 隔离；客户可自助注册 | `/auth/staff/*`、`/auth/customer/*` |
-| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘 | `http://<host>:8080/admin/` |
+| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘、用量报表、授权与版本 | `http://<host>:8080/admin/` |
 
 ## 架构
 
@@ -192,8 +195,8 @@ frontend/         客户对话端（Vue 3）
 admin-frontend/   运营管理台（Vue 3）
 packages/shared/  npm workspaces 共享包 @cs/shared（http / auth / SSE / 类型）
 docker/           镜像、入口脚本、Nginx 与 Caddy 配置
-scripts/          init_db / seed_data / rebuild_and_seed / backup / cleanup_traces
-docs/             快速开始、配置、部署、FAQ、运维手册、规范与更新记录
+scripts/          init_db / seed_data / rebuild_and_seed / migrate / eval / backup / cleanup_traces
+docs/             快速开始、配置、部署、评测、FAQ、运维手册、规范与更新记录
 ```
 
 ## 文档
@@ -204,12 +207,13 @@ docs/             快速开始、配置、部署、FAQ、运维手册、规范�
 | [配置说明](docs/configuration.md) | `.env` 全量配置、默认值与生效优先级 |
 | [部署指南](docs/deployment.md) | Compose、生产叠加、HTTPS、备份恢复 |
 | [常见问题](docs/faq.md) | 模型接入、Qdrant、MCP、Windows 编码、端口冲突 |
-| [运维手册](docs/runbook.md) | 服务清单、排障、数据维护、安全 |
+| [运维手册](docs/runbook.md) | 服务清单、排障、数据维护、发布前评测回归、安全 |
+| [评测与回归](docs/evaluation.md) | 用例集、指标口径、基线对比与退化判定、报告与退出码 |
 | [多场景开发](docs/multi-scene-development.md) | 场景/路由档案/隔离/公开接入/嵌入组件的设计与落地记录 |
 | [API 速查](docs/api.md) | 接口、SSE 事件与错误码 |
 | [技术文章](docs/articles/01-multi-intent-routing.md) | 多意图路由与提示词去具名化 |
 | [开发规范](docs/spec.md) | Spec v2.0，与实现同步 |
-| [功能更新记录](docs/updates/README.md) | U01–U17 每项能力的落地细节 |
+| [功能更新记录](docs/updates/README.md) | U01–U24 每项能力的落地细节 |
 
 ## 路线图
 
@@ -217,7 +221,7 @@ docs/             快速开始、配置、部署、FAQ、运维手册、规范�
 |---|---|---|
 | M0–M4 | 已完成 | 工程基线、业务代码分层、前端单仓化、一键部署、IT Helpdesk |
 | 多场景 M0–M7 | 已完成 | 场景与路由档案、五类隔离、公开接入与限流、嵌入组件、重建验证 |
-| v0.2 | 进行中 | 发布物料、版本化迁移、RBAC/SSO、评测与回归集 |
+| v0.2 | 进行中 | 发布物料、版本化迁移（已完成）、用量计量（已完成）、License 与版本分层（已完成）、评测与回归（已完成）、RBAC/SSO |
 
 ## 明确不做（12 个月内）
 

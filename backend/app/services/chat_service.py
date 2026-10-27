@@ -6,7 +6,12 @@ from app.agents.orchestrator import Orchestrator
 from app.core.database import SessionLocal
 from app.core.exceptions import UnsafeInput
 from app.core.security import detect_injection, sanitize_output
-from app.core.tracing import OUTCOME_ERROR, TraceCollector, new_request_trace_id
+from app.core.tracing import (
+    OUTCOME_ERROR,
+    OUTCOME_HANDOVER,
+    TraceCollector,
+    new_request_trace_id,
+)
 from app.models.repositories import (
     ChatEventRepo,
     MessageRepo,
@@ -50,6 +55,29 @@ class ChatService:
             await TraceRepo.insert(collector.to_row())
         except Exception as e:  # noqa: BLE001
             logger.warning(f"链路写入失败（不阻塞主流程）: {e}")
+
+    @staticmethod
+    async def _persist_usage(
+        collector: TraceCollector, integration_id: str | None, *, error: bool = False
+    ) -> None:
+        """用量记账：明细回填 + 日聚合，失败只告警。
+
+        不经过 should_persist()：链路可以按采样丢弃，账不能。
+        """
+        tokens = collector.total_tokens
+        try:
+            await ChatEventRepo.record_usage(
+                trace_id=collector.trace_id,
+                scene_code=collector.scene_code or "default",
+                integration_id=integration_id,
+                tokens=tokens,
+                # hello_agents 不回传 usage，当前口径全是估算；接入真实 usage 后改为按来源判断
+                estimated=tokens > 0,
+                handover=collector.outcome == OUTCOME_HANDOVER,
+                error=error,
+            )
+        except Exception as exc:  # noqa: BLE001 - 记账旁路不得阻塞对话
+            logger.warning(f"用量记账失败（不阻塞对话）: {exc}")
 
     @staticmethod
     async def _attach_chat_event_identity(trace_id: str | None, session) -> None:
@@ -149,12 +177,16 @@ class ChatService:
             except Exception as exc:  # noqa: BLE001
                 # 客户端断开走 GeneratorExit，不落链路；真正的服务端异常必须留痕
                 collector.record_outcome(OUTCOME_ERROR, message=str(exc))
+                # 已生成的部分同样消耗了模型额度，归账时不能丢
+                collector.record_completion(assistant_content)
                 collector.mark_finished()
                 await self._persist_trace(collector)
+                await self._persist_usage(collector, integration_id, error=True)
                 raise
 
             assistant_content = sanitize_output(assistant_content)
             collector.response_chars = len(assistant_content)
+            collector.record_completion(assistant_content)
             msg = await MessageRepo.add(
                 session.id,
                 role="assistant",
@@ -167,7 +199,8 @@ class ChatService:
             await db.commit()
 
         collector.mark_finished()
-        # 先落 trace 再下发 done：客户端收到 done 常立即断连，yield 之后的代码可能不再执行
+        # 先落用量与 trace 再下发 done：客户端收到 done 常立即断连，yield 之后的代码可能不再执行
+        await self._persist_usage(collector, integration_id)
         await self._persist_trace(collector)
         yield sse_event("done", {"message_id": str(msg.id), "trace_id": collector.trace_id})
 
@@ -236,12 +269,15 @@ class ChatService:
                         content += data.get("content", "") if isinstance(data, dict) else str(data)
             except Exception as exc:  # noqa: BLE001
                 collector.record_outcome(OUTCOME_ERROR, message=str(exc))
+                collector.record_completion(content)
                 collector.mark_finished()
                 await self._persist_trace(collector)
+                await self._persist_usage(collector, integration_id, error=True)
                 raise
 
             content = sanitize_output(content)
             collector.response_chars = len(content)
+            collector.record_completion(content)
             msg = await MessageRepo.add(
                 session.id, role="assistant", content=content, routed_to=routed_to, db=db
             )
@@ -249,6 +285,7 @@ class ChatService:
             await db.commit()
 
         collector.mark_finished()
+        await self._persist_usage(collector, integration_id)
         await self._persist_trace(collector)
         return {
             "session_id": str(session.id),

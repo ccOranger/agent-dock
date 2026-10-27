@@ -1,12 +1,28 @@
 """SQLAlchemy ORM 模型：与 scripts/init_db.sql 对应"""
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.schemas.scene import DEFAULT_SCENE_ID
+
+# 用量归属的“未归属”哨兵：PostgreSQL 唯一约束里 NULL 互不相等，
+# 日聚合的主键落零 UUID 才能让浏览器匿名与服务端未带接入方的轮次稳定命中同一行。
+UNASSIGNED_INTEGRATION_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 
 class Base(DeclarativeBase):
@@ -454,8 +470,64 @@ class ChatEvent(Base):
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     ext: Mapped[dict] = mapped_column(JSONB, default=dict)
     message_chars: Mapped[int] = mapped_column(Integer, default=0)
-    # 预留：LLM usage 采集后回填，用于按接入方统计 token 用量
+    # 输入+输出估算合计；供应商 usage 不可得时为估算（tokens_estimated 标记）
     total_tokens: Mapped[int | None] = mapped_column(Integer)
+    # total_tokens 是估算值（供应商 usage 不可得）；接入真实 usage 后置 False
+    tokens_estimated: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatUsageDaily(Base):
+    """用量日聚合：账单依据，长期保留（chat_events 明细按保留期清理）。
+
+    一行 = (日, 场景, 接入方)；integration_id 用零 UUID 表示“未归属”，
+    以避开 PostgreSQL 唯一约束里 NULL 互不相等的坑。
+    """
+
+    __tablename__ = "chat_usage_daily"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    scene_code: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
+    integration_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=UNASSIGNED_INTEGRATION_ID
+    )
+    requests: Mapped[int] = mapped_column(BigInteger, default=0)
+    tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    estimated_requests: Mapped[int] = mapped_column(BigInteger, default=0)
+    handoffs: Mapped[int] = mapped_column(BigInteger, default=0)
+    errors: Mapped[int] = mapped_column(BigInteger, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class EvalRun(Base):
+    """评测运行记录：一次 ``scripts/eval.py`` 一行。
+
+    只记结论不做执行：用例集在仓库里，打分在执行器里，本表回答"上一次跑是多少"
+    与"这次是不是退化了"。fixture_hash 是用例集内容指纹，指纹不同的两次运行
+    指标不可直接比较（用例本身变了）。
+    """
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    run_tag: Mapped[str] = mapped_column(String(64), default="")
+    scene_code: Mapped[str] = mapped_column(String(32), default="default")
+    base_url: Mapped[str] = mapped_column(String(255), default="")
+    model_name: Mapped[str] = mapped_column(String(64), default="")
+    fixture_hash: Mapped[str] = mapped_column(String(16), default="")
+    case_count: Mapped[int] = mapped_column(Integer, default=0)
+    passed_count: Mapped[int] = mapped_column(Integer, default=0)
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict)
+    detail: Mapped[list] = mapped_column(JSONB, default=list)
+    report_path: Mapped[str] = mapped_column(String(255), default="")
+    baseline_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

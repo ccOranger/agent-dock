@@ -747,9 +747,9 @@ CREATE TABLE canned_scripts (
 CREATE INDEX idx_canned_scripts_scene_enabled_priority
     ON canned_scripts(scene_id, enabled, priority);
 
--- ========== schema 版本（启动时断言；不匹配请全量重建） ==========
--- 当前值 6；新增列/表必须同时提升 init_db.sql 与 app 侧的 SCHEMA_VERSION
-INSERT INTO schema_meta (key, value) VALUES ('version', '6')
+-- ========== schema 版本（启动时断言；不匹配请跑迁移） ==========
+-- 当前值 8；新增列/表必须同时提升 init_db.sql 与 app 侧的 SCHEMA_VERSION，并补一个 scripts/migrations/NNNN_*.sql
+INSERT INTO schema_meta (key, value) VALUES ('version', '8')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 ```
 
@@ -757,10 +757,14 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
 ### 4.2 迁移与 Schema 演进
 
-- **本项目处开发阶段，schema 频繁变动**（如 `users` 拆分、工单迁表、链路表新增）。改 ORM 模型后**无需手写增量迁移**，直接对目标库全量重建 + 灌种子（⚠️ 清空业务数据，仅限开发）：`python scripts/rebuild_and_seed.py`（DROP 旧表含遗留 `users` → `create_all` 建表 → seed；单往返 simple query 适配云库代理）。
-- `init_db.sql` 与 ORM（`models/entities.py`）保持一致；新增列/表在 SQL 里用 `CREATE TABLE IF NOT EXISTS` 便于既有库增量补建。
-- `schema_meta.version` 是唯一的结构版本源（当前 `6`）：后端启动断言，`scripts/verify_schema.py` 校验，不匹配直接报错而不是带病运行。版本历史：`2`（多场景）→ `3`（接入方三表 + `visitors.integration_id`）→ `4`（`integrations.public_code`）→ `5`（`chat_events`）→ `6`（`canned_scripts.answer_source/kb_namespaces`、`scenes.runtime_config/created_by`、`agents.created_by`、`knowledge_bases.created_by`、`staff_users.quota`）。
-- 进入稳定期后再引入 Alembic：`alembic upgrade head` / `alembic downgrade -1`，提交前双向测试。
+- **存量库走版本化迁移**（W1 落地）：`scripts/migrations/NNNN_slug.sql` + `schema_migrations` 记录表，
+  `python -m app.migrate` 顺序升级（`--check` 只读、`--dry-run` 事务内试跑后回滚、`--backup` 先 `pg_dump`）；
+  每个文件独立事务、checksum 按 LF 归一化、历史文件被改即中止。空库仍由 `init_db.sql` 一次建到最新结构（不存 baseline 副本，避免双份 DDL 漂移）。
+- **全量重建仅限开发/演示**：`python scripts/rebuild_and_seed.py`（DROP 旧表 → `init_db.sql` 建表 → seed），
+  `APP_ENV=production` 时默认拒执行（需显式 `--force`）。
+- `init_db.sql` 与 ORM（`models/entities.py`）保持一致，`scripts/verify_schema.py` 逐表逐列比对两条路径；新增列/表在迁移 SQL 里用 `IF NOT EXISTS` 便于新库已到位时幂等补跑。
+- `schema_meta.version` 是唯一的结构版本源（当前 `8`）：后端启动断言，`verify_schema.py` 校验，不匹配直接报错而不是带病运行。版本历史：`2`（多场景）→ `3`（接入方三表 + `visitors.integration_id`）→ `4`（`integrations.public_code`）→ `5`（`chat_events`）→ `6`（`canned_scripts.answer_source/kb_namespaces`、`scenes.runtime_config/created_by`、`agents.created_by`、`knowledge_bases.created_by`、`staff_users.quota`）→ `7`（`chat_usage_daily` + `chat_events.tokens_estimated`，W2）→ `8`（`eval_runs`，W4）。
+- 不引入 Alembic：本项目 DDL 以手写 SQL 为单一真相（`init_db.sql` 与迁移文件同源），且需保持无额外依赖可部署。
 
 ---
 

@@ -23,6 +23,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'canned-scripts', component: () => import('@/views/CannedScriptsView.vue'), meta: { title: '固定话术', roles: ['admin'] } },
       { path: 'memory/:userId?', component: () => import('@/views/MemoryView.vue'), meta: { title: '记忆管理', roles: ['agent', 'admin'] } },
       { path: 'dashboard', component: () => import('@/views/Dashboard.vue'), meta: { title: '仪表盘', roles: ['admin'] } },
+      { path: 'usage', component: () => import('@/views/UsageView.vue'), meta: { title: '用量报表', roles: ['admin'] } },
+      { path: 'license', component: () => import('@/views/LicenseView.vue'), meta: { title: '授权与版本', roles: ['admin'] } },
     ],
   },
 ]

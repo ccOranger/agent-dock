@@ -3,7 +3,7 @@ import secrets
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -12,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import SessionLocal
 from app.core.security import hash_api_key
 from app.models.entities import (
+    UNASSIGNED_INTEGRATION_ID,
     AgentMeta,
     AuditLog,
     CannedScript,
     ChatEvent,
+    ChatUsageDaily,
     CustomerUser,
     Document,
     Integration,
@@ -2029,7 +2031,10 @@ class TraceRepo:
         min_latency_ms,
         date_from,
         date_to,
+        trace_id=None,
     ):
+        if trace_id:
+            stmt = stmt.where(RequestTrace.trace_id == str(trace_id))
         if session_id:
             stmt = stmt.where(RequestTrace.session_id == uuid.UUID(str(session_id)))
         if user_id:
@@ -2061,6 +2066,7 @@ class TraceRepo:
     async def list_filtered(
         *,
         session_id=None,
+        trace_id=None,
         user_id=None,
         scene_code=None,
         agent_name=None,
@@ -2076,6 +2082,7 @@ class TraceRepo:
     ) -> tuple[list[dict], int]:
         kw = {
             "session_id": session_id,
+            "trace_id": trace_id,
             "user_id": user_id,
             "scene_code": scene_code,
             "agent_name": agent_name,
@@ -2331,3 +2338,187 @@ class ChatEventRepo:
             )
             await db.commit()
             return int(result.rowcount or 0)
+
+    @staticmethod
+    async def record_usage(
+        *,
+        trace_id: str,
+        scene_code: str,
+        integration_id=None,
+        tokens: int = 0,
+        estimated: bool = True,
+        handover: bool = False,
+        error: bool = False,
+        day: date | None = None,
+    ) -> None:
+        """一轮对话的用量：明细回填 chat_events，同时累加到 chat_usage_daily。
+
+        - 与链路采集完全解耦：request_traces 关闭或采样丢弃时照样记账；
+        - 明细 UPDATE 命中 0 行（埋点写入失败/被限流拦下的请求）不影响日聚合落库，
+          账单依据始终是 chat_usage_daily；
+        - day 用进程本地日期，与 count_by_scene_today、Redis 日额度桶同口径。
+        """
+        usage_day = day or datetime.now().astimezone().date()
+        tid = str(trace_id or "")[:64]
+        total = max(int(tokens or 0), 0)
+        # 零 UUID 表示“未归属”：PG 唯一约束里 NULL 互不相等，不能用 NULL 做主键列
+        iid = ChatEventRepo._safe_uuid(integration_id) or UNASSIGNED_INTEGRATION_ID
+        async with SessionLocal() as db:
+            if tid:
+                await db.execute(
+                    update(ChatEvent)
+                    .where(ChatEvent.trace_id == tid)
+                    .values(total_tokens=total, tokens_estimated=estimated)
+                )
+            stmt = pg_insert(ChatUsageDaily).values(
+                day=usage_day,
+                scene_code=str(scene_code or "default")[:32],
+                integration_id=iid,
+                requests=1,
+                tokens=total,
+                estimated_requests=1 if estimated else 0,
+                handoffs=1 if handover else 0,
+                errors=1 if error else 0,
+            )
+            await db.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=["day", "scene_code", "integration_id"],
+                    set_={
+                        "requests": ChatUsageDaily.requests + stmt.excluded.requests,
+                        "tokens": ChatUsageDaily.tokens + stmt.excluded.tokens,
+                        "estimated_requests": (
+                            ChatUsageDaily.estimated_requests + stmt.excluded.estimated_requests
+                        ),
+                        "handoffs": ChatUsageDaily.handoffs + stmt.excluded.handoffs,
+                        "errors": ChatUsageDaily.errors + stmt.excluded.errors,
+                        "updated_at": func.now(),
+                    },
+                )
+            )
+            await db.commit()
+
+
+_USAGE_METRICS = ("requests", "tokens", "estimated_requests", "handoffs", "errors")
+
+
+class UsageRepo:
+    """用量报表：只读 chat_usage_daily（账单依据，长期保留）。"""
+
+    @staticmethod
+    def _filters(date_from: date, date_to: date, scene_code: str | None) -> list:
+        conds = [ChatUsageDaily.day >= date_from, ChatUsageDaily.day <= date_to]
+        if scene_code:
+            conds.append(ChatUsageDaily.scene_code == scene_code)
+        return conds
+
+    @staticmethod
+    def _metrics(row, offset: int = 1) -> dict:
+        # sum(bigint) 在 PG 里是 numeric，asyncpg 会返回 Decimal，统一转 int
+        return {m: int(row[offset + i] or 0) for i, m in enumerate(_USAGE_METRICS)}
+
+    @staticmethod
+    async def summary(
+        *,
+        group_by: str,
+        date_from: date,
+        date_to: date,
+        scene_code: str | None = None,
+    ) -> dict:
+        """按 day / scene / integration 聚合，返回 rows 与 totals（一次查询内自洽）。"""
+        conds = UsageRepo._filters(date_from, date_to, scene_code)
+        sums = [
+            func.coalesce(func.sum(getattr(ChatUsageDaily, m)), 0).label(m)
+            for m in _USAGE_METRICS
+        ]
+        if group_by == "day":
+            stmt = select(ChatUsageDaily.day.label("key"), *sums).where(*conds)
+            stmt = stmt.group_by(ChatUsageDaily.day).order_by(ChatUsageDaily.day.asc())
+        elif group_by == "scene":
+            stmt = select(ChatUsageDaily.scene_code.label("key"), *sums).where(*conds)
+            stmt = stmt.group_by(ChatUsageDaily.scene_code).order_by(
+                func.sum(ChatUsageDaily.tokens).desc()
+            )
+        else:
+            # 接入方维度带上名称：后台不用再发一轮请求拼名字
+            stmt = (
+                select(
+                    ChatUsageDaily.integration_id.label("key"),
+                    Integration.name.label("name"),
+                    *sums,
+                )
+                .select_from(ChatUsageDaily)
+                .outerjoin(Integration, Integration.id == ChatUsageDaily.integration_id)
+                .where(*conds)
+                .group_by(ChatUsageDaily.integration_id, Integration.name)
+                .order_by(func.sum(ChatUsageDaily.tokens).desc())
+            )
+
+        async with SessionLocal() as db:
+            result = await db.execute(stmt)
+            rows = result.all()
+
+        items: list[dict] = []
+        totals = dict.fromkeys(_USAGE_METRICS, 0)
+        for row in rows:
+            metrics = UsageRepo._metrics(row, offset=2 if group_by == "integration" else 1)
+            for key in _USAGE_METRICS:
+                totals[key] += metrics[key]
+            if group_by == "day":
+                items.append({"day": row[0].isoformat(), **metrics})
+            elif group_by == "scene":
+                items.append({"scene_code": str(row[0]), **metrics})
+            else:
+                iid = row[0]
+                unassigned = iid == UNASSIGNED_INTEGRATION_ID
+                items.append(
+                    {
+                        "integration_id": str(iid),
+                        "integration_name": None if unassigned else row[1],
+                        "unassigned": unassigned,
+                        **metrics,
+                    }
+                )
+        return {"rows": items, "totals": totals}
+
+    @staticmethod
+    async def export_rows(
+        *, date_from: date, date_to: date, scene_code: str | None = None
+    ) -> list[dict]:
+        """导出用明细：(日 × 场景 × 接入方) 逐行，供对账/开票。"""
+        conds = UsageRepo._filters(date_from, date_to, scene_code)
+        sums = [getattr(ChatUsageDaily, m) for m in _USAGE_METRICS]
+        stmt = (
+            select(
+                ChatUsageDaily.day,
+                ChatUsageDaily.scene_code,
+                ChatUsageDaily.integration_id,
+                Integration.name.label("integration_name"),
+                *sums,
+            )
+            .select_from(ChatUsageDaily)
+            .outerjoin(Integration, Integration.id == ChatUsageDaily.integration_id)
+            .where(*conds)
+            .order_by(
+                ChatUsageDaily.day.asc(),
+                ChatUsageDaily.scene_code.asc(),
+                ChatUsageDaily.integration_id.asc(),
+            )
+        )
+        async with SessionLocal() as db:
+            rows = (await db.execute(stmt)).all()
+        return [
+            {
+                "day": row.day.isoformat(),
+                "scene_code": row.scene_code,
+                "integration_id": str(row.integration_id),
+                "integration_name": None
+                if row.integration_id == UNASSIGNED_INTEGRATION_ID
+                else row.integration_name,
+                "requests": int(row.requests or 0),
+                "tokens": int(row.tokens or 0),
+                "estimated_requests": int(row.estimated_requests or 0),
+                "handoffs": int(row.handoffs or 0),
+                "errors": int(row.errors or 0),
+            }
+            for row in rows
+        ]

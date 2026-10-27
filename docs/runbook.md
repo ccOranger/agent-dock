@@ -231,6 +231,10 @@ docker compose stop backend web
 | 客户收到「本场景今日对话额度已用完」/「本场景请求过于频繁」 | 场景总额度（`scenes.runtime_config.quota`）触顶，不是单主体限流：后台「业务场景」列表看今日请求/日额度（超 80% 标黄、达上限标红），调大 `quota.daily` / `quota.per_minute` 或置空恢复不限。**注意场景额度不继承 `PUBLIC_CHAT_*`，默认 0 = 不限** |
 | 场景运行参数改了不生效 | 先确认保存返回 200：未知键、越界、引用停用知识库都会 400（白名单校验，不静默丢弃）；默认场景只开放 `runtime_config`，改路由模式/绑定会被拦。生效值看「编辑 → 运行参数」右侧的来源标签（本场景覆盖/继承全局/默认值）。`rag.namespaces` 一旦显式配置就以场景为准（覆盖 Agent 声明） |
 | 停用知识库后，kb 话术还能检索到内容 | 启用库清单有 10s 进程内缓存（命中话术在首字节路径，避免每轮全表查知识库）；等 10s 再试，或重启后端立即生效 |
+| 评测报告 RAG 命中率低 / 政策类问法只能转人工 | 先看失败用例的 `rag_namespaces` 与 `intents` 再下结论，三类原因处置完全不同：① **索引脏**：重复跑 seed 不清 Qdrant 会留下同一块的多个重复点，指标虚高且分数噪声大 → 清命名空间向量后按原文重灌；② **库绑少了**：`agents.rag_namespaces` 只绑单库，而政策写在另一个库里 → 补多库绑定（不要用 `search_all_knowledge_bases`，会把别的场景的库混进来）；③ **文档粒度过粗**：整篇一块时窄问法落在 `RAG_MIN_SCORE` 之下 → **拆文档条目，不降阈值、不改用例期望** |
+| 评测跑两次指标不一致 | 先比对两份报告的用例集指纹：不同就是用例变了（报告会自动标「不可比」）；相同则看 `--concurrency`（撞模型限流会出传输失败）、`TRACE_SAMPLE_RATE`（<1 时 RAG 指标落 `unobserved`）、以及登录客户身份跑时记忆会跨次累积（改用开匿名的场景或专用接入方 Key） |
+| `--baseline latest` 报「没有同用例集且场景匹配的历史运行」 | 三种可能：上一次跑了 `--no-db`（不落库）、换了场景、用例集改过判定字段导致指纹变了。可用 sidecar 文件当离线基线：`--baseline reports/eval-<timestamp>.json` |
+| 评测退出码 2 | 不是故障，是**闸门生效**：相对基线有指标超出容差（比率类下降 > 2 个百分点、耗时/token 上升 > 15%）。回滚变更，或在发布说明里逐项解释（含配置变动，报告解释不了配置造成的漂移） |
 
 ## 6. 数据维护与重建策略
 
@@ -252,10 +256,33 @@ docker compose stop backend web
   | `seed_memory_via_chat.py` | 模拟对话造记忆测试数据 |
   | `backup.sh` | 生产备份：pg_dump + Qdrant 快照 + 业务数据 + Redis RDB（带保留期） |
   | `cleanup_traces.py` | 清理过期链路（见下） |
+  | `eval.py` | 评测与回归：走真实 HTTP 链路跑用例集，出 `reports/eval-*.md`/`.json` 并写 `eval_runs`（见 6.1） |
   | `start_all.ps1` / `start_all.bat` / `stop_all.ps1` | 一键起停三服务 |
 - `request_traces`（请求链路）按轮次增长、带 spans 时间线，需设保留期：`python scripts/cleanup_traces.py`（默认取 `TRACE_RETENTION_DAYS`，可 `--days N` / `--dry-run`）；建议挂 cron 每日执行。
 - 工具入参/返回含客户数据：合规敏感场景设 `TRACE_STORE_PAYLOAD=false`（只留类型与字节数，不存原文）。
 - 知识重建：管理页 → 重建索引，或 `POST /api/v1/knowledge/documents/{id}/reindex`。
+
+### 6.1 发布前评测回归（改提示词 / 换模型 / 调 RAG 参数）
+
+这三类变更是交付期最容易“静默变差”的动作，发布前必须跑一次带基线对比的评测（完整口径见 [evaluation.md](evaluation.md)）：
+
+```powershell
+cd backend
+# 1) 先确认用例集合法（不发请求）
+.\.venv\Scripts\python.exe ..\scripts\eval.py --dry-run
+# 2) 跑全量并与上一次同用例集的运行对比
+.\.venv\Scripts\python.exe ..\scripts\eval.py --scene customer_service --baseline latest --run-tag v0.2.0-rc1
+echo $LASTEXITCODE
+```
+
+- **退出码 0/1 可发布**（1 = 有失败但无退化，逐条归因写进发布说明）；**2 = 相对基线退化 → 回滚或在发布说明里逐项解释**；3 = 链路根本没跑通（服务未起/地址错/鉴权不通）。
+- 验收跑建议临时 `TRACE_SAMPLE_RATE=1.0`，否则 RAG 指标会因采样落到不可观测。
+- 报告在 `reports/eval-<timestamp>.md`（五节：结论 / 与基线对比含退化标注 / 指标口径与样本数 / 失败用例 / 全量用例表），
+  可直接附在验收单后；`reports/` 不入库，运行结论在 `eval_runs` 表里。
+- ⚠️ **改下面这些配置等于换基线**：`ROUTER_CONFIDENCE_THRESHOLD` / `ROUTER_MAX_INTENTS` / `ROUTER_FALLBACK_ANSWER` /
+  `RAG_TOP_K` / `RAG_MIN_SCORE` / 模型名。换基线后第一次跑不带 `--baseline` 重新建基线，并在变更说明里写清。
+- 失败归因纪律：**不得改用例期望或降阈值来迁就结果**。用例口径修正必须在 `note` 里写清代码/政策依据，
+  并记在 [U24](updates/24-eval-regression.md)（首批只改过两处：`cs-edge-01/02/03`、`cs-order-04`）。
 
 ## 7. 本地 MCP 演示服务（物流 / 退款）与固定数据
 

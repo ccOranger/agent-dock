@@ -786,7 +786,11 @@ class Orchestrator:
             collector.add_unique("llm_models", model)
         # 把最近若干轮对话注入 Agent._history，赋予跨轮记忆：业务 Agent 每轮新建，
         # 不注入则模型看不到上一轮，既接不住追问也不知道刚创建的工单号（无法 update_ticket）
-        self._seed_history(simple_agent, history)
+        self._seed_history(simple_agent, history, collector)
+        if collector:
+            # 用量口径：上下文工程拼装后的提示词（多意图各计一次）；
+            # 历史由 _seed_history 按实际注入内容逐条计入
+            collector.record_prompt(enriched_query)
         yield {"type": "status", "data": {"stage": "generating", "text": "正在生成回答…"}}
         async for event in self._astream(
             simple_agent,
@@ -796,8 +800,14 @@ class Orchestrator:
             yield event
 
     @staticmethod
-    def _seed_history(simple_agent: SimpleAgent, history: list[dict] | None) -> None:
-        """用最近几轮历史填充 SimpleAgent._history（_stream_with_tools 会读取它）。"""
+    def _seed_history(
+        simple_agent: SimpleAgent, history: list[dict] | None, collector=None
+    ) -> None:
+        """用最近几轮历史填充 SimpleAgent._history（_stream_with_tools 会读取它）。
+
+        传 collector 时顺带把这些内容计入用量：历史确实被送进了模型，
+        口径放在这里可以保证与实际注入内容一致，不会与过滤/窗口逻辑跑偏。
+        """
         if not history:
             return
         prior = list(history)
@@ -809,6 +819,8 @@ class Orchestrator:
             content = (h.get("content") or "").strip()
             if role in ("user", "assistant") and content:
                 simple_agent._history.append(Message(content, role))
+                if collector is not None:
+                    collector.record_prompt(content)
 
     @staticmethod
     async def _resolve_rag_namespaces(business_agent, runtime=None) -> list[str]:

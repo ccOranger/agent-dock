@@ -43,6 +43,12 @@
         <el-menu-item index="/dashboard" v-if="isAdmin">
           <span>仪表盘</span>
         </el-menu-item>
+        <el-menu-item index="/usage" v-if="isAdmin">
+          <span>用量报表</span>
+        </el-menu-item>
+        <el-menu-item index="/license" v-if="isAdmin">
+          <span>授权与版本</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -54,6 +60,10 @@
           <el-button size="small" text @click="onLogout">退出</el-button>
         </div>
       </el-header>
+      <div v-if="license.banner" class="banner">
+        <el-alert :type="license.banner.type" :title="license.banner.text" show-icon :closable="false" />
+        <el-link type="primary" :underline="false" @click="router.push('/license')">查看授权</el-link>
+      </div>
       <el-main>
         <router-view />
       </el-main>
@@ -62,17 +72,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { useLicenseStore } from '@/stores/license'
 
 const auth = useAuthStore()
+const license = useLicenseStore()
 const route = useRoute()
 const router = useRouter()
 
 const activePath = computed(() => route.path)
 const isAdmin = computed(() => auth.user?.role === 'admin')
+
+// 授权状态只有 admin 能查（agent 调用 403）；降级时顶部常驻提醒，不阻断任何操作
+onMounted(() => {
+  if (isAdmin.value) license.load()
+})
 
 function onLogout() {
   auth.logout()
@@ -125,6 +142,15 @@ function onLogout() {
 }
 .name {
   color: #606266;
+}
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px 0;
+}
+.banner :deep(.el-alert) {
+  flex: 1;
 }
 .el-main {
   background: #f5f7fa;

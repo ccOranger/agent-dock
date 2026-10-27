@@ -103,6 +103,37 @@ def test_list_invalid_date_returns_400(client):
     assert resp.json()["detail"]["code"] == 1001
 
 
+def test_list_accepts_trace_id_in_session_box(client, monkeypatch):
+    """把日志/报告里的 16 位链路 ID 粘进「会话 ID」框：转成 trace_id 过滤，不能 500。"""
+    captured: dict = {}
+    _capture_list(monkeypatch, captured)
+    resp = client.get(at.router.prefix, params={"session_id": "93E20F49FA8E44F3"})
+    assert resp.status_code == 200
+    assert captured["trace_id"] == "93e20f49fa8e44f3"
+    assert captured["session_id"] is None
+
+
+def test_list_accepts_explicit_trace_id(client, monkeypatch):
+    captured: dict = {}
+    _capture_list(monkeypatch, captured)
+    resp = client.get(at.router.prefix, params={"trace_id": "trace_id=39129925f2d74c4c"})
+    assert resp.status_code == 200
+    assert captured["trace_id"] == "39129925f2d74c4c"
+
+
+def test_list_rejects_malformed_id(client):
+    """非法 ID 返回 400 并说明期望格式，而不是让 uuid.UUID 抛 500。"""
+    resp = client.get(at.router.prefix, params={"session_id": "93e20f49fa8e44f3x"})
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == 1001
+
+
+def test_session_traces_rejects_malformed_id(client):
+    resp = client.get(f"{at.router.prefix}/sessions/not-a-uuid")
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == 1001
+
+
 def test_usage_route_not_swallowed_by_detail(client, monkeypatch):
     """/usage 必须命中用量聚合，而不是被 /{trace_ref} 当 ID 吃掉。"""
 

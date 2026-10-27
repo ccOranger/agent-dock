@@ -3,13 +3,15 @@
 用法（backend 目录，先执行 scripts/rebuild_and_seed.py）：
     .\\.venv\\Scripts\\python.exe ..\\scripts\\verify_schema.py
 
-校验分四层：
+校验分五层：
 1. 结构：表、列、NOT NULL、唯一约束/CHECK/部分索引是否存在；
 2. 行为：该失败的写入确实失败，该放行的写入确实成功（全部在事务内，最后回滚）；
 3. 种子：默认场景、默认 Agent、绑定关系、默认知识库；
-4. 版本：schema_meta.version 与 backend/app/core/schema.py 一致。
+4. 版本：schema_meta.version 与 backend/app/core/schema.py 一致；
+5. 迁移：schema_migrations 记录与仓库文件一致（编号/checksum/无待执行），
+   且当前库结构没有和 init_db.sql 漂移。
 
-注意：本脚本不会建表/灌种子，也不会改数据；行为用例最后统一 rollback。
+注意：本脚本不会改业务数据；行为用例最后统一 rollback，一致性比对用一次性临时 schema。
 """
 import asyncio
 import os
@@ -20,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 import asyncpg  # noqa: E402
 
+from app.core.migrate import init_sql_path, load_migrations  # noqa: E402
 from app.core.schema import SCHEMA_VERSION  # noqa: E402
 from app.schemas.scene import (  # noqa: E402
     DEFAULT_ASSISTANT_NAME,
@@ -47,6 +50,8 @@ EXPECTED_TABLES = {
     "tickets",
     "request_traces",
     "chat_events",
+    "chat_usage_daily",
+    "eval_runs",
     "canned_scripts",
     "schema_meta",
 }
@@ -76,6 +81,16 @@ EXPECTED_COLUMNS = {
     "chat_events": {
         "id", "trace_id", "scene_code", "session_id", "visitor_id", "user_id",
         "integration_id", "tenant_id", "ext", "message_chars", "total_tokens",
+        "tokens_estimated",
+    },
+    "chat_usage_daily": {
+        "day", "scene_code", "integration_id", "requests", "tokens",
+        "estimated_requests", "handoffs", "errors", "updated_at",
+    },
+    "eval_runs": {
+        "id", "run_tag", "scene_code", "base_url", "model_name", "fixture_hash",
+        "case_count", "passed_count", "metrics", "detail", "report_path",
+        "baseline_run_id", "duration_ms", "started_at", "finished_at",
     },
     "schema_meta": {"key", "value"},
 }
@@ -104,6 +119,10 @@ EXPECTED_INDEXES = {
     "idx_chat_events_visitor_created",
     "idx_chat_events_integration_created",
     "idx_chat_events_trace",
+    "idx_chat_usage_daily_scene",
+    "idx_chat_usage_daily_integration",
+    "idx_eval_runs_scene_started",
+    "idx_eval_runs_fixture",
 }
 
 
@@ -357,6 +376,86 @@ async def check_seed(conn: asyncpg.Connection, checker: Checker) -> None:
     checker.ok("默认知识库存在")
 
 
+async def check_migrations(conn: asyncpg.Connection, checker: Checker) -> None:
+    """迁移记录一致性：不超前、历史未篡改、未漏执行。"""
+    files = load_migrations()
+    limit = int(SCHEMA_VERSION)
+    ahead = [m.name for m in files if m.number > limit]
+    assert not ahead, f"迁移编号超过 SCHEMA_VERSION={SCHEMA_VERSION}：{ahead}"
+
+    has_table = await conn.fetchval(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = current_schema() AND table_name = 'schema_migrations'"
+    )
+    if not has_table:
+        # 用 init_db.py 新建的空库还没有迁移表，属于正常路径
+        checker.ok("未启用增量迁移（无 schema_migrations，按空库建表路径）")
+        return
+
+    rows = await conn.fetch("SELECT version, checksum FROM schema_migrations ORDER BY version")
+    applied = {r["version"]: r["checksum"] for r in rows}
+    known = {m.version: m for m in files}
+
+    unknown = sorted(set(applied) - set(known))
+    assert not unknown, f"库中存在仓库已无的迁移记录：{unknown}"
+
+    for version, checksum in applied.items():
+        assert checksum == known[version].checksum, (
+            f"迁移 {known[version].name} 的 checksum 与仓库文件不一致：历史文件被修改过"
+        )
+
+    missing = sorted(v for v in known if v not in applied and int(v) <= limit)
+    assert not missing, f"存在未执行的迁移：{missing}，请运行 python -m app.migrate"
+
+    latest = max((int(v) for v in applied), default=0)
+    if applied:
+        checker.ok(f"迁移记录一致（已执行 {len(applied)} 个，最新 {latest:04d}）")
+    else:
+        checker.ok("迁移表已就绪，尚无增量记录")
+
+
+async def check_parity(conn: asyncpg.Connection, checker: Checker) -> None:
+    """把 init_db.sql 建进一次性临时 schema，与当前库逐表逐列比对。
+
+    守住「存量库跑完迁移后的结构」与「空库直接建表的结构」不漂移：
+    新增迁移时忘了同步 init_db.sql，或 init_db.sql 改了但没写增量文件，这里都会报出来。
+    """
+    schema = f"verify_parity_{uuid.uuid4().hex[:8]}"
+    original_path = await conn.fetchval("SHOW search_path")
+    sql = init_sql_path().read_text(encoding="utf-8")
+    await conn.execute(f'CREATE SCHEMA "{schema}"')
+    try:
+        await conn.execute(f'SET search_path TO "{schema}", public')
+        await conn.execute(sql)
+
+        async def columns_of(name: str) -> dict[str, set[str]]:
+            rows = await conn.fetch(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = $1",
+                name,
+            )
+            result: dict[str, set[str]] = {}
+            for r in rows:
+                result.setdefault(r["table_name"], set()).add(r["column_name"])
+            return result
+
+        expected = await columns_of(schema)
+        actual = await columns_of("public")
+    finally:
+        await conn.execute(f"SET search_path TO {original_path}")
+        await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+
+    absent = sorted(set(expected) - set(actual))
+    assert not absent, f"当前库缺少 init_db.sql 中的表：{absent}"
+    drift = [
+        f"{table}: {sorted(expected[table] ^ actual.get(table, set()))}"
+        for table in sorted(expected)
+        if expected[table] ^ actual.get(table, set())
+    ]
+    assert not drift, "当前库与 init_db.sql 列结构漂移：\n  " + "\n  ".join(drift)
+    checker.ok(f"结构无漂移（{len(expected)} 张表与 init_db.sql 对齐）")
+
+
 async def main() -> None:
     conn = await asyncpg.connect(dsn_from_env(), statement_cache_size=0)
     checker = Checker()
@@ -367,9 +466,13 @@ async def main() -> None:
         await check_behaviour(conn, checker)
         print("== 种子 ==")
         await check_seed(conn, checker)
+        print("== 迁移一致性 ==")
+        await check_migrations(conn, checker)
+        await check_parity(conn, checker)
     finally:
         await conn.close()
-    print(f"\n✅ schema 校验通过：{checker.passed} 项")
+    # 不用 emoji：Windows 控制台默认 GBK，会直接 UnicodeEncodeError
+    print(f"\n[OK] schema 校验通过：{checker.passed} 项")
 
 
 if __name__ == "__main__":

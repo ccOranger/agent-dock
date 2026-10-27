@@ -10,6 +10,67 @@
 
 ## [Unreleased]
 
+### 新增：版本化增量迁移（W1）
+
+- **存量库可升级**：新增 `scripts/migrations/NNNN_slug.sql` + `schema_migrations` 记录表，存量库通过 `python -m app.migrate` 顺序升级，不再依赖 `rebuild_and_seed.py` 全量重建。空库仍由 `init_db.sql` 一次建到最新结构（不存 `0001_baseline.sql` 副本，避免双份 DDL 漂移）。
+- **执行器**：`backend/app/core/migrate.py` 提供 `--check`（只读，有待执行退出码 1）、`--dry-run`（事务内试跑后回滚）、`--backup`（待执行时先 `pg_dump`）、无参正式执行；每个文件独立事务，成功才写历史记录，checksum 按 LF 归一化（跨 Windows/Linux 一致），历史文件被改直接报错中止。
+- **启动守卫**：版本不匹配的错误提示从“全量重建”改为迁移命令（`python -m app.migrate`）；`init_db.sql` 末尾版本写入改 `ON CONFLICT DO NOTHING`，重复执行不会把存量库版本降回去。
+- **生产保护**：`rebuild_and_seed.py` 在 `APP_ENV=production` 时默认拒绝执行（需显式 `--force`），文档定为仅开发/演示可用；`docker/backend-entrypoint.sh` 支持 `MIGRATE_ON_START=true`（默认 false）并对连接失败重试。
+- **校验**：`scripts/verify_schema.py` 新增迁移记录一致性（编号不超前、checksum 未篡改、无待执行）与“当前库 vs `init_db.sql`”逐表逐列比对；新增 `backend/tests/test_migrations.py`（命名/排序/checksum/CRLF/历史篡改/dry-run/真实库数据保留）。
+- **升级演练**：`test_g1_rehearsal_upgrade_keeps_data` 自造同规模存量库（500 消息 / 20 工单 / 3 知识库 + 30 文档 / 120 会话 / 200 埋点 / 60 记忆 / 50 链路），迁移前后 20 张业务表的行数与全行 md5 完全一致，dry-run 不落库，二次执行幂等。
+
+### 新增：用量计量与报表（W2）
+
+- **采集口径**：一轮对话结束后，把「路由提示词 + 业务 Agent 提示词 + 注入的历史 + 最终回答」估算成 token，写入 `chat_events.total_tokens` 并用 `tokens_estimated` 标记；`hello_agents` 未开 `stream_options.include_usage`，拿不到供应商 usage，故当前全部为估算值。
+- **估算器**：新增 `backend/app/utils/tokens.py`。装了 `tiktoken`（**可选依赖** `backend/requirements-optional.txt`，镜像默认不装）按 `cl100k_base` 分词，否则按「CJK 1 字 ≈ 1 token、其余 4 字符 ≈ 1 token」加权；`TOKEN_ESTIMATE_FACTOR` 可按供应商账单整体校准。
+- **与链路解耦**：用量计数不走 `TraceCollector.should_persist()`，`TRACE_ENABLED=false` 或 `TRACE_SAMPLE_RATE<1` 时 `request_traces` 没有记录，但账照记；异常/中断轮也会把已生成的部分计入。
+- **日聚合**：新增 `chat_usage_daily(day, scene_code, integration_id)`（零 UUID 表示匿名/未归属，规避 NULL 在唯一约束中互不相等的坑），每次对话一条 `INSERT ... ON CONFLICT DO UPDATE` 累加 `requests / tokens / estimated_requests / handoffs / errors`；`chat_events` 仍按保留期清理，日聚合长期保留作账单依据。
+- **接口**：`GET /api/v1/admin/usage/summary?from=&to=&group_by=day|scene|integration`（默认近 30 天，单次跨度上限 `USAGE_QUERY_MAX_DAYS`=366，超限 400）与 `GET /api/v1/admin/usage/export.csv`（UTF-8 BOM，(日 × 场景 × 接入方) 明细）；均要求 `admin`。
+- **后台页面**：「用量报表」（`/usage`，admin）：日期区间、按天/场景/接入方切换、场景过滤、四张合计卡、Token 趋势柱状图（复用仪表盘样式，不引图表库）、明细表与 CSV 导出。
+- **迁移**：`SCHEMA_VERSION` 由 `6` 升到 `7`，首个真实增量 `scripts/migrations/0007_usage_daily.sql`（`init_db.sql` 同步），存量库执行 `python -m app.migrate` 即可，无需重建。
+- **测试**：`backend/tests/test_usage.py`（估算口径、估算系数校准、关链路仍计量、写入 SQL 与零 UUID 归属、接口参数/越权 403/CSV BOM）。
+- **边界**：本项只产出「用量事实」，**不做**套餐、账单与支付；计费规则留给后续 License / 企业合同。
+
+### 新增：License 与版本分层（W3）
+
+- **离线授权文件**：`backend/app/core/license.py` 校验「JSON 负载 + Ed25519 签名」，不联网。公钥由 `LICENSE_PUBLIC_KEY` 提供（Base64 裸 32 字节或 PEM），私钥与签发脚本只在私有仓库，开源仓库不内置任何可用私钥。
+- **只降级不阻断**：文件缺失 / JSON 解析失败 / 签名不符 / 指纹不符 / 已过期，一律退回 `community`；**不阻断启动、不影响对话与社区功能**（多场景路由、RAG、工具/MCP、跨轮记忆、链路追踪、用量报表、场景管理、嵌入挂件、基础评测全部保留）。
+- **5 个功能位**：`rbac`、`audit`、`white_label`、`eval_pro`、`sso`，均不动对话内核；后端提供 `has_feature()` 与 `require_feature(feature)` 挂载点（社区版返回 403/2003），企业功能实现代码不进开源仓库。`eval_pro` 只控制评测集管理/定时回归/看板，不控制评测执行与报告。
+- **部署指纹**：用 `.env` 的 `DEPLOYMENT_ID`（随数据卷长期存在）而不是机器码/hostname，避免容器重启即掉授权；留空表示未绑定（仅建议开发/演示）。
+- **接口与页面**：`GET /api/v1/admin/license`（授权状态、功能位、到期天数、降级原因）与 `POST /api/v1/admin/license/reload`（换授权/续期免重启）；后台新增「授权与版本」页（`/license`，admin），降级或 30 天内到期时后台顶部常驻横幅。
+- **启动自检**：启动日志输出一行 `授权: license=enterprise customer=… expires_in=365d features=…`；降级时 WARN 给出原因，便于现场一眼定位“文件放错位置 / 未配公钥 / 指纹不符”。
+- **不升 schema**：本项无表结构变更，`SCHEMA_VERSION` 保持 `7`。
+- **测试**：`backend/tests/test_license.py` 17 项（无文件/有效/过期/篡改功能位/缺签名/指纹不符/未配公钥/未知功能位/版本不支持/重新加载/功能位依赖 403 与放行/接口形状/agent 越权）。
+- **边界**：不提供签发工具与私钥（在私有仓库）；不做机器码硬绑、代码混淆与在线激活；`mode`（`on_prem` / `hosted`）当前只记录，不做逻辑分支。
+
+### 新增：评测与回归（W4）
+
+- **用例集进仓库**：`backend/tests/fixtures/eval/<scene_code>.json` 首批 50 条（`customer_service` 39 + `default` 11），
+  每条带 `expect` / `tags` / `source` / `note`；期望字段 18 个（意图、多意图、置信度、工具集与次数上限、RAG 命中/为空、
+  转人工、兜底、关键词与禁词、应答长度、入口拦截）；`setup[]` 支持多轮铺垫只判最后一轮（追问续接与跨轮记忆类用例）。
+  用例评审后才可改，**不允许改期望迁就结果**（口径修正必须在 `note` 里写清代码/政策依据）。
+- **执行器走真实 HTTP 链路**：`scripts/eval.py` 打 `POST /api/v1/chat/stream`，不 import Agent，因此能覆盖鉴权 / 限流 /
+  场景路由 / 固定话术 / 埋点 / 链路回读全链路；支持 `--scene` `--tag` `--limit` `--concurrency` `--baseline` `--dry-run` `--no-db`。
+- **服务端事实回读**：SSE 流里没有的 RAG 片段数/命中命名空间/工具名/结局按 `done` 里的 `trace_id` 回读 `request_traces`，
+  token 回读 `chat_events`（不受采样影响）—— 指标是实测而非模型自述。
+- **分母纪律**：用例没写→不参与；写了但服务端无可回读事实（链路被采样丢弃）→计入 `unobserved`、不进分母；
+  报告第 3 节把分子/分母/不可观测三个数都列出来，避免把基础设施问题误报成效果退化。
+- **基线与退化闸门**：用例集指纹（只取 `case_id`+`query`+`setup`+`expect`，过滤后计算）锁定可比范围；比率类下降
+  > 2 个百分点、耗时/token 上升 > 15% 判退化，退出码 `0/1/2/3`（2 = 相对基线退化，可当发布闸门）。
+- **报告**：`reports/eval-<timestamp>.md` 五节结构（结论 → 与基线逐项对比含退化标注 → 指标口径与样本数 →
+  失败用例含 `trace_id` 与摘录 → 全量用例表）+ 同名 sidecar `.json` 可当离线基线；`reports/` 不入库。
+- **迁移**：新增表 `eval_runs`（运行结论 + 指标 + 逐用例明细 + 基线指向），`SCHEMA_VERSION` 由 `7` 升到 `8`
+  （`scripts/migrations/0008_eval_runs.sql`）；与计划 3.4「并入 P0-2 升级」不同——W2 已交付验收，不为省一个版本号回头改已上线的 0007。
+- **评测推动的两处产品修正**：修复 `/chat/stream` 响应头 `X-Trace-Id` 与落库 `trace_id` 不是同一个的缺陷（否则
+  运维按响应头查链路永远查不到）；演示种子给 `knowledge_qa` / `order_service` 配 `rag_namespaces` 跨库绑定（政策类问法
+  写在售后/订单指南里，只绑单库会检回空块只能转人工）。
+- **首批实测**（本机 `SEED_DEMO=true`、`deepseek-flash`、`TRACE_SAMPLE_RATE=1.0`）：全量 36/39 = 92.3%，意图 30/30、
+  工具 7/7、RAG 9/12；**同一用例集跑两次比率类指标逐项相同**（验收一）；把 `knowledge_qa` 提示词改错后意图准确率
+  100% → 30%、4 项退化标注、退出码 2（验收二）；保留 3 条失败不迁就（演示文档整篇一块，窄问法落在 `RAG_MIN_SCORE` 之下）。
+- **测试**：`backend/tests/test_eval_runner.py` 47 项全部 mock（不打真实 LLM）；打分/聚合/指纹/diff/报告渲染与仓库用例集结构校验。
+- **边界**：后台「评测与回归」看板与定时回归属企业版功能位 `eval_pro`，**评测能力本身全在社区版**；
+  首批来源为 `demo_corpus` 28 + `manual` 22，`trace_sample` 0 条（库里没有真实链路，偏离已记录）。
+
 ### 新增：多场景平台化（M0–M7）
 
 - **业务场景**：`scenes` + `scene_agents`；对外仍是 `/chat/stream`，用 `scene_code` 区分场景，无码请求落默认场景（固定 `default_assistant` 直连，不路由）。
@@ -54,7 +115,7 @@
 - **场景请求额度**：`acquire_chat_slot` 的 Redis 桶由 3 个扩到 5 个（主体分钟/日 + 场景分钟/日 + 主体并发流），仍一次 pipeline 提交；任一超限就回滚本次自增的全部键后返回 429（否则未参与判定的日桶与并发槽会白扣一个），新增额度不带来额外往返。**`quota.*` 不继承 `PUBLIC_CHAT_*`，默认 `0` = 不限**。
 - **后台体验**：场景列表新增「今日请求 / 日额度」列（一条 `GROUP BY scene_code` 聚合，超 80% 标黄、达上限标红）；固定话术页新增「回答来源」与知识库多选，命中测试回显检索到的库，列表每行带 `scene_code`（场景已停用/归档也能正确定位，不会误改全局模板）；链路中 `canned.script` span 带 `answer_source` 与命中数。
 - ⚠️ `SCHEMA_VERSION` 由 `5` 升到 `6`（`canned_scripts.answer_source/kb_namespaces`、`scenes.runtime_config/created_by`、`agents.created_by`、`knowledge_bases.created_by`、`staff_users.quota`、`idx_chat_events_created_scene`），旧库需 `scripts/rebuild_and_seed.py` 全量重建后跑一次 backfill。
-- Agent 级模型配置（`agents.llm_model` 按场景/按 Agent 独立指定）本期**未落地**，留待下一迭代。
+- Agent 级模型配置已落地（`agents.llm_model` 按 Agent 指定 + `llm_factory` 按模型缓存）；尚未落地的是“模型供应商后台化”（API Key/Base URL 由后台维护而非 `.env`）。
 
 ### 移除：场景包机制
 
@@ -73,13 +134,20 @@
 ### 修复
 
 - `publish_key` 含非 ASCII 字符时 `hmac.compare_digest` 抛 TypeError → 统一 UTF-8 编码后比较。
+- `/chat/stream` 响应头的 `X-Trace-Id` 与落库的 `trace_id` 不是同一个（中间件在 `call_next` 之后覆盖、端点又自己新生成一个）
+  → 运维按响应头查链路永远查不到。端点改为复用 `request.state.trace_id`，由 W4 评测的回读环节发现。
+- 后台链路页把日志里的 16 位链路 ID 粘进「会话 ID」框时 `uuid.UUID()` 抛 ValueError → 500
+  （`/admin/traces` 列表、`/admin/traces/sessions/{id}`、`/admin/inquiries/sessions/{id}` 同类）
+  → 新增 `app/api/params.py`：同一个 ID 框既认 36 位会话 UUID 也认 16 位 `trace_id`，
+  非法形态返回 400 `code=1001`；列表接口另开放显式 `trace_id` 参数。
 
 面向后续版本的候选项（只记录，不影响当前发布）：
 
-- 版本化数据库迁移（Alembic 或 `scripts/migrations/NNN_*.sql` + `schema_version`）；
 - RBAC 与审计增强、SSO（企业版方向）；
-- 评测与回归集（基于 `request_traces` 构建 golden set）；
 - 后台 IA 去客服化：`canned_scripts` → 通用 `response_templates`，`app_users` 合并、Ticket 领域拆分。
+
+已完成：版本化数据库迁移（W1）；用量计量与报表（W2）；License 与版本分层（W3）；
+评测与回归（`backend/tests/fixtures/eval/*.json` + `scripts/eval.py` + `eval_runs`，见上方 W4）。
 
 ## [0.1.0] - 2026-10-20
 

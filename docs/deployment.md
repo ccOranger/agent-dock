@@ -24,7 +24,7 @@ docker compose ps
 - 入口：`http://<host>:8080/`（客户）、`http://<host>:8080/admin/`（运营台）
 - 后端只绑定宿主机回环 `127.0.0.1:8000`，不对外暴露
 - 数据在命名卷：`pgdata`、`qdrantdata`、`redisdata`、`backenddata`、`memorydata`
-- 首次启动自动执行 `init_db` + `seed`；之后每次启动都会跑（幂等）
+- 首次启动自动执行 `init_db` + `seed`（幂等）；存量库升级需设 `MIGRATE_ON_START=true`，或在升级流程里显式执行 `python -m app.migrate`
 
 ## 3. 生产叠加
 
@@ -68,7 +68,7 @@ INIT_ON_START=false
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
 $COMPOSE up -d --build postgres qdrant redis   # 先起依赖
-$COMPOSE run --rm backend python ../scripts/init_db.py
+$COMPOSE run --rm backend python -m app.migrate            # 空库：用 init_db.sql 建到最新结构
 $COMPOSE run --rm backend python ../scripts/seed_data.py   # 管理员随机密码只打印一次
 $COMPOSE up -d --build
 $COMPOSE ps
@@ -134,23 +134,37 @@ $COMPOSE logs -f caddy
 
 ## 5. 升级与回滚
 
+schema 升级走 `python -m app.migrate`（版本化增量迁移），不要用 `init_db.py` 硬凑，更不要在生产跑 `rebuild_and_seed.py`。
+
 ```bash
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+
 # 1) 先备份
 COMPOSE_FILE="docker-compose.yml:docker-compose.prod.yml" bash scripts/backup.sh
 
 # 2) 拉新代码
 git pull
 
-# 3) 重建
-COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+# 3) 看当前版本与待执行迁移（有待执行时退出码 1）
+$COMPOSE run --rm backend python -m app.migrate --check
+
+# 4) 事务内试跑后回滚，确认 SQL 无语法/依赖问题
+$COMPOSE run --rm backend python -m app.migrate --dry-run
+
+# 5) 正式执行（镜像内无 pg_dump，备份依赖第 1 步；本机装了 pg_dump 才用 --backup）
+$COMPOSE run --rm backend python -m app.migrate
+
+# 6) 重建镜像与容器
 $COMPOSE up -d --build
 
-# 4) 有 schema 变更时补跑一次（幂等）
-$COMPOSE run --rm backend python ../scripts/init_db.py
+# 7) 健康检查
+curl -fsS http://127.0.0.1:8080/api/health
 ```
 
-- 升级期间 `INIT_ON_START` 保持 `false`，不要靠重启自动迁移。
-- 回滚：`git checkout <上一个 tag>` 后重新 `up -d --build`；数据库回滚用备份 `pg_restore`。当前没有版本化迁移，跨版本回滚前先在预发环境验证。
+- 升级期间 `INIT_ON_START` 保持 `false`：`init_db.sql` 只负责空库建表，存量库版本由迁移推进。
+- `MIGRATE_ON_START=true` 只建议单实例场景使用；多副本滚动更新时应独立执行第 3~5 步，避免并发迁移。
+- **schema 只向前**：迁移不写回滚脚本，回滚镜像版本不等于回滚 schema。跨版本回退需要 `pg_restore` 到升级前的备份，先在预发环境演练。
+- `APP_ENV=production` 时 `rebuild_and_seed.py` 会直接拒绝执行（`--force` 可绕过，但会 DROP 全部业务表）。
 - 升级前确认已备份，备份产物至少包含 `postgres.dump` 与 `qdrant-*.snapshot`。
 
 ## 6. 备份与恢复
@@ -222,7 +236,39 @@ $COMPOSE start backend web caddy
 - 链路数据按轮增长，务必设置 `TRACE_RETENTION_DAYS` 并定期执行 `python scripts/cleanup_traces.py`（可挂 cron）；
 - 单实例 SSE 连接上限约 500，超出会在指标中体现。
 
-## 9. 上线检查清单
+## 9. 企业授权文件（可选）
+
+未放置授权文件时按社区版运行，无需任何配置。企业版按实例年授权，一份授权对应一个部署：
+
+1. 把授权方给的 `license.json` 放到宿主机，例如 `${DATA_ROOT}/license.json`（**不要提交到 Git**）。
+2. 根 `.env` 增加三项：
+
+```ini
+# 容器内路径（来源码仓 backend 目录，容器里是 /app/backend）
+LICENSE_FILE=/app/backend/license.json
+# 授权方提供的 Ed25519 公钥（Base64 裸 32 字节或 PEM）
+LICENSE_PUBLIC_KEY=<base64 公钥>
+# 部署指纹：首次部署生成一次，之后保持不变（换值会让授权失效）
+DEPLOYMENT_ID=<python -c "import uuid;print(uuid.uuid4().hex)" 的输出>
+```
+
+3. 在 `docker-compose.override.yml`（或生产叠加）里只读挂载：
+
+```yaml
+services:
+  backend:
+    volumes:
+      - ${DATA_ROOT:-/srv/smart-cs}/license.json:/app/backend/license.json:ro
+```
+
+> 挂载前宿主机文件必须已存在；否则 Docker 会建一个同名目录，表现为“授权文件读取失败”。
+
+4. 验证：重启后看启动日志 `授权: license=enterprise customer=… expires_in=…d`，或在后台「授权与版本」页查看。
+
+换授权 / 续期：覆盖文件后调 `POST /api/v1/admin/license/reload`（或在授权页点“重新加载”），**不需要重启容器**。
+授权过期、签名不符、指纹不符都只会关闭企业功能位，对话与社区版功能不受影响。
+
+## 10. 上线检查清单
 
 - [ ] 根 `.env` 已设置强 `JWT_SECRET`、`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`QDRANT_API_KEY`
 - [ ] `APP_ENV=production`，`SEED_DEMO=false`
@@ -234,3 +280,4 @@ $COMPOSE start backend web caddy
 - [ ] 备份脚本已跑通，恢复流程在测试环境演练过
 - [ ] 日志轮转、磁盘告警、`cleanup_traces` 定时任务已配置
 - [ ] 演示账号已禁用或改密，后台无默认口令
+- [ ] 企业版：`.env` 已配 `LICENSE_FILE` / `LICENSE_PUBLIC_KEY` / `DEPLOYMENT_ID`，后台「授权与版本」页显示“企业版”且剩余天数符合合同

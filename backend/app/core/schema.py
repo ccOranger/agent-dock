@@ -1,18 +1,22 @@
 """schema 版本守卫。
 
-本项目不做增量迁移：``scripts/init_db.sql`` 只保留最新结构，换库直接全量重建。
-旧库如果缺列/缺表，应该在启动时立刻给出“请全量重建”的明确提示，
-而不是等第一轮对话写库时才报 UndefinedColumn。
+``scripts/init_db.sql`` 是空库的最新结构，``scripts/migrations/NNNN_*.sql`` 是存量库的
+增量补丁。版本不匹配时要在启动阶段立刻给出可操作提示，而不是等第一轮对话
+写库才报 UndefinedColumn。
 """
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from app.core.database import engine
 
-# 与 scripts/init_db.sql 末尾 schema_meta 的 version 保持一致
-SCHEMA_VERSION = "6"
+# 与 scripts/init_db.sql 末尾 schema_meta 的 version 保持一致；
+# 新增迁移后必须同步（tests/test_migrations.py 会做一致性断言）
+SCHEMA_VERSION = "8"
 
-_REBUILD_HINT = "本项目不做增量迁移，请全量重建：python scripts/rebuild_and_seed.py"
+_MIGRATE_HINT = (
+    "请执行数据库迁移：python -m app.migrate（容器内："
+    "docker compose run --rm backend python -m app.migrate）"
+)
 
 
 async def assert_schema_version() -> None:
@@ -24,11 +28,12 @@ async def assert_schema_version() -> None:
             )
             row = result.first()
     except ProgrammingError as exc:
-        # schema_meta 不存在：典型旧库
-        raise RuntimeError(f"数据库缺少 schema_meta 表。{_REBUILD_HINT}") from exc
+        # schema_meta 不存在：全新未初始化的库
+        raise RuntimeError(f"数据库尚未初始化（缺少 schema_meta）。{_MIGRATE_HINT}") from exc
 
     found = row[0] if row else "missing"
     if found != SCHEMA_VERSION:
         raise RuntimeError(
-            f"数据库 schema 版本不匹配（期望 {SCHEMA_VERSION}，实际 {found}）。{_REBUILD_HINT}"
+            f"数据库 schema 版本不匹配（期望 {SCHEMA_VERSION}，实际 {found}）。{_MIGRATE_HINT}"
         )
+

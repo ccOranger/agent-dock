@@ -156,6 +156,20 @@ class Settings(BaseSettings):
     # 保留天数，供清理脚本使用
     trace_retention_days: int = 30
 
+    # ===== 用量计量（chat_events / chat_usage_daily）=====
+    # 供应商 usage 不可得时按字符估算 token；本系数供客户按账单整体校准（1.0 = 不校正）
+    token_estimate_factor: float = 1.0
+    # 报表单次查询的最大跨度（天），防止一次扫穿整张聚合表
+    usage_query_max_days: int = 366
+
+    # ===== License 与版本分层 =====
+    # 授权文件路径（JSON + Ed25519 signature）；不存在时静默按社区版运行
+    license_file: str = "./license.json"
+    # 签发方公钥：Base64 裸 32 字节或 PEM；为空则无法校验签名，一律社区版
+    license_public_key: str = ""
+    # 部署指纹（初始化时生成一次，随数据卷长期存在）。留空 = 未绑定，跳过指纹校验
+    deployment_id: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

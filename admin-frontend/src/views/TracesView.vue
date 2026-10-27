@@ -24,7 +24,7 @@
         </el-select>
         <el-input v-model="filters.tool_name" placeholder="工具名" clearable style="width: 150px" />
         <el-input v-model="filters.mcp_server" placeholder="MCP 服务名" clearable style="width: 150px" />
-        <el-input v-model="filters.session_id" placeholder="会话 ID" clearable style="width: 200px" />
+        <el-input v-model="filters.session_id" placeholder="会话 ID / 链路 ID" clearable style="width: 230px" />
         <el-input-number v-model="filters.min_latency_ms" :min="0" :step="500" placeholder="最小耗时" style="width: 140px" />
         <el-checkbox v-model="filters.has_error">仅看异常</el-checkbox>
         <el-date-picker
@@ -47,8 +47,8 @@
         :closable="false"
         class="tip"
       >
-        当前按会话过滤：{{ route.query.session_id }}
-        <el-button link type="primary" @click="clearSession">查看整个会话咨询记录</el-button>
+        当前按 ID 过滤：{{ route.query.session_id }}
+        <el-button link type="primary" @click="clearSession">清除过滤</el-button>
       </el-alert>
 
       <el-table :data="rows" v-loading="loading" style="margin-top: 12px" @row-click="openDetail">

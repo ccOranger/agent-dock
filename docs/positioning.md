@@ -1,7 +1,7 @@
 # 产品定位（v0.1 草案）
 
 > 状态：定位与前端形态已定，其余待验证。用于统一后续产品与架构决策。
-> 关联文档：[开源发布检查清单](./open-source-release.md)、[开发清单](./development-checklist.md)。
+> 关联文档：[开源发布检查清单](./open-source-release.md)、[开发清单](./development-checklist.md)、[产品化落地计划](./productization-plan.md)。
 
 ## 0. 结论摘要
 

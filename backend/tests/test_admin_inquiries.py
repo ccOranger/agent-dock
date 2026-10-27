@@ -162,6 +162,7 @@ def test_export_csv_header_bom_and_rows(client, monkeypatch):
 
 
 def test_get_inquiry_detail_with_messages(client, monkeypatch):
+    sid = "11111111-1111-1111-1111-111111111111"
     sess = SimpleNamespace(
         id="s-1",
         title="订单查询",
@@ -175,7 +176,7 @@ def test_get_inquiry_detail_with_messages(client, monkeypatch):
     messages = [{"id": "m-1", "role": "user", "content": "我的订单到哪了"}]
 
     async def fake_get(session_id):
-        assert session_id == "s-1"
+        assert session_id == sid
         return sess
 
     async def fake_scene_get(scene_id):
@@ -188,7 +189,7 @@ def test_get_inquiry_detail_with_messages(client, monkeypatch):
     monkeypatch.setattr(ai.SceneRepo, "get", fake_scene_get)
     monkeypatch.setattr(ai.MessageRepo, "list_by_session", fake_list_by_session)
 
-    resp = client.get(f"{ai.router.prefix}/sessions/s-1")
+    resp = client.get(f"{ai.router.prefix}/sessions/{sid}")
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["session"]["id"] == "s-1"
@@ -202,9 +203,16 @@ def test_get_inquiry_not_found(client, monkeypatch):
 
     monkeypatch.setattr(ai.SessionRepo, "get", fake_get)
 
-    resp = client.get(f"{ai.router.prefix}/sessions/missing")
+    resp = client.get(f"{ai.router.prefix}/sessions/99999999-0000-0000-0000-000000000000")
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == 3001
+
+
+def test_get_inquiry_rejects_malformed_id(client):
+    """非 UUID 的路径参数返回 400，而不是让 uuid.UUID 抛 500。"""
+    resp = client.get(f"{ai.router.prefix}/sessions/93e20f49fa8e44f3")
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == 1001
 
 
 def test_customer_forbidden_on_all_inquiry_endpoints(make_test_app):

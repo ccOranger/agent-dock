@@ -6,6 +6,7 @@ RAG/记忆命中多少、耗时与结局。明细时间线在 detail 的 spans �
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import require_staff
+from app.api.params import normalize_trace_id, parse_uuid, split_session_ref
 from app.core.exceptions import NotFound
 from app.models.repositories import TraceRepo
 from app.schemas.common import ApiResponse, PaginatedData
@@ -30,7 +31,8 @@ def _parse_dt(value: str | None):
 async def list_traces(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    session_id: str | None = None,
+    session_id: str | None = Query(None, description="会话 ID（UUID）；粘 16 位链路 ID 也可）"),
+    trace_id: str | None = Query(None, description="HTTP 链路 ID（16 位十六进制）"),
     user_id: str | None = None,
     scene_code: str | None = Query(None, description="按业务场景过滤（如 default / mall_order）"),
     agent_name: str | None = None,
@@ -43,10 +45,12 @@ async def list_traces(
     date_to: str | None = None,
     user=Depends(require_staff),
 ):
-    """链路列表（不带 spans 明细）：支持按场景/客户/会话/Agent/工具/MCP/结局/耗时/时间过滤。"""
+    """链路列表（不带 spans 明细）：支持按场景/客户/会话/链路/Agent/工具/MCP/结局/耗时/时间过滤。"""
+    session_ref, ref_trace_id = split_session_ref(session_id)
     items, total = await TraceRepo.list_filtered(
-        session_id=session_id,
-        user_id=user_id,
+        session_id=session_ref,
+        trace_id=normalize_trace_id(trace_id) or ref_trace_id,
+        user_id=parse_uuid(user_id, "user_id"),
         scene_code=scene_code,
         agent_name=agent_name,
         tool_name=tool_name,
@@ -77,7 +81,7 @@ async def trace_usage(
 @router.get("/sessions/{session_id}", response_model=ApiResponse[list])
 async def list_session_traces(session_id: str, user=Depends(require_staff)):
     """某会话按轮次的链路摘要（时间正序），用于画会话级链路串。"""
-    return ApiResponse(data=await TraceRepo.list_by_session(session_id))
+    return ApiResponse(data=await TraceRepo.list_by_session(parse_uuid(session_id, "session_id")))
 
 
 @router.get("/{trace_ref}", response_model=ApiResponse[dict])

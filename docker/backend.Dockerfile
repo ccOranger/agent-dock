@@ -19,6 +19,8 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend/ /app/backend/
 COPY scripts/seed_data.py scripts/init_db.py scripts/init_db.sql /app/scripts/
+# 增量迁移目录：app/core/migrate.py 按 <repo>/scripts/migrations 解析
+COPY scripts/migrations /app/scripts/migrations
 COPY docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint.sh
 RUN chmod +x /usr/local/bin/backend-entrypoint.sh && chown -R appuser:appuser /app
 

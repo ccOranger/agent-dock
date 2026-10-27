@@ -22,6 +22,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+def _request_trace_id(request: Request) -> str:
+    """沿用中间件已生成的 trace_id。
+
+    端点自己再 new 一个会与响应头 `X-Trace-Id`（中间件写的）不一致：
+    运维按头里的 id 查不到链路，评测执行器也无法按 trace_id 回读 RAG/token 事实。
+    没有中间件（如精简测试应用）时才自行生成。
+    """
+    tid = getattr(request.state, "trace_id", None)
+    return str(tid) if tid else new_trace_id()
+
+
 def _rate_actor(user, body: ChatRequest, request: Request) -> str:
     """限流主体：登录客户按 user，访客按 visitor_id，其余按 IP。"""
     if user is not None:
@@ -97,7 +108,7 @@ async def chat_stream(
     scene = await resolve_scene(body.scene_code)
     integration = await _resolve_and_authorize(request, scene, user)
     integration_id = str(integration["id"]) if integration else None
-    trace_id = new_trace_id()
+    trace_id = _request_trace_id(request)
     await _record_chat_event(
         trace_id=trace_id,
         scene_code=scene.code,
@@ -166,7 +177,7 @@ async def chat_message(
     scene = await resolve_scene(body.scene_code)
     integration = await _resolve_and_authorize(request, scene, user)
     integration_id = str(integration["id"]) if integration else None
-    trace_id = new_trace_id()
+    trace_id = _request_trace_id(request)
     await _record_chat_event(
         trace_id=trace_id,
         scene_code=scene.code,

@@ -269,6 +269,9 @@ class _Collector:
         self.router_ms = None
         self.router_fallback = False
         self.prompt_hash = None
+        # 用量计数（与真实 TraceCollector 接口对齐，路由是一次真实 LLM 调用）
+        self.prompts = []
+        self.completions = []
 
     def now_ms(self):
         return 5
@@ -278,6 +281,12 @@ class _Collector:
 
     def add_unique(self, *args):
         self.unique.append(args)
+
+    def record_prompt(self, text):
+        self.prompts.append(text)
+
+    def record_completion(self, text):
+        self.completions.append(text)
 
 
 @pytest.fixture

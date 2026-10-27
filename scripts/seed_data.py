@@ -183,6 +183,10 @@ DEMO_DYNAMIC_AGENTS = [
             "无法从知识库确认时如实说明并建议转人工，不臆造答案。"
         ),
         "rag_namespace": "cs_default",
+        # 跨库检索：政策类问题（退货运费、发票、退款时效）写在售后与订单指南里，
+        # 只绑 cs_default 会让这些问法检回空块、只能转人工（W4 评测实测）。
+        # 不用 search_all_knowledge_bases：那会把 it_* 演示库混进客服场景。
+        "rag_namespaces": ["cs_default", "cs_order", "cs_after_sales"],
         "routing_keywords": ["怎么用", "说明书", "政策", "FAQ", "常见问题"],
         "routing_examples": ["这个功能怎么使用", "你们的退换货政策是什么"],
     },
@@ -198,6 +202,8 @@ DEMO_DYNAMIC_AGENTS = [
             "调用工具前先向客户确认订单号等关键信息，修改类操作必须与客户核对后再执行。"
         ),
         "rag_namespace": "cs_order",
+        # 退换/退款类问法要先看售后政策条款，只绑 cs_order 会答不出时效与运费归属（W4 评测实测）
+        "rag_namespaces": ["cs_order", "cs_after_sales"],
         "routing_keywords": ["订单", "物流", "发货", "签收", "改地址", "退换"],
         "routing_examples": ["我的订单到哪了", "帮我把收货地址改一下"],
         "custom_tool_names": [

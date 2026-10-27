@@ -4,6 +4,7 @@
 - 纯内存累加，不做任何 IO；落库由调用方（ChatService）在流结束后一次性完成
 - 维度拍平成标量/数组列便于后台过滤，明细统一放 spans JSONB
 - 工具入参与返回属客户数据：受 TRACE_STORE_PAYLOAD / TRACE_PAYLOAD_MAX_CHARS 约束
+- 用量（prompt/completion token）与链路开关、采样**解耦**：链路可以不记，账必须有
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import time
 import uuid
 
 from app.core.config import settings
+from app.utils.tokens import estimate_tokens
 
 # ===== span 类型（后台按类型分组着色）=====
 SPAN_ROUTER = "router.llm"
@@ -105,6 +107,9 @@ class TraceCollector:
         self.tool_call_count = 0
         self.tool_error_count = 0
         self.response_chars = 0
+        # ---- 用量计量（不受 enabled / 采样影响，见 record_prompt）----
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
         self.outcome: str | None = None
         self.handover_reason: str | None = None
         self.error_code: int | None = None
@@ -190,6 +195,23 @@ class TraceCollector:
                 "attributes": merged,
             }
         )
+
+    # ------------------------------------------------------------------ 用量
+    def record_prompt(self, text: str | None) -> None:
+        """记录一段真正送进模型的提示词（多意图/路由各算一次）。
+
+        刻意不判断 self.enabled：TRACE_ENABLED=false 或采样丢弃时链路没了，
+        用量仍要落到 chat_usage_daily，否则报表会漏计。
+        """
+        self.prompt_tokens += estimate_tokens(text)
+
+    def record_completion(self, text: str | None) -> None:
+        """记录模型最终下发的正文（同样不受链路开关影响）。"""
+        self.completion_tokens += estimate_tokens(text)
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
 
     # -------------------------------------------------------------- 业务语义
     def add_unique(self, bucket: str, value: str | None) -> None:

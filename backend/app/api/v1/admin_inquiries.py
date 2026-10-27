@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import require_staff
+from app.api.params import parse_uuid
 from app.core.exceptions import NotFound, ParamError
 from app.models.repositories import MessageRepo, SceneRepo, SessionRepo
 from app.schemas.common import ApiResponse, PaginatedData
@@ -124,11 +125,12 @@ async def export_inquiries(
 @router.get("/sessions/{session_id}", response_model=ApiResponse[dict])
 async def get_inquiry(session_id: str, user=Depends(require_staff)):
     """查看某会话的完整对话记录（staff 可访问任意会话）。"""
-    sess = await SessionRepo.get(session_id)
+    session_ref = parse_uuid(session_id, "session_id")
+    sess = await SessionRepo.get(session_ref)
     if sess is None:
         raise NotFound("会话不存在")
     scene = await SceneRepo.get(sess.scene_id)
-    messages = await MessageRepo.list_by_session(session_id)
+    messages = await MessageRepo.list_by_session(session_ref)
     return ApiResponse(
         data={
             "session": {

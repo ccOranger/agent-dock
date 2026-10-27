@@ -15,6 +15,7 @@ import type {
   IntegrationKeyIssueResult,
   IntegrationUpdatePayload,
   KnowledgeBase,
+  LicenseStatus,
   LoginResult,
   MCPServer,
   MCPServerPayload,
@@ -44,6 +45,8 @@ import type {
   TicketDetail,
   TicketSummary,
   TraceUsageItem,
+  UsageGroupBy,
+  UsageSummary,
   User,
 } from '@/types'
 
@@ -145,6 +148,22 @@ export type TraceUsageField = 'tool_names' | 'agent_names' | 'mcp_server_names'
 
 export const apiTraceUsage = (field: TraceUsageField = 'tool_names', days = 7) =>
   unwrap(http.get<never, { data: { data: TraceUsageItem[] } }>('/admin/traces/usage', { params: { field, days } }))
+
+// ===== Admin：用量报表（账单口径）=====
+// 注意：token 目前是估算值（后端 tokens_estimated 标记），不是供应商账单
+export interface UsageQuery {
+  from?: string
+  to?: string
+  group_by?: UsageGroupBy
+  scene_code?: string
+}
+
+export const apiUsageSummary = (params: UsageQuery = {}) =>
+  unwrap(http.get<never, { data: { data: UsageSummary } }>('/admin/usage/summary', { params }))
+
+/** 导出的始终是 (日 × 场景 × 接入方) 明细，不受页面维度影响 */
+export const apiExportUsage = (params: Omit<UsageQuery, 'group_by'> = {}) =>
+  downloadBlob('/admin/usage/export.csv', params as Record<string, unknown>)
 
 // ===== 知识库：命名空间 =====
 export const apiListBases = () =>
@@ -438,3 +457,12 @@ export const apiMyMemories = (type?: string) =>
 
 export const apiUserMemories = (userId: string, type?: string) =>
   unwrap(http.get<never, { data: { data: MemoryItem[] } }>(`/memory/users/${userId}`, { params: { type } }))
+
+// ===== Admin：授权与版本 =====
+/** 当前授权状态（版本、功能位、到期天数、降级原因），只读 */
+export const apiLicenseStatus = () =>
+  unwrap(http.get<never, { data: { data: LicenseStatus } }>('/admin/license'))
+
+/** 换授权文件后无需重启：重新读取并校验（失败同样只降级，不报错） */
+export const apiReloadLicense = () =>
+  unwrap(http.post<never, { data: { data: LicenseStatus } }>('/admin/license/reload'))

@@ -369,16 +369,84 @@ GET    /api/v1/admin/inquiries/sessions/{id}     # 会话详情（消息 + 每�
 （[U04](updates/04-request-tracing.md)）
 
 ```
-GET    /api/v1/admin/traces                  # 列表（不带 spans；?session_id/user_id/agent_name/tool_name/mcp_server/outcome/has_error/min_latency_ms/date_from/date_to + 分页）
+GET    /api/v1/admin/traces                  # 列表（不带 spans；?session_id/trace_id/user_id/agent_name/tool_name/mcp_server/outcome/has_error/min_latency_ms/date_from/date_to + 分页）
 GET    /api/v1/admin/traces/usage            # 近 N 天依赖使用分布（?field=tool_names|agent_names|mcp_server_names, days）
 GET    /api/v1/admin/traces/sessions/{id}    # 某会话按轮次链路摘要（时间正序）
 GET    /api/v1/admin/traces/{trace_ref}      # 单条详情（含 spans 时间线；trace_ref=行ID/HTTP trace_id/助手消息ID）
 ```
 
+> `session_id` 与 `trace_id` 是两个参数，但后台列表页只有一个 ID 框：粘 **36 位会话 UUID** 按会话过滤，
+> 粘 **16 位十六进制链路 ID**（日志/评测报告里的 `trace_id`，如 `93e20f49fa8e44f3`）自动按链路过滤。
+> 两者形态不重叠；其它形态（如 17 位、带字母的会话串）返回 **400 `code=1001`** 而不是 500。
+
 > 链路详情的 `spans` 中，`route.intent`（每个路由意图）除 `intent_index`/`confidence`/`reason`/`is_fallback` 外，
 > 还带意图依据 `matched_keywords`（原句命中的路由关键词，**本地子串匹配、仅供参考**，路由实际由 LLM 语义判定）
 > 与 `clue_basis`（`keyword_hit` / `keyword_miss` 配了关键词但未出现 / `no_keywords` 未配关键词），
 > 见 [U15](updates/15-route-intent-evidence.md)。数据只存 `spans` JSONB，无额外列。
+
+## Admin · Usage（用量报表，require_admin）
+
+```
+GET    /api/v1/admin/usage/summary     # 汇总（?from=YYYY-MM-DD&to=&group_by=day|scene|integration&scene_code=）
+GET    /api/v1/admin/usage/export.csv  # 导出 (日 × 场景 × 接入方) 明细 CSV（UTF-8 BOM）
+```
+
+响应结构（`summary`）：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "from": "2026-10-01", "to": "2026-10-30", "group_by": "day", "scene_code": null,
+    "rows": [{ "day": "2026-10-01", "requests": 42, "tokens": 53120,
+               "estimated_requests": 42, "handoffs": 3, "errors": 1 }],
+    "totals": { "requests": 42, "tokens": 53120, "estimated_requests": 42, "handoffs": 3, "errors": 1 },
+    "tokens_estimated": true
+  }
+}
+```
+
+- `group_by=scene` 的行键为 `scene_code`；`group_by=integration` 的行键为 `integration_id` + `integration_name` + `unassigned`
+  （零 UUID 表示匿名或未携带凭证，名称显示为 null，由前端渲染「未归属」）。
+- 默认区间为最近 30 天（含今天）；`from > to`、维度非法、跨度超过 `USAGE_QUERY_MAX_DAYS`(366) 均返回 400（业务码 1001）。
+- `tokens_estimated=true` 表示 token 为估算值（当前恒为 true，见 [configuration.md](configuration.md) 3.14）。
+- 数据源是 `chat_usage_daily`（账单依据，长期保留），不读会被保留期清理的 `chat_events` / `request_traces`。
+
+## Admin · License（授权与版本，require_admin）
+
+```
+GET  /api/v1/admin/license         # 当前授权状态（版本、功能位、到期天数、降级原因）
+POST /api/v1/admin/license/reload  # 重新读取并校验授权文件（换文件/续期后无需重启）
+```
+
+响应结构：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "edition": "enterprise", "edition_label": "企业版",
+    "customer": "某某科技有限公司", "contract_ref": "HT-2026-0117",
+    "features": ["audit", "rbac"], "active_features": ["audit", "rbac"],
+    "unknown_features": [],
+    "issued_at": "2026-11-01T00:00:00Z", "expires_at": "2027-11-01T00:00:00Z",
+    "days_left": 365, "valid": true, "expired": false,
+    "deployment_id": "dep_7f3a...", "deployment_bound": true, "mode": "on_prem",
+    "source": "./license.json", "configured": true, "reason": "",
+    "feature_catalog": { "rbac": { "label": "精细化权限", "desc": "..." } },
+    "community_scope": ["完整对话与多意图路由", "..."],
+    "expiring_soon": false, "expiring_soon_days": 30
+  }
+}
+```
+
+- `features` 是授权文件声明的功能位（过期后仍保留，便于展示“曾授权”）；`active_features` 是**当前实际生效**的，
+  降级时为 `[]`，企业功能接口应断言它（后端用 `Depends(require_feature("audit"))`，社区版返回 403 业务码 2003）。
+- `configured=false` 表示没找到授权文件（社区版正常状态，不告警）；`configured=true` 但 `valid=false` 才是
+  “放了授权但没生效”，后台顶部会常驻红条 + 原因（签名不符 / 指纹不符 / 过期 / 未配公钥）。
+- 两个接口都是 `admin`；校验从不抛错、不阻断启动，任何异常都降级为 `community`。
+- 授权文件格式、签名口径与 `LICENSE_FILE` / `LICENSE_PUBLIC_KEY` / `DEPLOYMENT_ID` 见
+  [configuration.md](configuration.md) 3.15。
 
 ## Admin · Tools / Metrics
 

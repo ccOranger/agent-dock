@@ -13,6 +13,7 @@ from app.core.config import settings, validate_runtime_config
 from app.core.constants import API_PREFIX
 from app.core.context_engineer import drain_background_tasks
 from app.core.cors import SceneCORSMiddleware
+from app.core.license import log_startup_license
 from app.core.logging import new_trace_id, setup_logging
 from app.core.ratelimit import close_redis
 from app.core.schema import assert_schema_version
@@ -34,6 +35,8 @@ for _stream in (sys.stdout, sys.stderr):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_runtime_config()
+    # 授权只降级不阻断：先输出一行版本与到期天数，再继续启动
+    log_startup_license()
     await assert_schema_version()
     await run_startup_selfcheck()
     init_hello_agents()

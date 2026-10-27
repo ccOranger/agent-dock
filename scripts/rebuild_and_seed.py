@@ -7,7 +7,11 @@
 
 用法（backend 目录）：
     .\\.venv\\Scripts\\python.exe ..\\scripts\\rebuild_and_seed.py
+
+生产环境（APP_ENV=production）默认拒绝执行：升级请用 ``python -m app.migrate``。
+确需重建必须显式加 ``--force``，并确认已有可用备份。
 """
+import argparse
 import asyncio
 import json
 import os
@@ -211,7 +215,20 @@ def build_sql() -> str:
     return "\n".join(parts)
 
 
-async def main() -> None:
+def _refuse_in_production(force: bool) -> None:
+    """生产库误跑全量重建会直接删光业务数据，必须显式放行。"""
+    env = (settings.app_env or "").strip().lower()
+    if force or env not in {"production", "prod"}:
+        return
+    raise SystemExit(
+        "检测到 APP_ENV=production：已拒绝全量重建（会 DROP 全部业务表）。\n"
+        "升级请用增量迁移：python -m app.migrate\n"
+        "确需重建请追加 --force，并确认已有可用备份。"
+    )
+
+
+async def main(force: bool = False) -> None:
+    _refuse_in_production(force)
     url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
     sql = build_sql()
     conn = await asyncpg.connect(url, statement_cache_size=0)
@@ -277,4 +294,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="全量重建数据库并写入种子（仅开发/演示）")
+    parser.add_argument(
+        "--force", action="store_true", help="生产环境（APP_ENV=production）下也允许重建（危险）"
+    )
+    asyncio.run(main(force=parser.parse_args().force))
