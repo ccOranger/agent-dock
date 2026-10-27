@@ -8,6 +8,14 @@
 
 > 当前为 v0.1 早期版本，接口与表结构仍可能调整；升级前请先备份。
 
+![多意图对话：一条消息拆两个意图、工具回填真实物流、投诉自动建单、最后转人工](docs/assets/screenshots/01-chat-multi-intent.gif)
+
+| 运营台 · 链路详情 | 运营台 · 业务场景 |
+|---|---|
+| ![链路详情：路由 raw、意图依据、工具调用与分段耗时](docs/assets/screenshots/02-admin-traces.png) | ![业务场景：默认场景直连，客服场景按 LLM 路由](docs/assets/screenshots/03-admin-scenes.png) |
+
+> 截图均为 `SEED_DEMO=true` 的演示数据；完整取景清单与录制参数见 [演示脚本](docs/demo-script.md)。
+
 ## 它解决什么问题
 
 多数"智能客服"项目停在"文档问答 + 一个大模型提示词"：一条消息里有两个诉求只能答一个，追问下一句就忘了上文，工具调用看不见执行过程，出了问题也说不清是哪一步。

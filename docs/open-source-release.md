@@ -51,6 +51,7 @@
 - [x] 新增 `docs/deployment.md`（Docker、反向代理、HTTPS、SSE 缓冲关闭）。
 - [x] 新增 `docs/faq.md`（模型接入、Qdrant、MCP stdio、Windows 编码）。
 - [x] 新增 `CONTRIBUTING.md`（开发环境、测试命令、提交规范、业务 Agent/工具贡献方式）。
+- [x] 新增 `docs/demo-script.md`（GIF 分镜台词、8 张截图取景清单与录制/压缩参数，台词取自已验证评测用例）。
 - [ ] 新增 `docs/architecture.md`（路由、上下文工程、记忆生命周期、追踪模型；待 M4 前后补）。
 - [ ] 保留 `docs/updates/*` 作为开发历史，不要求外部读者通读。
 
@@ -118,8 +119,8 @@
 
 ## 8. 发布物料
 
-- [ ] 3 分钟演示视频或 GIF：登录 → 导入知识库 → 多意图对话 → 工具调用 → 转人工 → 链路查看。
-- [ ] 5–8 张截图：管理台、链路详情、记忆页、Agent 配置、业务场景切换。
+- [x] 演示 GIF：四帧 13 秒（发问 + 工具回填 → 多意图 + 自动建单 → 跨轮补单 → 转人工），分镜台词见 [demo-script.md](demo-script.md)。
+- [x] 8 张截图：链路详情、业务场景、知识库、Agent 编辑、用量报表、嵌入挂件、授权与版本，取景清单见 [demo-script.md](demo-script.md)。
 - [ ] 技术文章三篇（差异化证明）：
   1. 多意图路由与提示词去具名化
   2. 记忆生命周期与跨轮上下文
@@ -128,6 +129,7 @@
 - [ ] 路线图 issue（置顶）：第二个业务场景、Docker 优化、评测、RBAC。
 
 > 2026-10-20：首篇技术文章初稿已完成（[docs/articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)），待外部发布；截图与 GIF 待演示数据就绪后补。
+> 2026-10-27：演示脚本与取景清单已就位（[demo-script.md](demo-script.md)），台词取自 `customer_service` 已验证用例；待本机录屏后一次性入库。
 
 ## 9. 发布后运营
 
