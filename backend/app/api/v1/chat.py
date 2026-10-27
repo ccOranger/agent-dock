@@ -2,16 +2,25 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import optional_customer
-from app.core.exceptions import BizError, Unauthorized, UnsafeInput
+from app.api.params import parse_uuid
+from app.core.exceptions import BizError, NotFound, Unauthorized, UnsafeInput
 from app.core.logging import new_trace_id
 from app.core.ratelimit import ChatSlot, acquire_chat_slot
 from app.core.security import detect_injection
-from app.models.repositories import ChatEventRepo, IntegrationRepo
+from app.models.repositories import (
+    ChatEventRepo,
+    IntegrationRepo,
+    MessageRepo,
+    SessionRepo,
+    VisitorRepo,
+)
 from app.schemas.api import ChatRequest
+from app.schemas.common import ApiResponse
+from app.schemas.scene import Actor, ActorType
 from app.services.chat_service import ChatService
 from app.services.scene_service import authorize_scene_access, resolve_scene
 from app.utils.request import client_ip
@@ -201,3 +210,51 @@ async def chat_message(
         return {"code": 0, "message": "ok", "data": result, "trace_id": trace_id}
     finally:
         await slot.release()
+
+
+@router.get("/poll", response_model=ApiResponse[dict])
+async def chat_poll(
+    request: Request,
+    session_id: str = Query(..., description="待轮询会话 ID"),
+    after_id: str | None = Query(None, description="增量游标：只返回该消息 ID 之后的新消息"),
+    visitor_id: str | None = Query(None, description="匿名访客标识（登录客户可不传）"),
+    scene_code: str | None = Query(None, max_length=32),
+    user=Depends(optional_customer),
+):
+    """客户侧消息轮询：人工接管期间拉取坐席回复（接管无 SSE，靠前端定时轮询）。
+
+    鉴权与 /chat/stream 同源：登录客户按 user_id 校验归属，匿名访客按
+    visitor_id + publish_key/integration 解析出的内部访客行校验归属；
+    归属不匹配一律 404，不泄露「该会话存在但不属于你」。不记量、不限流（只读）。
+    """
+    scene = await resolve_scene(scene_code)
+    integration = await _resolve_and_authorize(request, scene, user)
+    integration_id = str(integration["id"]) if integration else None
+
+    if user is not None:
+        actor = Actor(ActorType.USER, str(user.id))
+    elif visitor_id:
+        visitor = await VisitorRepo.get_or_create(
+            scene.scene_id, external_key=visitor_id, integration_id=integration_id
+        )
+        actor = Actor(ActorType.VISITOR, str(visitor.id))
+    else:
+        raise Unauthorized("缺少客户身份或访客标识")
+
+    sid = parse_uuid(session_id, "session_id")
+    if sid is None:
+        raise NotFound("会话不存在")
+    sess = await SessionRepo.get(sid)
+    if sess is None or not SessionRepo._belongs(sess, actor, scene.scene_id):
+        raise NotFound("会话不存在")
+
+    # after_id 非法时降级为全量：客户端游标丢失也不应 500，最多重传一次历史
+    cursor = parse_uuid(after_id, "after_id") if after_id else None
+    messages = await MessageRepo.list_by_session_after(sess.id, cursor)
+    return ApiResponse(
+        data={
+            "session_id": str(sess.id),
+            "status": sess.status,
+            "messages": messages,
+        }
+    )

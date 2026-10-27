@@ -10,6 +10,7 @@ from app.api.v1 import (
     admin_router,
     admin_scenes,
     admin_staff,
+    admin_takeover,
     admin_tickets,
     admin_traces,
     admin_usage,
@@ -34,6 +35,7 @@ api_router.include_router(admin_staff.router)
 api_router.include_router(admin_integrations.router)
 api_router.include_router(admin_router.router)
 api_router.include_router(admin_inquiries.router)
+api_router.include_router(admin_takeover.router)
 api_router.include_router(admin_tickets.router)
 api_router.include_router(admin_traces.router)
 api_router.include_router(admin_usage.router)

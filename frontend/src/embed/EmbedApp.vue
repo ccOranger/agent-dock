@@ -136,6 +136,61 @@ const listRef = ref<HTMLElement>()
 let seq = 0
 let controller: AbortController | null = null
 
+// ===== 人工接管轮询 =====
+// 接管期间无 SSE：定时轮询 /chat/poll 拉取坐席回复，靠消息 id 去重。
+const takeoverActive = ref(false)
+let pollCursor = ''
+const seenStaffIds = new Set<string>()
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function startTakeover(cursorId?: string) {
+  takeoverActive.value = true
+  if (cursorId) pollCursor = cursorId
+  if (!pollTimer) pollTimer = setInterval(pollOnce, 3500)
+  void pollOnce()
+}
+
+function stopTakeover() {
+  takeoverActive.value = false
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+async function pollOnce() {
+  if (!sessionId.value || !takeoverActive.value) return
+  const info = scene.value
+  const headers: Record<string, string> = {
+    'X-Scene-Code': sceneCode,
+    ...(integrationCode ? { 'X-Integration-Code': integrationCode } : {}),
+    ...(info?.publish_key ? { 'X-Publish-Key': info.publish_key } : {}),
+    ...(customerToken ? { Authorization: `Bearer ${customerToken}` } : {}),
+  }
+  const q = new URLSearchParams({ session_id: sessionId.value, scene_code: sceneCode })
+  if (pollCursor) q.set('after_id', pollCursor)
+  if (visitorId.value) q.set('visitor_id', visitorId.value)
+  try {
+    const res = await requestJSON<{
+      session_id: string
+      status: string
+      messages: Array<{ id: string; role: string; content: string; sender_type?: string; routed_to?: string }>
+    }>(`/api/v1/chat/poll?${q.toString()}`, { headers })
+    if (res.messages.length) pollCursor = res.messages[res.messages.length - 1].id
+    for (const m of res.messages) {
+      if (m.role === 'assistant' && (m.sender_type === 'staff' || m.routed_to === 'staff')) {
+        if (!seenStaffIds.has(m.id)) {
+          seenStaffIds.add(m.id)
+          pushBubble('assistant', m.content)
+        }
+      }
+    }
+    if (res.status === 'active' || res.status === 'closed') stopTakeover()
+  } catch {
+    /* 单次轮询失败静默等下一轮 */
+  }
+}
+
 const themeColor = ref('#2b5aa0')
 const title = ref('在线客服')
 const subtitle = ref('')
@@ -288,6 +343,13 @@ function send() {
         sessionId.value = d?.session_id || ''
       },
       status: (d: any) => {
+        // 接管中提示：直接当正文渲染（而不是转瞬即逝的思考态文案）
+        if (d?.stage === 'takeover') {
+          reply.content = d?.text || '人工客服正在为您服务，您的消息已转达。'
+          reply.status = ''
+          scrollBottom()
+          return
+        }
         reply.status = d?.text || ''
       },
       text: (d: any) => {
@@ -299,7 +361,13 @@ function send() {
         reply.status = ''
         if (!reply.content) reply.content = '已为您转接人工客服，请稍候。'
       },
-      done: () => finishStream(),
+      done: (d: any) => {
+        finishStream()
+        const st = d?.session_status
+        if (st === 'handover' || st === 'human_handling' || d?.takeover) {
+          startTakeover(d?.message_id)
+        }
+      },
       error: (d: any) => {
         reply.status = ''
         const fallback =
@@ -328,6 +396,7 @@ onMounted(init)
 onBeforeUnmount(() => {
   controller?.abort()
   controller = null
+  stopTakeover()
 })
 </script>
 

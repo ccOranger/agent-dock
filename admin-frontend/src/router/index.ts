@@ -9,6 +9,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/layouts/AdminLayout.vue'),
     children: [
       { path: '', redirect: '/inquiries' },
+      { path: 'takeover', component: () => import('@/views/TakeoverView.vue'), meta: { title: '人工接管', roles: ['agent', 'admin'] } },
       { path: 'inquiries', component: () => import('@/views/InquiriesView.vue'), meta: { title: '咨询管理' } },
       { path: 'tickets', component: () => import('@/views/TicketsView.vue'), meta: { title: '工单管理' } },
       { path: 'traces', component: () => import('@/views/TracesView.vue'), meta: { title: '链路追踪' } },

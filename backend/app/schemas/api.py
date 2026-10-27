@@ -114,7 +114,7 @@ class SessionCreate(BaseModel):
 
 class SessionUpdate(BaseModel):
     title: str | None = None
-    status: Literal["active", "closed", "handover"] | None = None
+    status: Literal["active", "closed", "handover", "human_handling"] | None = None
 
 
 class SessionOut(BaseModel):
@@ -124,6 +124,19 @@ class SessionOut(BaseModel):
     last_route_to: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+# ===== 人工接管（admin takeover） =====
+class TakeoverMessageRequest(BaseModel):
+    """坐席回复：与机器人应答同长度上限，避免超长文本刷屏。"""
+
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class TakeoverReleaseRequest(BaseModel):
+    """释放接管：to=bot 交还机器人，to=close 结束会话；缺省交还机器人。"""
+
+    to: Literal["bot", "close"] = "bot"
 
 
 # ===== Memory =====

@@ -11,7 +11,7 @@ from app.core.database import engine
 
 # 与 scripts/init_db.sql 末尾 schema_meta 的 version 保持一致；
 # 新增迁移后必须同步（tests/test_migrations.py 会做一致性断言）
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 
 _MIGRATE_HINT = (
     "请执行数据库迁移：python -m app.migrate（容器内："

@@ -16,7 +16,13 @@
         <div class="messages" ref="listRef">
           <MessageBubble v-for="m in store.messages" :key="m.id" :message="m" />
           <el-alert
-            v-if="handoverReason"
+            v-if="takeover"
+            type="warning"
+            :closable="false"
+            title="人工客服已接入，您的消息将直接转达客服。"
+          />
+          <el-alert
+            v-else-if="handoverReason"
             type="warning"
             :closable="false"
             :title="`已转人工处理（${handoverReason}）`"
@@ -44,7 +50,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiCloseSession } from '@/api'
+import { apiChatPoll, apiCloseSession } from '@/api'
 import { streamChat } from '@/api/chat'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
@@ -65,6 +71,59 @@ const listRef = ref<HTMLElement>()
 const handoverReason = ref('')
 let controller: AbortController | null = null
 
+// ===== 人工接管轮询 =====
+// 接管期间无 SSE：靠定时轮询 /chat/poll 拉取坐席回复；cursor 为已消费的最后一条消息 id。
+const takeover = ref(false)
+const pollCursor = ref<string | null>(null)
+const seenStaffIds = new Set<string>()
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function startTakeover(cursorId?: string | null) {
+  takeover.value = true
+  if (cursorId) pollCursor.value = cursorId
+  if (!pollTimer) pollTimer = setInterval(poll, 3500)
+  poll()
+}
+
+function stopTakeover(note?: string) {
+  takeover.value = false
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+  if (note) ElMessage.info(note)
+}
+
+function resetTakeover() {
+  stopTakeover()
+  pollCursor.value = null
+  seenStaffIds.clear()
+}
+
+async function poll() {
+  if (!store.sessionId || !takeover.value) return
+  try {
+    const res = await apiChatPoll(store.sessionId, pollCursor.value, sceneCode.value)
+    if (res.messages.length) pollCursor.value = res.messages[res.messages.length - 1].id
+    let added = false
+    for (const m of res.messages) {
+      // 只追加坐席回复（role=assistant 且标记 staff）；客户自己的消息与机器人应答不进这里
+      if (m.role === 'assistant' && (m.sender_type === 'staff' || m.routed_to === 'staff')) {
+        if (!seenStaffIds.has(m.id)) {
+          seenStaffIds.add(m.id)
+          store.pushResolvedAssistant(m.content, 'staff')
+          added = true
+        }
+      }
+    }
+    if (added) scrollBottom()
+    if (res.status === 'active') stopTakeover('人工客服已结束，机器人继续为您服务')
+    else if (res.status === 'closed') stopTakeover('会话已结束')
+  } catch {
+    /* 轮询是幂等旁路：单次失败静默等下一轮，不打断对话 */
+  }
+}
+
 const isAdminOrAgent = () => ['agent', 'admin'].includes(auth.user?.role ?? '')
 
 function scrollBottom() {
@@ -81,6 +140,7 @@ onBeforeUnmount(() => {
   controller?.abort()
   controller = null
   store.forceFinish()
+  stopTakeover()
 })
 
 function send() {
@@ -120,8 +180,13 @@ function send() {
       handoverReason.value = d.reason || 'low_confidence'
       store.finishStreaming()
     },
-    done: () => {
+    done: (d: any) => {
       store.finishStreaming()
+      // 转人工 / 接管中：done 带 session_status 时进入轮询，坐席回复靠 poll 送达
+      const st = d?.session_status
+      if (st === 'handover' || st === 'human_handling' || d?.takeover) {
+        startTakeover(d?.message_id)
+      }
     },
     error: (d: any) => {
       store.forceFinish()
@@ -147,6 +212,7 @@ function abort() {
 
 function onNew() {
   abort()
+  resetTakeover()
   store.reset()
   handoverReason.value = ''
 }
@@ -163,6 +229,7 @@ async function onClose() {
     return // 用户取消
   }
   await apiCloseSession(store.sessionId, sceneCode.value)
+  resetTakeover()
   store.reset()
   handoverReason.value = ''
   ElMessage.success('会话已结束，短期记忆已归档')

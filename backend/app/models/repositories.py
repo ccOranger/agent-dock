@@ -962,6 +962,165 @@ class SessionRepo:
                 )
             return result
 
+    # ---------- 人工接管（转人工队列 / 坐席接入 / 释放） ----------
+
+    TAKEOVER_STATUSES = ("handover", "human_handling")
+
+    @staticmethod
+    async def mark_handover(session_id: uuid.UUID | str | None) -> bool:
+        """把 active 会话置为 handover（低置信 / escalate 工具两条触发路径共用）。
+
+        session_id 可能不是 UUID（示例客户名 / 未注入），非法值静默跳过，
+        绝不让旁路状态写阻断工具执行与对话；closed/human_handling 不覆盖。
+        """
+        if not session_id:
+            return False
+        try:
+            sid = uuid.UUID(str(session_id))
+        except (ValueError, AttributeError, TypeError):
+            return False
+        async with SessionLocal() as db:
+            sess = await db.get(Session, sid)
+            if sess is None or sess.status != "active":
+                return False
+            sess.status = "handover"
+            await db.commit()
+            return True
+
+    @staticmethod
+    async def touch(session_id: uuid.UUID | str, db: AsyncSession | None = None) -> None:
+        """刷新 updated_at：接管期间客户消息不产生机器人应答，但排队顺序要反映最新动态。"""
+        async with _session(db) as s:
+            sess = await s.get(Session, uuid.UUID(str(session_id)))
+            if sess is not None:
+                sess.updated_at = datetime.now(UTC)
+                await s.commit()
+
+    @staticmethod
+    async def takeover_queue(
+        scene_id: uuid.UUID | str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
+        """待接入队列：handover（排队中）+ human_handling（已接入）。
+
+        按 updated_at 升序：排队最久的优先被接入；坐席发消息 / 客户追问都会
+        刷新 updated_at，语义是「最近动态」而非创建时间。
+        """
+        statuses = (status,) if status else SessionRepo.TAKEOVER_STATUSES
+        cond = [Session.status.in_(statuses)]
+        if scene_id:
+            cond.append(Session.scene_id == uuid.UUID(str(scene_id)))
+        msg_count = (
+            select(func.count())
+            .select_from(Message)
+            .where(Message.session_id == Session.id)
+            .correlate(Session)
+            .scalar_subquery()
+            .label("message_count")
+        )
+        async with SessionLocal() as db:
+            total = (
+                await db.execute(
+                    select(func.count()).select_from(Session).where(*cond)
+                )
+            ).scalar_one()
+            rows = (
+                await db.execute(
+                    select(
+                        Session,
+                        CustomerUser.username,
+                        CustomerUser.display_name,
+                        Scene.code,
+                        StaffUser.username,
+                        StaffUser.display_name,
+                        msg_count,
+                    )
+                    .outerjoin(CustomerUser, CustomerUser.id == Session.user_id)
+                    .outerjoin(Scene, Scene.id == Session.scene_id)
+                    .outerjoin(StaffUser, StaffUser.id == Session.assigned_agent)
+                    .where(*cond)
+                    .order_by(Session.updated_at.asc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                )
+            ).all()
+            result = [
+                {
+                    "id": str(s.id),
+                    "title": s.title,
+                    "status": s.status,
+                    "scene_code": scene_code,
+                    "last_route_to": s.last_route_to,
+                    "user_id": str(s.user_id) if s.user_id else None,
+                    "visitor_id": str(s.visitor_id) if s.visitor_id else None,
+                    "username": username,
+                    "display_name": display_name,
+                    "assigned_agent_id": str(s.assigned_agent) if s.assigned_agent else None,
+                    "assigned_agent_name": assigned_name or assigned_display,
+                    "message_count": message_count,
+                    "created_at": s.created_at.isoformat(),
+                    "updated_at": s.updated_at.isoformat(),
+                }
+                for (
+                    s,
+                    username,
+                    display_name,
+                    scene_code,
+                    assigned_name,
+                    assigned_display,
+                    message_count,
+                ) in rows
+            ]
+            return result, total
+
+    @staticmethod
+    async def claim_takeover(
+        session_id: uuid.UUID | str, staff_id: uuid.UUID | str
+    ) -> Session | None | bool:
+        """坐席接入：handover 或本人已接入的会话置 human_handling 并绑定 assigned_agent。
+
+        返回 Session=接入成功；True=他人已占用（409）；None=会话不存在。
+        同一坐席重复 claim 幂等成功，便于断线后回到自己的会话。
+        """
+        async with SessionLocal() as db:
+            sess = await db.get(Session, uuid.UUID(str(session_id)))
+            if sess is None:
+                return None
+            staff_uuid = uuid.UUID(str(staff_id))
+            if sess.status == "handover" or (
+                sess.status == "human_handling" and sess.assigned_agent == staff_uuid
+            ):
+                sess.status = "human_handling"
+                sess.assigned_agent = staff_uuid
+                await db.commit()
+                await db.refresh(sess)
+                return sess
+            return True
+
+    @staticmethod
+    async def release_takeover(
+        session_id: uuid.UUID | str, staff_id: uuid.UUID | str, *, to_status: str = "active"
+    ) -> bool | None:
+        """释放接管：human_handling → active（机器人接管）或 closed（结束）。
+
+        assigned_agent 保留，作为「谁处理过」的追溯依据。
+        返回 True=成功；False=状态不符或非本人（admin 可调岗）；None=会话不存在。
+        """
+        async with SessionLocal() as db:
+            sess = await db.get(Session, uuid.UUID(str(session_id)))
+            if sess is None:
+                return None
+            staff = await db.get(StaffUser, uuid.UUID(str(staff_id)))
+            if sess.status != "human_handling":
+                return False
+            if staff is not None and staff.role != "admin" and sess.assigned_agent != staff.id:
+                return False
+            sess.status = to_status
+            await db.commit()
+            return True
+
 
 class MessageRepo:
     @staticmethod
@@ -971,12 +1130,18 @@ class MessageRepo:
         content: str,
         routed_to: str | None = None,
         db: AsyncSession | None = None,
+        metadata: dict | None = None,
         **kw,
     ) -> Message:
         own = db is None
         async with _session(db) as s:
             msg = Message(
-                session_id=uuid.UUID(str(session_id)), role=role, content=content, routed_to=routed_to, **kw
+                session_id=uuid.UUID(str(session_id)),
+                role=role,
+                content=content,
+                routed_to=routed_to,
+                metadata_=metadata,
+                **kw,
             )
             s.add(msg)
             await s.flush()
@@ -991,13 +1156,21 @@ class MessageRepo:
         limit: int = 50,
         db: AsyncSession | None = None,
     ) -> list[dict]:
-        """取最近 N 条消息（时间正序），供聊天上下文使用；不带 trace 关联，避免冗余 JOIN。"""
+        """取最近 N 条消息（时间正序），供聊天上下文使用；不带 trace 关联，避免冗余 JOIN。
+
+        排除坐席接管消息（metadata.sender_type=staff）：人工回复不进机器人上下文，
+        否则模型会把坐席的话术当作自己说过内容重复承诺。
+        """
+        staff_msg = Message.metadata_.op("->>")("sender_type") == "staff"
         async with _session(db) as s:
             rows = (
                 (
                     await s.execute(
                         select(Message)
-                        .where(Message.session_id == uuid.UUID(str(session_id)))
+                        .where(
+                            Message.session_id == uuid.UUID(str(session_id)),
+                            or_(Message.metadata_.is_(None), ~staff_msg),
+                        )
                         .order_by(Message.created_at.desc())
                         .limit(max(1, limit))
                     )
@@ -1051,7 +1224,45 @@ class MessageRepo:
                     "content": r[0].content,
                     "routed_to": r[0].routed_to,
                     "trace_id": r[1],
+                    # 坐席接管消息标识：后台/客户端渲染时区分人工与机器人应答
+                    "sender_type": (r[0].metadata_ or {}).get("sender_type"),
+                    "staff_name": (r[0].metadata_ or {}).get("staff_name"),
                     "created_at": r[0].created_at.isoformat(),
+                }
+                for r in rows
+            ]
+
+    @staticmethod
+    async def list_by_session_after(
+        session_id: uuid.UUID | str, after_id: str | None = None
+    ) -> list[dict]:
+        """增量拉取会话消息（时间正序）：人工接管期间的轮询接口用，after_id 之后的新消息。
+
+        不做 JOIN trace：轮询频率高，接管场景也不需要链路 ID。
+        """
+        sid = uuid.UUID(str(session_id))
+        stmt = (
+            select(Message)
+            .where(Message.session_id == sid)
+            .order_by(Message.created_at.asc())
+        )
+        async with SessionLocal() as db:
+            if after_id:
+                # created_at 与 id 同为插入时刻/随机 UUID，不能直接比较；
+                # 先定位游标消息，再按 created_at 取它之后的（同刻消息允许重复拉取，客户端按 id 去重）
+                cursor = await db.get(Message, uuid.UUID(str(after_id)))
+                if cursor is not None and cursor.session_id == sid:
+                    stmt = stmt.where(Message.created_at > cursor.created_at)
+            rows = (await db.execute(stmt)).scalars().all()
+            return [
+                {
+                    "id": str(r.id),
+                    "role": r.role,
+                    "content": r.content,
+                    "routed_to": r.routed_to,
+                    "sender_type": (r.metadata_ or {}).get("sender_type"),
+                    "staff_name": (r.metadata_ or {}).get("staff_name"),
+                    "created_at": r.created_at.isoformat(),
                 }
                 for r in rows
             ]

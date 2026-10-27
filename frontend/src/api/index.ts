@@ -60,6 +60,33 @@ export const apiCloseSession = (sessionId: string, sceneCode?: string | null) =>
     { params: sceneCode ? { scene_code: sceneCode } : {} },
   )
 
+// ===== 人工接管：客户侧消息轮询 =====
+// 接管期间无 SSE，靠定时轮询拉取坐席回复（鉴权同 /chat/stream）。
+export interface PollMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  routed_to?: string | null
+  sender_type?: string | null
+  staff_name?: string | null
+  created_at: string
+}
+export interface ChatPollResult {
+  session_id: string
+  status: string
+  messages: PollMessage[]
+}
+export const apiChatPoll = (sessionId: string, afterId?: string | null, sceneCode?: string | null) =>
+  unwrap(
+    http.get<never, { data: { data: ChatPollResult } }>('/chat/poll', {
+      params: {
+        session_id: sessionId,
+        ...(afterId ? { after_id: afterId } : {}),
+        ...(sceneCode ? { scene_code: sceneCode } : {}),
+      },
+    }),
+  )
+
 // ===== Memory =====
 export const apiMyMemories = (type?: string) =>
   unwrap(http.get<never, { data: { data: MemoryItem[] } }>('/memory/me', { params: { type } }))

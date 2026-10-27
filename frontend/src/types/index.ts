@@ -8,6 +8,8 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   routed_to?: string | null
+  /** 发送者标识：'staff' 表示人工坐席接管回复，用于区分机器人与人工气泡 */
+  senderType?: string | null
   streaming?: boolean
   /** 占位气泡的阶段进度文案（后端 status 事件驱动，正文到达后清空） */
   statusText?: string

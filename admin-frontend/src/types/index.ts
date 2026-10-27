@@ -47,6 +47,55 @@ export interface InquiryDetail {
   messages: ChatMessage[]
 }
 
+// ===== 人工接管 =====
+/** 接管状态机：handover=排队待接入，human_handling=坐席已接入 */
+export type TakeoverStatus = 'handover' | 'human_handling'
+
+/** 待接入队列行（GET /admin/takeover/sessions） */
+export interface TakeoverSession {
+  id: string
+  title: string
+  status: TakeoverStatus
+  scene_code?: string | null
+  last_route_to?: string | null
+  user_id?: string | null
+  visitor_id?: string | null
+  username?: string | null
+  display_name?: string | null
+  assigned_agent_id?: string | null
+  assigned_agent_name?: string | null
+  message_count: number
+  created_at: string
+  updated_at: string
+}
+
+/** 接管详情消息：坐席消息 sender_type=staff，与机器人应答区分渲染 */
+export interface TakeoverMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  routed_to?: string | null
+  sender_type?: string | null
+  staff_name?: string | null
+  created_at: string
+}
+
+export interface TakeoverDetail {
+  session: {
+    id: string
+    title: string
+    status: TakeoverStatus
+    scene_code?: string | null
+    user_id?: string | null
+    visitor_id?: string | null
+    last_route_to?: string | null
+    assigned_agent?: { id: string; name?: string | null } | null
+    created_at: string
+    updated_at: string
+  }
+  messages: TakeoverMessage[]
+}
+
 // ===== 请求链路追踪 =====
 export type TraceOutcome = 'answered' | 'handover' | 'error'
 

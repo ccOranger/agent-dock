@@ -3,6 +3,10 @@
     <el-aside width="220px">
       <div class="brand">AgentDock 管理后台</div>
       <el-menu :default-active="activePath" router class="menu">
+        <el-menu-item index="/takeover">
+          <span>人工接管</span>
+          <el-badge v-if="pendingTakeover > 0" :value="pendingTakeover" class="takeover-badge" />
+        </el-menu-item>
         <el-menu-item index="/inquiries">
           <span>咨询管理</span>
         </el-menu-item>
@@ -72,9 +76,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { apiListTakeovers } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useLicenseStore } from '@/stores/license'
 
@@ -86,9 +91,27 @@ const router = useRouter()
 const activePath = computed(() => route.path)
 const isAdmin = computed(() => auth.user?.role === 'admin')
 
+// 待接入角标：坐席/管理员都轮询排队数（status=queued），提醒有新会话等待接入
+const pendingTakeover = ref(0)
+let pollTimer: ReturnType<typeof setInterval> | null = null
+async function refreshPending() {
+  try {
+    const data = await apiListTakeovers({ status: 'queued', page: 1, page_size: 1 })
+    pendingTakeover.value = data.total
+  } catch {
+    /* 无权限或网络异常不影响后台其它操作 */
+  }
+}
+
 // 授权状态只有 admin 能查（agent 调用 403）；降级时顶部常驻提醒，不阻断任何操作
 onMounted(() => {
   if (isAdmin.value) license.load()
+  refreshPending()
+  pollTimer = setInterval(refreshPending, 20000)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer)
 })
 
 function onLogout() {
@@ -124,6 +147,9 @@ function onLogout() {
 .menu :deep(.el-menu-item.is-active) {
   color: #fff;
   background: #2b5aa0;
+}
+.takeover-badge {
+  margin-left: 8px;
 }
 .header {
   display: flex;

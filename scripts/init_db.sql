@@ -204,7 +204,7 @@ CREATE TABLE sessions (
     visitor_id      UUID REFERENCES visitors(id) ON DELETE CASCADE,
     title           VARCHAR(128) DEFAULT '新对话',
     status          VARCHAR(16) NOT NULL DEFAULT 'active'
-                    CHECK (status IN ('active','closed','handover')),
+                    CHECK (status IN ('active','closed','handover','human_handling')),
     assigned_agent  UUID REFERENCES staff_users(id),
     memory_tool_uid VARCHAR(64),
     rag_namespace   VARCHAR(64),
@@ -526,5 +526,5 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- 只在缺失时写入：存量库的版本由迁移推进，重复执行本脚本不得把版本降回去
-INSERT INTO schema_meta (key, value) VALUES ('version', '8')
+INSERT INTO schema_meta (key, value) VALUES ('version', '9')
 ON CONFLICT (key) DO NOTHING;

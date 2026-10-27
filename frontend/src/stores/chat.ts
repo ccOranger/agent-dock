@@ -143,6 +143,11 @@ export const useChatStore = defineStore('chat', () => {
     currentAgent.value = agentName
   }
 
+  /** 接管轮询拉到的坐席回复：直接落一条定稿的 assistant 气泡（非流式） */
+  function pushResolvedAssistant(content: string, senderType: string | null = null) {
+    messages.value.push({ id: nanoid(), role: 'assistant', content, senderType })
+  }
+
   /** 流结束：不立即收尾，等缓冲逐字揭示完再关闭打字机 */
   function finishStreaming() {
     streamEnded = true
@@ -181,6 +186,7 @@ export const useChatStore = defineStore('chat', () => {
     addToolCall,
     finishToolCall,
     setRoute,
+    pushResolvedAssistant,
     finishStreaming,
     forceFinish,
     setRevealHook,

@@ -109,7 +109,7 @@ class EscalateTool(BaseTool):
     timeout = 10
 
     async def run(self, session_id: str, reason: str, user_id: str = ""):
-        from app.models.repositories import AuditRepo, TicketRepo
+        from app.models.repositories import AuditRepo, SessionRepo, TicketRepo
 
         # 工单升级状态落到 tickets 表（若该客户/会话有未关闭工单）
         ticket_no = None
@@ -117,6 +117,12 @@ class EscalateTool(BaseTool):
         if ticket is not None:
             await TicketRepo.set_status(ticket.ticket_no, "escalated", note=f"升级人工：{reason}")
             ticket_no = ticket.ticket_no
+
+        # 会话同步置 handover：坐席工作台才能看到待接入队列（旁路写，失败不影响升级本身）
+        try:
+            await SessionRepo.mark_handover(session_id)
+        except Exception:  # noqa: BLE001
+            pass
 
         # 转人工是会话级安全事件，仍保留一条审计（不属于工单数据）
         await AuditRepo.write(

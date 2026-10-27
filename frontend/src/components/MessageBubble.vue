@@ -1,7 +1,8 @@
 <template>
-  <div class="bubble" :class="message.role">
+  <div class="bubble" :class="[message.role, { staff: message.senderType === 'staff' }]">
     <div class="meta">
-      <AgentBadge v-if="message.routed_to" :agent="message.routed_to" />
+      <el-tag v-if="message.senderType === 'staff'" size="small" type="success">人工客服</el-tag>
+      <AgentBadge v-else-if="message.routed_to" :agent="message.routed_to" />
       <span v-if="message.streaming" class="typing">{{ message.statusText || '输入中…' }}</span>
     </div>
     <StreamRenderer v-if="message.role === 'assistant'" :content="message.content" />
@@ -31,6 +32,10 @@ defineProps<{ message: Message }>()
   margin-left: auto;
   background: #ecf5ff;
   border-color: #d9ecff;
+}
+.bubble.staff {
+  background: #f0f9eb;
+  border-color: #e1f3d8;
 }
 .meta {
   margin-bottom: 4px;

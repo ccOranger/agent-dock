@@ -57,6 +57,11 @@ _TOOL_MARKER = "[TOOL_CALL:"
 # 多意图分块之间插入的分隔（markdown 水平线，前端逐字渲染即可分段）
 _INTENT_SEPARATOR = "\n\n---\n\n"
 
+# 升级人工类工具：本轮只要成功执行过它们，就在文本之外补发 handover 事件，
+# 由 chat_service 把会话置为排队待接入（与低置信整轮转人工同一契约）。
+# 判定不解析工具返回体（_execute_tool 已把它包装成带前缀的文本），只看工具名 + 无错误。
+_ESCALATION_TOOLS = frozenset({"escalate", "escalate_it"})
+
 # 注入业务 Agent 的最近对话轮数上限（业务 Agent 每轮新建，靠此获得跨轮记忆）
 _HISTORY_WINDOW = 12
 
@@ -573,6 +578,7 @@ class Orchestrator:
         streamed = False
         handled: list[str] = []
         fallback_attempted = False
+        escalated = False
         for intent in targets:
             intent_name = intent["agent_name"]
             # 代码注册表优先，其次 DB 动态 Agent
@@ -656,12 +662,22 @@ class Orchestrator:
                         agent_name=intent_name,
                         iteration=index,
                     )
-                elif collector and etype == "tool_result":
-                    collector.finish_tool_call(
-                        open_tools.pop(data.get("id"), ""),
-                        result=data.get("result"),
-                        error=data.get("error"),
-                    )
+                elif etype == "tool_result":
+                    if collector:
+                        collector.finish_tool_call(
+                            open_tools.pop(data.get("id"), ""),
+                            result=data.get("result"),
+                            error=data.get("error"),
+                        )
+                    # 升级工具成功执行：记下来，本轮收尾补发 handover
+                    # （工具失败/异常时 _execute_tool 返回错误文本但 error 为 None，
+                    #  靠“结果文本含 handover 标记”过滤：成功结果里才有这个键）
+                    if (
+                        data.get("name") in _ESCALATION_TOOLS
+                        and data.get("error") is None
+                        and "handover" in str(data.get("result") or "")
+                    ):
+                        escalated = True
                 elif etype == "text":
                     text_chars += len(data.get("content") or "")
                     if collector:
@@ -689,6 +705,14 @@ class Orchestrator:
             }
             handled.append(intent_name)
             streamed = streamed or produced
+
+        # 升级工具已执行：补发 handover 事件（Agent 终轮文本照常保留），
+        # chat_service 据此把会话置 handover 进待接入队列
+        if escalated:
+            if collector:
+                collector.record_outcome(OUTCOME_HANDOVER, reason="escalate")
+            yield {"type": "handover", "data": {"reason": "escalated_by_tool"}}
+            return
 
         if not streamed:
             if collector:

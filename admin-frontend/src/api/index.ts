@@ -42,6 +42,8 @@ import type {
   StaffCreatePayload,
   StaffMember,
   StaffUpdatePayload,
+  TakeoverDetail,
+  TakeoverSession,
   TicketDetail,
   TicketSummary,
   TraceUsageItem,
@@ -83,6 +85,51 @@ export const apiInquiryDetail = (sessionId: string) =>
 // CSV 导出（Blob 下载）
 export const apiExportInquiries = (filters: Omit<InquiryFilters, 'page' | 'page_size'> = {}) =>
   downloadBlob('/admin/inquiries/sessions/export', filters as Record<string, unknown>)
+
+// ===== 人工接管 =====
+/** 待接入队列：status 传 queued(排队)/handling(已接入)，缺省返回两者；按 updated_at 升序 */
+export const apiListTakeovers = (
+  params: { status?: string; scene_code?: string; page?: number; page_size?: number } = {},
+) =>
+  unwrap(
+    http.get<never, { data: { data: Paginated<TakeoverSession> } }>('/admin/takeover/sessions', {
+      params,
+    }),
+  )
+
+/** 接管详情：after_id 走增量轮询，客户端按 id 去重 */
+export const apiTakeoverDetail = (sessionId: string, afterId?: string) =>
+  unwrap(
+    http.get<never, { data: { data: TakeoverDetail } }>(`/admin/takeover/sessions/${sessionId}`, {
+      params: afterId ? { after_id: afterId } : {},
+    }),
+  )
+
+/** 坐席接入：handover → human_handling 并绑定当前坐席；他人占用返回 409 */
+export const apiClaimTakeover = (sessionId: string) =>
+  unwrap(
+    http.post<never, { data: { data: { session_id: string; status: string; assigned_agent_id: string } } }>(
+      `/admin/takeover/sessions/${sessionId}/claim`,
+    ),
+  )
+
+/** 坐席回复：以 role=assistant + sender_type=staff 落库，客户端轮询可见 */
+export const apiSendTakeoverMessage = (sessionId: string, content: string) =>
+  unwrap(
+    http.post<never, { data: { data: { message_id: string; session_id: string; created_at: string } } }>(
+      `/admin/takeover/sessions/${sessionId}/messages`,
+      { content },
+    ),
+  )
+
+/** 释放：to=bot 交还机器人（active），to=close 结束会话 */
+export const apiReleaseTakeover = (sessionId: string, to: 'bot' | 'close' = 'bot') =>
+  unwrap(
+    http.post<never, { data: { data: { session_id: string; status: string } } }>(
+      `/admin/takeover/sessions/${sessionId}/release`,
+      { to },
+    ),
+  )
 
 // ===== 工单管理 =====
 export interface TicketFilters {

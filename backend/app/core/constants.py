@@ -13,7 +13,10 @@ class UserRole(StrEnum):
 class SessionStatus(StrEnum):
     ACTIVE = "active"
     CLOSED = "closed"
+    # 已转人工、等待坐席接入
     HANDOVER = "handover"
+    # 坐席已接入：客户消息只落库，机器人让位不应答
+    HUMAN_HANDLING = "human_handling"
 
 
 class MemoryType(StrEnum):

@@ -32,6 +32,8 @@ class FakeSession:
         self.last_route_to = "order_service"
         # 与真实 ORM 默认值保持一致：新建会话标题是占位值，等待首条消息自动补全
         self.title = "新对话"
+        # 人工接管让位判断依赖此字段，默认普通活跃会话
+        self.status = "active"
         self.attached: list[dict] = []
 
 
@@ -73,6 +75,9 @@ def _install_fakes(
     async def fake_list_recent(session_id, limit=50, db=None):
         return []
 
+    async def fake_touch(session_id, db=None):
+        return None
+
     async def fake_insert(row):
         if raiser:
             raise raiser
@@ -90,6 +95,7 @@ def _install_fakes(
     monkeypatch.setattr(cs_mod, "SessionLocal", FakeSessionFactory())
     monkeypatch.setattr(cs_mod, "resolve_scene", fake_resolve_scene)
     monkeypatch.setattr(cs_mod.SessionRepo, "get_or_create_for_actor", fake_get_or_create_for_actor)
+    monkeypatch.setattr(cs_mod.SessionRepo, "touch", fake_touch)
     monkeypatch.setattr(cs_mod.MessageRepo, "add", fake_add)
     monkeypatch.setattr(cs_mod.MessageRepo, "list_recent", fake_list_recent)
     monkeypatch.setattr(cs_mod.TraceRepo, "insert", fake_insert)
