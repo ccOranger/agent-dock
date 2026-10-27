@@ -18,6 +18,10 @@
 - CI 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，Dockerfile 或前端产物坏掉会直接在 PR 上暴露。
 - `scripts/release.py check` 在 Windows 上可跑通：pytest 固定带 `--basetemp=.pytest_tmp`（避开 `%TEMP%` 权限问题），npm 改用 `shutil.which` 解析后的完整路径（CreateProcess 不会自动补 `.cmd`）。
 
+### 修复
+
+- CI 四个失败用例：三个断言工具/错误正文的用例未显式打开 `TRACE_STORE_PAYLOAD`（默认改为 `false` 后只存长度摘要），已补 `monkeypatch`；`test_stream_attaches_visitor_identity` 原先会连真实 PostgreSQL（本地有库才通过），已 mock `VisitorRepo.get_or_create`。
+
 ### 文档
 
 - 新增 `docs/architecture.md`（14 节）：组件拓扑、启动与关闭、一轮对话完整链路、场景路由与隔离、上下文工程、记忆生命周期、RAG、工具与 MCP、鉴权与限流、链路追踪与用量、数据层、前端结构、扩展点、明确边界。README 文档表与 `release.py` 必备文件清单已同步。

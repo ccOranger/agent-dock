@@ -223,7 +223,9 @@ def test_tool_call_counting_and_error():
     assert error_spans[0]["attributes"]["error"] == "工具执行超时"
 
 
-def test_record_outcome_fields():
+def test_record_outcome_fields(monkeypatch):
+    # error_message 会被 clip_payload 裁切，断言正文前必须显式打开载荷存储
+    monkeypatch.setattr(settings, "trace_store_payload", True)
     c = _collector()
     c.record_outcome(OUTCOME_HANDOVER, reason="low_confidence")
     assert c.outcome == OUTCOME_HANDOVER and c.handover_reason == "low_confidence"

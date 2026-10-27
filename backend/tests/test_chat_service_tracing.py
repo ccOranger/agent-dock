@@ -83,6 +83,10 @@ def _install_fakes(
             raise attach_raiser
         sess.attached.append(kwargs)
 
+    async def fake_visitor_get_or_create(scene_id, external_key=None, integration_id=None):
+        # 匿名访客解析必须走 fake：真实实现会连库，CI 上没有 PostgreSQL 会直接报连接失败
+        return SimpleNamespace(id=sess.visitor_id or "00000000-0000-0000-0000-000000000000")
+
     monkeypatch.setattr(cs_mod, "SessionLocal", FakeSessionFactory())
     monkeypatch.setattr(cs_mod, "resolve_scene", fake_resolve_scene)
     monkeypatch.setattr(cs_mod.SessionRepo, "get_or_create_for_actor", fake_get_or_create_for_actor)
@@ -90,6 +94,7 @@ def _install_fakes(
     monkeypatch.setattr(cs_mod.MessageRepo, "list_recent", fake_list_recent)
     monkeypatch.setattr(cs_mod.TraceRepo, "insert", fake_insert)
     monkeypatch.setattr(cs_mod.ChatEventRepo, "attach_identity", fake_attach_identity)
+    monkeypatch.setattr(cs_mod.VisitorRepo, "get_or_create", fake_visitor_get_or_create)
 
     service = ChatService()
 
@@ -194,6 +199,8 @@ async def test_trace_write_failure_does_not_break_stream(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_dispatch_exception_persists_error_trace(monkeypatch):
+    # 断言错误正文已落库，必须显式打开载荷存储：默认已改为 false（只存长度摘要）
+    monkeypatch.setattr(settings, "trace_store_payload", True)
     inserted: list[dict] = []
     service, sess = _install_fakes(
         monkeypatch,

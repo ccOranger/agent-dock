@@ -140,6 +140,8 @@ def _intent(name, conf=0.9):
 
 @pytest.mark.asyncio
 async def test_single_intent_full_timeline(monkeypatch):
+    # 后面要断言工具返回值正文，必须显式打开载荷存储（默认 false 只存长度摘要）
+    monkeypatch.setattr(settings, "trace_store_payload", True)
     tool_events = [
         {"type": "tool_call", "data": {"id": "c1", "name": "order_query", "args": {"order_no": "A1"}}},
         {"type": "tool_result", "data": {"id": "c1", "name": "order_query", "result": "已发货", "error": None}},

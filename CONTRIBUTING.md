@@ -56,6 +56,10 @@ CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest
 需要真实模型与嵌入模型的全栈集成测试（`tests/test_hello_agents_integration.py`）默认跳过，
 单独验证时先配好 `.env`，再设 `RUN_HELLO_AGENTS_INTEGRATION=1` 运行该文件。
 
+> **跑测试时 `backend/.env` 是生效的**，CI 上没有这个文件、用的是代码默认值。所以改了某个配置项的
+> 默认值时，本地要用环境变量临时覆盖再跑一遍（如 `$env:TRACE_STORE_PAYLOAD="false"`），
+> 否则本地会被 `.env` 里的旧值遮蔽，推上去才会在 CI 里报错。
+
 ## 依赖与版本
 
 - 运行时依赖在 `backend/requirements.txt`：普通依赖使用下限，存在兼容风险的依赖加上界并注释原因
