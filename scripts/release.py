@@ -46,6 +46,7 @@ REQUIRED_FILES = (
     "scripts/seed_data.py",
     "scripts/backup.sh",
     "docs/quickstart.md",
+    "docs/architecture.md",
     "docs/deployment.md",
     "docs/demo-script.md",
 )
@@ -230,7 +231,11 @@ def check_tests(rep: Report) -> None:
         rep.fail("ruff 未通过", lint_last[-1] if lint_last else "")
     else:
         rep.ok("ruff 通过")
-    test = sh([interpreter, "-m", "pytest", "tests", "-q"], cwd=BACKEND)
+    # 固定 --basetemp：Windows 下 pytest 默认在 %TEMP% 建目录，部分环境 os.scandir 被拒（
+    # PermissionError: [WinError 5]）会让整套用例在 fixture 阶段报 ERROR；该目录已在 .gitignore 中
+    test = sh(
+        [interpreter, "-m", "pytest", "tests", "-q", "--basetemp=.pytest_tmp"], cwd=BACKEND
+    )
     tail = [line for line in (test.stdout or "").splitlines() if " passed" in line or " failed" in line]
     if test.returncode != 0:
         rep.fail("pytest 未通过", tail[-1] if tail else "见上方输出")
@@ -240,10 +245,13 @@ def check_tests(rep: Report) -> None:
 
 def check_build(rep: Report) -> None:
     rep.step("前端构建")
-    if not shutil.which("npm"):
+    # Windows 上 which 解析到 npm.cmd，但 CreateProcess 只会补 .exe，
+    # 直接传 "npm" 会 FileNotFoundError；统一用解析后的完整路径调用
+    npm = shutil.which("npm")
+    if not npm:
         rep.fail("未找到 npm，无法验证前端构建")
         return
-    build = sh(["npm", "run", "build"])
+    build = sh([npm, "run", "build"])
     build_last = (build.stdout or build.stderr).strip().splitlines()
     if build.returncode != 0:
         rep.fail("前端构建未通过", build_last[-1] if build_last else "")

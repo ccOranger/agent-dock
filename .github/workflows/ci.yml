@@ -55,3 +55,35 @@ jobs:
 
       - name: Build ${{ matrix.app }}
         run: npm run build -w ${{ matrix.app }}
+
+  docker:
+    name: Docker (${{ matrix.image }} image)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            dockerfile: docker/backend.Dockerfile
+          - image: web
+            dockerfile: docker/web.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # 只构建不推送：镜像只要构建失败（依赖解析、COPY 路径、前端产物）就应该在 PR 上暴露
+      - name: Build ${{ matrix.image }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: smart-cs/${{ matrix.image }}:ci
+          # 分层缓存走 GitHub Actions 缓存，两个镜像各用一个 scope，避免互相覆盖
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Inspect image
+        run: docker image inspect smart-cs/${{ matrix.image }}:ci --format '{{.Id}} {{.Size}}'

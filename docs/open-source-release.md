@@ -2,136 +2,131 @@
 
 > 目标：把当前仓库整理成"陌生人 30 分钟内能跑起来"的开源项目。
 > 关联文档：[产品定位](./positioning.md)、[开发清单](./development-checklist.md)。
-> 现状基线：无 LICENSE / Dockerfile / docker-compose；`.env`、运行数据已被 gitignore；`seed_data.py` 含演示默认口令；README 仍是客服系统叙事。
+> 最近一次实检：**2026-10-27**（本地 `release.py check` 0 失败；`ruff check app tests` 通过；
+> `pytest -q --basetemp=.pytest_tmp` → 599 passed / 3 skipped；两端构建在 CI 绿；CI 已加 `docker` job）。
+> 勾选口径：`[x]` = 已在代码/仓库/CI 中验证；`[ ]` = 未做或不满足。
 
 ## 0. 发布目标
 
 | 项 | 目标 |
 |---|---|
 | 受众 | 能自己跑 Docker 的技术型团队 |
-| 首次体验 | 克隆 → `cp .env.example .env` → `docker compose up` → 打开管理台 → 用演示数据对话 |
+| 首次体验 | 克隆 → `cp backend/.env.example .env` → `docker compose up` → 打开管理台 → 用演示数据对话 |
 | 版本 | v0.1.0，明确标注"早期版本，接口可能变化" |
 | 渠道 | GitHub（主）+ Gitee（镜像）+ 2–3 篇技术文章 |
 | 成功标准 | 10 个真实部署、3 个外部 issue、1 篇社区转载 |
 
-## 1. 法务与品牌
+## 1. 当前阻塞项（发布前必须清零）
 
-- [x] 许可证：核心 Apache-2.0（已添加 LICENSE/NOTICE）。
-- [x] 增加 `LICENSE`、`NOTICE`（如有第三方声明）。
-- [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）。
-- [x] 确定产品名：对外使用 **AgentDock**；仓库名与代码代号保留 `smart-cs`（Compose 项目名、包名不变，避免已有数据卷失联）。
-- [ ] README 与页面中不出现真实客户名、内部系统名、真实域名。
-- [x] 增加 `SECURITY.md`：漏洞报告方式、支持版本、响应时限（尽力而为）。
+| # | 阻塞项 | 现状 |
+|---|---|---|
+| B1 | **默认分支与发布版本一致** | `main` 落后 `release/v0.1.0` 两个提交（版本归并 + 截图/GIF + `demo-script.md`）。`main` 上既没有 `docs/assets/screenshots/` 也没有 README 首屏 GIF，陌生人克隆默认分支看到的是残缺版本 |
+| B2 | **仓库仍为私有** | `https://github.com/ccOranger/smart-cs` 返回 404；转公开前需确认最终归属（个人号 / 组织）与仓库名，并同步 README 徽章、克隆地址与 issue 模板里的链接 |
+| B3 | ~~CI 缺镜像构建~~ **已补** | `ci.yml` 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，分层缓存走 gha 且各用一个 scope；PR 上就能暴露 Dockerfile 与前端产物问题（待首次 Actions 运行确认） |
+| B4 | **依赖许可证与漏洞扫描** | 无第三方许可证清单，`pip-audit` / `npm audit` 未接入 CI，`SECURITY.md` 无"已知问题"段落 |
+| B5 | ~~`docs/architecture.md` 缺失~~ **已补** | 新增 [架构说明](architecture.md)：组件拓扑、启动关闭、一轮对话链路、场景路由、上下文工程、记忆生命周期、RAG、MCP、鉴权限流、追踪模型、数据层、前端、扩展点、明确边界；README 文档表已挂链，`release.py` 必备文件清单已纳入 |
+| B6 | **Release 实体未发布** | tag `v0.1.0` 已打，CHANGELOG 已写，但 GitHub Release 正文、置顶路线图 issue、Discussions / 支持入口都还没有 |
 
-## 2. 仓库卫生
+> 建议顺序：B1 → B4 → 更新本文件 → B2（转公开）→ B6（发 Release）。转公开之后再做 B6 才有效。
 
-- [x] 删除临时文件 `.review_diff.txt`。
-- [ ] 检查 git 历史是否提交过密钥：`git log -p -- backend/.env`、gitleaks/git-secrets 扫描。
-- [ ] 确认 `.env`、`memory_data/`、`backend/data/doc_archives/*`、`backend/data/knowledge_bases/*` 均未入库（当前已 gitignore）。
-- [x] `seed_data.py` 默认口令（`Admin@123` 等）仅用于 demo：
-  - [x] 种子脚本显式要求 `SEED_DEMO=true`；
-  - [x] 首次登录强制改密，或在初始化向导中生成随机密码并打印一次；
-  - [x] README 显著提示"不要在生产使用演示口令"。
-- [ ] `backend/app/tools/custom/mock_data.py` 的示例数据去标识化（姓名、手机号、订单号均为虚构）。
-- [ ] 确认没有大文件/构建产物入库：`git count-objects -vH`。
-- [x] 增加 `.gitattributes`（换行符）与统一编码说明（项目含中文，建议 UTF-8）。
+## 2. 法务与品牌
 
-## 3. 文档
+- [x] 许可证：核心 Apache-2.0（`LICENSE`）。
+- [x] `NOTICE`（第三方声明位，当前只写本项目版权）。
+- [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）：当前 requirements 与前端依赖均为 MIT/BSD/Apache 类，但**没有正式扫描记录**。
+- [x] 产品名：对外 **AgentDock**；仓库名与代码代号保留 `smart-cs`（Compose 项目名、包名不变，避免已有数据卷失联）。
+- [x] 对外文案无真实客户名、内部系统名、真实域名：`docs/api.md`、`docs/configuration.md`、`docs/updates/23-license-edition.md` 里的客户名均为"某某科技有限公司"占位；截图抽查（嵌入挂件、授权与版本页）无客户信息、无合同号、无真实域名。
+  - [ ] 剩余 6 张截图与 GIF 逐张复核（目前只抽查了 2 张）。
+- [x] `SECURITY.md`：漏洞报告方式、支持版本、响应时限（尽力而为）。
+- [x] API 文档标题统一为 AgentDock（`main.py` 的 FastAPI `title`、`pyproject.toml` 的 `description` 不再出现旧名）。
 
-- [x] 重写 `README.md`：
-  - [ ] 一句话定位与截图/GIF（定位已完成，截图待 M3-4）
-  - [x] 能力清单（路由、记忆、知识、工具、追踪）
-  - [x] 架构图（后端、两个前端、Postgres/Qdrant/Redis/MCP）
-  - [x] 3 分钟快速开始
-  - [x] 业务扩展说明（代码 Agent / 自定义工具目录）
-  - [x] 路线图与“明确不做什么”
-  - [x] 许可证与商业支持入口
-- [x] 新增 `docs/quickstart.md`（从零到对话成功，含常见报错）。
-- [x] 新增 `docs/configuration.md`（`.env` 全量说明与默认值）。
-- [x] 新增 `docs/deployment.md`（Docker、反向代理、HTTPS、SSE 缓冲关闭）。
-- [x] 新增 `docs/faq.md`（模型接入、Qdrant、MCP stdio、Windows 编码）。
-- [x] 新增 `CONTRIBUTING.md`（开发环境、测试命令、提交规范、业务 Agent/工具贡献方式）。
-- [x] 新增 `docs/demo-script.md`（GIF 分镜台词、8 张截图取景清单与录制/压缩参数，台词取自已验证评测用例）。
-- [ ] 新增 `docs/architecture.md`（路由、上下文工程、记忆生命周期、追踪模型；待 M4 前后补）。
-- [ ] 保留 `docs/updates/*` 作为开发历史，不要求外部读者通读。
+## 3. 仓库卫生
 
-## 4. 一键部署
+- [x] 无临时文件入库（`.review_diff.txt` 已删除）。
+- [x] 历史未提交过密钥：`git log --all` 中从未新增 `.env`（只有 `.env.example`）；全仓 `sk-*` / `AKIA*` / `ghp_*` 模式 0 命中；历史仅 27 个 commit。
+- [x] `.env`、`memory_data/`、`backend/data/doc_archives/*`、`backend/data/knowledge_bases/*`、`reports/` 均在 `.gitignore` 且未被跟踪。
+- [x] 演示口令受控：`seed_data.py` 要求 `SEED_DEMO=true`；非演示模式只建管理员且**随机密码只打印一次**；README 显著提示"切勿用于生产"。
+- [x] `backend/app/tools/custom/mock_data.py` / `mock_assets.py` 为虚构数据（订单号 `SO2024xxxx`、地址为公共路段、客户 ID 为 `alice` / `u_1002`）。
+- [x] 无大文件/构建产物入库：322 个跟踪文件 / 5.67 MiB，`node_modules`、`dist`、`.venv`、`reports` 均未入库。
+- [x] `.gitattributes`（`* text=auto`，Windows 脚本 CRLF / Shell LF）+ UTF-8 编码约定。
 
-当前只有 Windows 启动脚本（`scripts/start_all.ps1` / `.bat`），不满足跨平台要求。
+## 4. 文档
 
-### 4.1 镜像
+- [x] `README.md` 重写：一句话定位、能力清单、Mermaid 架构、Compose 快速开始、业务扩展方式、生产部署、路线图、"明确不做什么"、许可证与社区入口。
+- [x] 首屏物料：四帧 13 秒演示 GIF + 8 张运营台截图（取景与台词见 [demo-script.md](demo-script.md)）。
+- [x] `docs/quickstart.md`（从零到对话成功，含常见报错）。
+- [x] `docs/configuration.md`（`.env` 全量说明与默认值）。
+- [x] `docs/deployment.md`（Docker、反向代理、HTTPS、SSE 缓冲关闭、离线部署）。
+- [x] `docs/faq.md`（模型接入、Qdrant、MCP stdio、Windows 编码）。
+- [x] `CONTRIBUTING.md`（开发环境、测试命令、提交规范、业务 Agent/工具贡献方式；Windows 已注明 `--basetemp=.pytest_tmp`）。
+- [x] `docs/api.md`、`docs/runbook.md`、`docs/evaluation.md`、`docs/multi-scene-development.md`。
+- [x] `docs/architecture.md`（组件拓扑、对话链路、上下文工程、记忆生命周期、追踪模型、扩展点）。
+- [x] `docs/updates/*` 保留为开发历史，不要求外部读者通读。
 
-- [ ] 后端 `Dockerfile`：Python 3.12-slim，非 root 用户，先装依赖再拷代码，带 `/health` HEALTHCHECK。
-- [ ] 前端 `Dockerfile`：多阶段构建管理端与聊天端两个产物，一个 Nginx 托管；`/` 聊天、`/admin/` 管理端，`/api` 反代后端。
-- [ ] `.dockerignore`：排除 `node_modules`、`.venv`、`data/`、`memory_data/`、日志。
+## 5. 一键部署
 
-### 4.2 Compose
+### 5.1 镜像
 
-- [ ] `docker-compose.yml` 服务：`postgres`（pgvector 镜像）、`qdrant`、`redis`、`backend`、`web`（一个 Nginx 托管两个前端产物）。
-- [ ] 数据卷：Postgres、Qdrant、上传归档、记忆文件；命名卷 + 备份说明。
-- [ ] `depends_on` + healthcheck，避免后端先于数据库启动。
-- [ ] `.env.example` 覆盖全部必填项（模型 Key、数据库、JWT、CORS、TRUSTED_PROXIES、上传上限、追踪开关）。
-- [ ] 首次启动自动执行 `init_db.sql` 与可选种子（`SEED_DEMO=true`）。
-- [ ] MCP 示例：stdio 服务需要 Python/Node 运行时，确认镜像内可用；`npx` 示例默认关闭或单独 profile，避免离线环境启动失败。
-- [ ] 反向代理示例（Nginx）：`/` 聊天、`/admin/` 管理端、`/api` 后端；关闭 SSE 缓冲，透传 `X-Forwarded-For`，配置 `TRUSTED_PROXIES`。
+- [x] 后端 `docker/backend.Dockerfile`：Python 3.12-slim，非 root（appuser 1000），依赖层缓存，`/health` HEALTHCHECK，镜像内含 MCP stdio 所需运行时。
+- [x] 前端 `docker/web.Dockerfile`：多阶段构建管理端与聊天端两个产物，一个 Nginx 托管；`/` 聊天、`/admin/` 管理端，`/api` 反代后端。
+- [x] `.dockerignore`：排除 `node_modules`、`.venv`、`data/`、`memory_data/`、日志。
 
-### 4.3 升级
+### 5.2 Compose
 
-- [ ] 引入版本化迁移（Alembic 或 `scripts/migrations/NNN_*.sql` + `schema_version` 表）。
-- [ ] 提供 `docker compose run backend python -m app.migrate` 或入口自动迁移开关。
-- [ ] `CHANGELOG.md` 使用 Keep a Changelog 格式，标注破坏性变更。
+- [x] `docker-compose.yml`：`postgres`（pgvector）、`qdrant`、`redis`、`backend`、`web`。
+- [x] 命名卷 + healthcheck + `depends_on`，五服务均达 healthy。
+- [x] `.env.example` 覆盖必填项（模型 Key、Embedding、数据库、JWT、CORS、`TRUSTED_PROXIES`、上传上限、追踪开关、`API_DOCS_ENABLED`）。
+- [x] 首启自动执行 `init_db.sql`；`SEED_DEMO=true` 时导入演示数据，均为幂等。
+- [x] `npx` 型 MCP 示例只在 `SEED_DEMO=true` 时写入，离线环境不会因此启动失败。
+- [x] 反向代理样例 `docker/nginx.conf`：SSE 关闭缓冲、`X-Forwarded-For`、`TRUSTED_PROXIES` 说明、25m 上传上限；`/metrics` 不对外暴露。
 
-## 5. 初始化向导
+### 5.3 升级
 
-当前依赖 `scripts/seed_data.py` 手工建管理员与演示数据，开源用户容易卡住。
+- [x] 版本化迁移：`scripts/migrations/NNNN_*.sql` + `schema_migrations`，`python -m app.migrate`（`--check` / `--dry-run` / `--backup`）。
+- [x] 入口自动迁移开关 `MIGRATE_ON_START`（默认 false）+ `scripts/verify_schema.py` 校验。
+- [x] `CHANGELOG.md` 遵循 Keep a Changelog，破坏性变更用 ⚠️ 标注。
 
-- [ ] 新增"首次运行"检测：不存在任何后台账号时进入设置流程。
-- [ ] 提供两种方式（二选一即可）：
-  - [ ] CLI：`python -m app.setup`（交互式创建管理员、写入 `.env`、测试模型连通性）。
-  - [ ] Web：`/setup` 页面 + `POST /api/v1/setup`，仅在无管理员时可调用，成功后自动关闭。
-- [ ] 模型配置测试：填写 Base URL / Key / Model 后发一次最小请求，失败给出明确错误。
-- [ ] 演示数据开关：一键导入示例知识库、客服包、IT Helpdesk 包。
-- [ ] 系统自检页：数据库、Qdrant、Redis、模型、MCP 连接状态。
+## 6. 初始化向导
 
-## 6. 安全基线
+- [x] CLI：`python -m app.setup`（建表、建管理员、生成随机 JWT 并写回 `.env`、测试模型连通性）。
+- [x] 演示数据开关：`SEED_DEMO=true` 一键导入示例知识库、场景与动态 Agent。
+- [x] 启动日志自检：数据库 / Qdrant / Redis / 模型状态单行输出，失败给可操作提示。
+- [ ] **系统自检页**：管理台里看不到实时依赖状态（当前只有启动日志 + `/health`）。
+- [x] 不做 Web `/setup`：计划里是"CLI / Web 二选一"，已由 CLI 满足。
 
-- [x] 生产环境 JWT 密钥 ≥32 字节校验（已实现，确认文档同步）。
-- [ ] 初始化向导自动生成随机 JWT 密钥，禁止示例值进入生产。
-- [x] 默认管理员强制改密；演示账号默认禁用或随机密码。
-- [ ] CORS 默认仅放行本地地址；文档说明生产配置。
-- [ ] 上传大小限制、登录限流、SSE 错误脱敏已在代码中生效，补充文档说明。
-- [ ] `TRUSTED_PROXIES` 说明：反向代理后必须配置，否则限流按直连 IP。
-- [ ] 关闭或保护 `/docs` 的可选开关（生产环境）。
-- [ ] 追踪 payload 开关（`TRACE_STORE_PAYLOAD`）默认值复核，避免无意存客户数据。
-- [ ] 依赖漏洞扫描（`pip-audit`、`npm audit`），记录已知问题。
+## 7. 安全基线
 
-## 7. 质量与 CI
+- [x] 生产环境 JWT 密钥 ≥32 字节校验（`validate_runtime_config`）。
+- [x] 初始化向导自动生成随机 JWT，示例值无法进入生产（弱密钥直接拒绝启动）。
+- [x] 演示账号默认关闭（`SEED_DEMO=false`），非演示模式管理员密码随机且只打印一次。
+- [x] CORS 默认仅放行本地开发地址，生产按 `ALLOWED_ORIGINS` + 场景 `allowed_origins` 收紧。
+- [x] 上传大小限制、登录限流、SSE 错误脱敏已在代码生效，且 `docs/configuration.md` / `docs/deployment.md` / `SECURITY.md` 有说明。
+- [x] `TRUSTED_PROXIES` 说明：反向代理后必须配置，否则限流按直连 IP。
+- [x] `/docs`、`/redoc`、`/openapi.json` 可用 `API_DOCS_ENABLED` 关闭；生产叠加 `docker-compose.prod.yml` 默认 `false`。
+- [x] `TRACE_STORE_PAYLOAD` 默认值改为 `false`（开源默认不把客户工具入参落库，排障时显式打开）。
+- [ ] 依赖漏洞扫描（`pip-audit`、`npm audit`）并入 CI，已知问题记录到 `SECURITY.md`。
 
-- [x] 后端：`python -m compileall`、`pytest`（本地 277 passed / 2 skipped；CI 275 passed / 4 skipped）。
-- [x] 增加 ruff（0.17.1，已纳入 `requirements-dev` 与 CI）：lint + import 排序。
-- [x] 前端：`npm run build` 两端均通过（当前通过，仅有 chunk 体积告警）。
-- [x] GitHub Actions：
-  - [x] backend job（Python 3.12，依赖缓存，pytest）
-  - [x] frontend job（Node 20，两端 build）
-  - [ ] docker job（构建镜像，不推送）
-- [x] 固定版本与锁文件：`requirements.txt` 版本策略、仓库根 `package-lock.json`（npm workspaces）入库。
-- [ ] 发布流程：打 tag、生成 Release Notes、附镜像构建说明。
+## 8. 质量与 CI
 
-## 8. 发布物料
+- [x] 后端：`ruff check app tests` + `pytest`（本地 599 passed / 3 skipped；CI Linux 上跳过 Windows 专用用例）。
+- [x] 前端：两端 `npm run build` 通过（仅有 chunk 体积告警）。
+- [x] GitHub Actions：backend job（Python 3.12，ruff + pytest）、frontend job（Node 20，矩阵构建两端）、docker job（backend / web 两个镜像 `push: false`，待首次运行确认）。
+- [x] 版本与锁文件：`requirements.txt` 版本策略、仓库根 `package-lock.json`（npm workspaces）入库；`python scripts/release.py check` 校验六处版本一致。
+- [x] 发布流程脚本：`scripts/release.py {check,bundle,tag}`（离线 bundle + 校验和 + 打 tag）。
+- [ ] Release Notes 正式发布：CHANGELOG 已备，GitHub Release 正文未发（含镜像构建说明与已知限制）。
 
-- [x] 演示 GIF：四帧 13 秒（发问 + 工具回填 → 多意图 + 自动建单 → 跨轮补单 → 转人工），分镜台词见 [demo-script.md](demo-script.md)。
-- [x] 8 张截图：链路详情、业务场景、知识库、Agent 编辑、用量报表、嵌入挂件、授权与版本，取景清单见 [demo-script.md](demo-script.md)。
-- [ ] 技术文章三篇（差异化证明）：
-  1. 多意图路由与提示词去具名化
-  2. 记忆生命周期与跨轮上下文
-  3. 一轮对话的全链路追踪模型
-- [ ] Release Notes：v0.1 能力、已知限制、升级方式。
+## 9. 发布物料
+
+- [x] 演示 GIF：四帧 13 秒（发问 + 工具回填 → 多意图 + 自动建单 → 跨轮补单 → 转人工），分镜见 [demo-script.md](demo-script.md)。
+- [x] 8 张截图：链路详情、业务场景、知识库、Agent 编辑、用量报表、嵌入挂件、授权与版本。
+- [ ] 技术文章三篇（当前 1/3）：
+  1. [x] 多意图路由与提示词去具名化 —— [articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)
+  2. [ ] 记忆生命周期与跨轮上下文
+  3. [ ] 一轮对话的全链路追踪模型
 - [ ] 路线图 issue（置顶）：第二个业务场景、Docker 优化、评测、RBAC。
+- [ ] 发布公告：技术社区 1–2 处，附 GIF 与部署入口。
 
-> 2026-10-20：首篇技术文章初稿已完成（[docs/articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)），待外部发布；截图与 GIF 待演示数据就绪后补。
-> 2026-10-27：演示脚本与取景清单已就位（[demo-script.md](demo-script.md)），台词取自 `customer_service` 已验证用例；待本机录屏后一次性入库。
-
-## 9. 发布后运营
+## 10. 发布后运营
 
 - [x] Issue 模板：bug / feature / deployment help；PR 模板含测试说明。
 - [ ] Discussions 或群组入口，明确"尽力而为"的支持边界。
@@ -139,24 +134,46 @@
 - [ ] 收集部署反馈：至少记录部署失败原因 Top 5，作为下一版优先项。
 - [ ] 不默认采集遥测；如需统计，必须显式 opt-in 并在文档说明。
 
-## 10. v0.1 验收清单
+## 11. v0.1 验收清单
 
 全部勾选才可发布：
 
-- [ ] 全新机器按 README 步骤 30 分钟内跑通对话。
-- [ ] `docker compose up` 一条命令启动，无需手工建库。
-- [ ] 初始化向导可创建管理员并完成模型连通性测试。
-- [ ] 演示数据可一键导入，也可完全不导入。
-- [ ] 客服包可停用，IT Helpdesk 包可启用（若第二个包未就绪，则明确标注"预览"）。
+- [ ] **默认分支可克隆即用**（B1 清零）。
+- [x] 全新机器按 README 步骤 30 分钟内跑通对话（M2-8 演练记录：冷构建 + 启动 + 首条回复合计 <10 分钟）。
+- [x] `docker compose up` 一条命令启动，无需手工建库。
+- [x] 初始化可创建管理员并完成模型连通性测试（`python -m app.setup`）。
+- [x] 演示数据可一键导入，也可完全不导入（`SEED_DEMO`）。
+- [x] 默认场景与业务场景可切换：停用客服场景后系统仍可用，IT Helpdesk 场景可独立启用（场景包机制已移除，改为后台「业务场景」配置）。
 - [x] 无默认生产密钥、无演示口令直接暴露。
 - [x] 两端构建通过，后端测试通过，CI 绿。
 - [x] LICENSE、SECURITY、CONTRIBUTING 齐备。
-- [x] README 与产品定位文档一致，不再以“智能客服系统”作为唯一身份。
+- [x] README 与产品定位文档一致，不再以"智能客服系统"作为唯一身份。
 
-## 11. v0.1 明确不做
+## 12. v0.1 明确不做
 
 - 多租户与租户隔离（只预留 `tenant_id`）。
 - SSO、RBAC、计费、用量账单。
 - 可视化 DAG 编排、插件市场、移动端。
 - 托管 SaaS 与在线试用环境。
-- 自动化升级（先提供手动迁移脚本）。
+- 自动化升级（只提供手动迁移脚本）。
+- 内置 mock 模型模式（对话与向量必须连 OpenAI 兼容端点）。
+
+## 13. 维护者发布动作（按顺序执行）
+
+```bash
+# 1. 合并发布分支，默认分支与 tag 对齐（B1）
+git checkout main && git merge --ff-only release/v0.1.0 && git push origin main
+
+# 2. 发布前全量校验（B3/B4 补完后再跑一次）
+cd backend && ruff check app tests && pytest -q --basetemp=.pytest_tmp
+cd .. && python scripts/release.py check
+
+# 3. 打 tag 并推送（已打过则跳过；改版本时用 tag --push）
+python scripts/release.py tag --push
+
+# 4. 生成离线交付包（可选，内网客户用）
+python scripts/release.py bundle
+```
+
+GitHub 网页端（本地无法代替）：Settings → 转公开 / 转移归属；Actions 勾选 docker job 首次运行；
+Releases 用 CHANGELOG 的 `[0.1.0]` 段落作正文；新建并置顶路线图 issue；开启 Discussions。

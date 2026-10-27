@@ -25,13 +25,13 @@
 | 产品定位 / ICP / 版本分层 / 定价原则 | [positioning.md](./positioning.md) 已定 | 无需重做 |
 | 多场景隔离、公开接入、匿名归属、动态 CORS、嵌入挂件 | M0–M7、U18–U21 已落地 | 可交付 |
 | 接入方与 API Key（`integrations` / `integration_keys`） | 已落地，U20 单租户下降级为 `ic_default` | **它就是计费主体**，逻辑必须保留 |
-| 场景运行参数（`scenes.runtime_config`） | [runtime_config.py](file:///d:/project/smart-cs/backend/app/services/runtime_config.py) 已支持 rag / history / quota 覆盖 | 客户调优入口已具备 |
-| 资源创建配额（`staff_users.quota`） | [quota_service.py](file:///d:/project/smart-cs/backend/app/services/quota_service.py) 已实现 | 是"限流"，**不是计费** |
-| Agent 级模型（`agents.llm_model` → `get_llm()`） | **已落地**：[base_business_agent.py](file:///d:/project/smart-cs/backend/app/agents/base_business_agent.py) L72 + [llm_factory.py](file:///d:/project/smart-cs/backend/app/agents/llm_factory.py) 按模型缓存 | CHANGELOG 中"未落地"的描述需修正；真正缺的是**供应商后台化** |
-| 角色权限 | `staff_users.role` 仅 `agent` / `admin`（[init_db.sql](file:///d:/project/smart-cs/scripts/init_db.sql) L67），前端已按 `meta.roles` 守卫 | 粗粒度可用，不满足企业采购 |
+| 场景运行参数（`scenes.runtime_config`） | [runtime_config.py](../backend/app/services/runtime_config.py) 已支持 rag / history / quota 覆盖 | 客户调优入口已具备 |
+| 资源创建配额（`staff_users.quota`） | [quota_service.py](../backend/app/services/quota_service.py) 已实现 | 是"限流"，**不是计费** |
+| Agent 级模型（`agents.llm_model` → `get_llm()`） | **已落地**：[base_business_agent.py](../backend/app/agents/base_business_agent.py) L72 + [llm_factory.py](../backend/app/agents/llm_factory.py) 按模型缓存 | CHANGELOG 中"未落地"的描述需修正；真正缺的是**供应商后台化** |
+| 角色权限 | `staff_users.role` 仅 `agent` / `admin`（[init_db.sql](../scripts/init_db.sql) L67），前端已按 `meta.roles` 守卫 | 粗粒度可用，不满足企业采购 |
 | 审计 | `audit_logs` 有写入（如 `quota.reject`），无查询页、无导出 | 需补，否则无法响应客户审计诉求 |
-| 数据库升级 | `init_db.sql` 幂等 DDL + `SCHEMA_VERSION` 启动守卫 + `rebuild_and_seed.py` **全量 DROP 重建**（[schema.py](file:///d:/project/smart-cs/backend/app/core/schema.py)） | **最大阻塞项** |
-| 用量采集 | `chat_events.total_tokens` 仅预留列，从未写入（[entities.py](file:///d:/project/smart-cs/backend/app/models/entities.py) L457–458） | 需补采集与报表 |
+| 数据库升级 | `init_db.sql` 幂等 DDL + `SCHEMA_VERSION` 启动守卫 + `rebuild_and_seed.py` **全量 DROP 重建**（[schema.py](../backend/app/core/schema.py)） | **最大阻塞项** |
+| 用量采集 | `chat_events.total_tokens` 仅预留列，从未写入（[entities.py](../backend/app/models/entities.py) L457–458） | 需补采集与报表 |
 | 评测回归 | 全库无相关实现 | 需从 0 建 |
 | 可观测 | 无 `/metrics`、无告警、无诊断包 | 私有化支持成本会失控 |
 | 依赖储备 | `alembic==1.13.2`、`prometheus-client==0.21.0`、`python-jose[cryptography]` **已在 requirements，未启用** | 三项 P0/P1 不必新增依赖 |
@@ -372,8 +372,8 @@
 ### 4.5 安全合规物料
 
 - CI 增加 `pip-audit` 与 `npm audit`，已知问题记录在 `SECURITY.md`。
-- 复核 `TRACE_STORE_PAYLOAD` 默认值，生产默认不落客户正文。
-- 依赖许可证扫描（open-source-release.md 中唯一未勾的合规项）。
+- 复核 `TRACE_STORE_PAYLOAD` 默认值，生产默认不落客户正文（已改为默认 `false`）。
+- 依赖许可证扫描（open-source-release.md §2 / §7 中仍待办的合规项）。
 - 文档化：日志留存期、数据删除流程（客户离场时如何清库）、脱敏范围。
 
 ---

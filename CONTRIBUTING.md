@@ -43,11 +43,15 @@ npm run dev:admin
 | 目的 | 命令 |
 |---|---|
 | 代码检查 | `cd backend; .\.venv\Scripts\ruff.exe check app tests` |
-| 后端测试 | `cd backend; .\.venv\Scripts\python.exe -m pytest -q` |
+| 后端测试 | `cd backend; .\.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest_tmp` |
 | 客户端构建 | `npm run build -w frontend` |
 | 管理端构建 | `npm run build -w admin-frontend` |
 
 CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest 与两端构建。
+
+> Windows 上请保留 `--basetemp=.pytest_tmp`：pytest 默认会在 `%TEMP%\pytest-of-<user>` 建临时目录，
+> 部分环境下 `os.scandir` 会被拒绝访问（`PermissionError: [WinError 5]`），表现为大量用例
+> 在 fixture 阶段报 ERROR。CI 在 Linux 上跑，不受影响。
 
 需要真实模型与嵌入模型的全栈集成测试（`tests/test_hello_agents_integration.py`）默认跳过，
 单独验证时先配好 `.env`，再设 `RUN_HELLO_AGENTS_INTEGRATION=1` 运行该文件。
@@ -67,7 +71,7 @@ CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest
 ## Pull Request 检查清单
 
 - [ ] `ruff check app tests` 通过
-- [ ] `pytest -q` 通过
+- [ ] `pytest -q --basetemp=.pytest_tmp` 通过
 - [ ] `frontend` 与 `admin-frontend` 构建通过
 - [ ] 未提交 `.env`、密钥、运行数据与本地临时文件
 - [ ] 新增/修改的行为有测试或明确的手工验证步骤

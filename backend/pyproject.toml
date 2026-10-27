@@ -1,7 +1,7 @@
 [project]
 name = "cs-backend"
 version = "0.1.0"
-description = "smart-customer-service backend (HelloAgents + FastAPI)"
+description = "AgentDock backend (HelloAgents + FastAPI; repo codename smart-cs)"
 requires-python = ">=3.11,<3.13"
 
 [tool.black]

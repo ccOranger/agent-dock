@@ -194,7 +194,7 @@
 ### M5 v0.1 发布
 
 - [ ] **M5-1 全量验收**（0.5d）
-  - 跑 [开源发布检查清单](./open-source-release.md) 第 10 节
+  - 跑 [开源发布检查清单](./open-source-release.md) 第 11 节（v0.1 验收清单）
   - 带 schema 变更的版本：`python -m app.migrate --check` 无待执行 + `python scripts/verify_schema.py` 通过
   - 改提示词 / 换模型 / 调 RAG 参数的版本：`scripts/eval.py --scene <场景> --baseline latest` **退出码必须为 0 或 1**；
     退出码 2（指标退化）要么回滚要么在发布说明里逐项解释（口径见 [评测与回归](./evaluation.md)）

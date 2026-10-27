@@ -10,7 +10,22 @@
 
 ## [Unreleased]
 
-_暂无。_
+### 变更
+
+- `TRACE_STORE_PAYLOAD` 默认值由 `true` 改为 `false`：开源默认不再把工具入参/返回（含客户数据）写进 `request_traces`，需要排障的部署显式置 `true` 即可恢复。存量 `.env` 里已显式写值的部署不受影响。
+- 新增 `API_DOCS_ENABLED`（默认 `true`）：置 `false` 时 `/docs`、`/redoc`、`/openapi.json` 同时关闭（只关 `/docs` 仍能从 `/openapi.json` 拿到全量描述）。`docker-compose.prod.yml` 默认置 `false`。
+- 对外品牌收口：FastAPI 文档标题改为 `AgentDock API（仓库代号 smart-cs）`，`backend/pyproject.toml` 描述同步，不再对外显示旧名。
+- CI 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，Dockerfile 或前端产物坏掉会直接在 PR 上暴露。
+- `scripts/release.py check` 在 Windows 上可跑通：pytest 固定带 `--basetemp=.pytest_tmp`（避开 `%TEMP%` 权限问题），npm 改用 `shutil.which` 解析后的完整路径（CreateProcess 不会自动补 `.cmd`）。
+
+### 文档
+
+- 新增 `docs/architecture.md`（14 节）：组件拓扑、启动与关闭、一轮对话完整链路、场景路由与隔离、上下文工程、记忆生命周期、RAG、工具与 MCP、鉴权与限流、链路追踪与用量、数据层、前端结构、扩展点、明确边界。README 文档表与 `release.py` 必备文件清单已同步。
+
+- `CONTRIBUTING.md`：测试命令补 `--basetemp=.pytest_tmp`（Windows 下 pytest 默认临时目录可能 `PermissionError: [WinError 5]`，表现为大量 fixture ERROR），并说明原因。
+- `docs/configuration.md`：补 `API_DOCS_ENABLED`，更新 `TRACE_STORE_PAYLOAD` 默认值。
+- `docs/open-source-release.md`：按实检结果重写，新增「当前阻塞项」与「维护者发布动作」。
+- `docs/productization-plan.md`：6 处本机绝对路径链接改为仓库相对路径。
 
 ## [0.1.0] - 2026-10-27
 

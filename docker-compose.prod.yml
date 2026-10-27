@@ -70,6 +70,8 @@ services:
     environment:
       APP_ENV: production
       SEED_DEMO: "false"
+      # 生产不暴露 /docs、/redoc 与 /openapi.json
+      API_DOCS_ENABLED: "false"
       # 生产不在每次启动时做建表/种子；初始化用一次性命令
       INIT_ON_START: ${INIT_ON_START:-false}
       # 密码含 @ : / 等字符时需 URL 编码，建议使用字母数字随机串

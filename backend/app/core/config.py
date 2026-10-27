@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     log_level: str = "INFO"
+    # 是否对外暴露 /docs、/redoc 与 /openapi.json；裸机部署时务必在生产置 false
+    api_docs_enabled: bool = True
 
     # ===== CORS（逗号分隔的允许来源；默认放行客户端前端 5173 与管理后台 5174） =====
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
@@ -148,8 +150,9 @@ class Settings(BaseSettings):
 
     # ===== 链路追踪（request_traces）=====
     trace_enabled: bool = True
-    # 工具入参/返回是否入库（含客户数据）：只存截断后的文本，关闭则仅存工具名与耗时
-    trace_store_payload: bool = True
+    # 工具入参/返回是否入库（含客户数据）：只存截断后的文本，关闭则仅存工具名与耗时。
+    # 默认关闭：开源默认配置不应悄悄把客户数据落到链路表里，需要排障的部署自行打开。
+    trace_store_payload: bool = False
     trace_payload_max_chars: int = 2000
     # 正常应答的采样率 0~1；转人工/出错的请求永远全量记录
     trace_sample_rate: float = 1.0

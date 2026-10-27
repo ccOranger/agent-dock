@@ -49,6 +49,7 @@ JWT_SECRET=<≥32 字节随机串>
 | `APP_HOST` | `0.0.0.0` | 监听地址（uvicorn 由启动命令决定，通常不用改） |
 | `APP_PORT` | `8000` | 容器内端口；宿主机端口用 `BACKEND_PORT` |
 | `LOG_LEVEL` | `INFO` | 日志级别 |
+| `API_DOCS_ENABLED` | `true` | 是否对外暴露 `/docs`、`/redoc` 与 `/openapi.json`；置 `false` 时三个入口一并关闭。生产叠加（`docker-compose.prod.yml`）默认置 `false`，裸机部署请自行关闭 |
 | `ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174` | CORS 白名单，逗号分隔。单镜像部署前后端同源，无需额外放行 8080；嵌入场景还会叠加各自 `scenes.allowed_origins`（后台配置，保存后立即生效） |
 
 ### 3.2 种子数据
@@ -182,7 +183,7 @@ JWT_SECRET=<≥32 字节随机串>
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `TRACE_ENABLED` | `true` | 是否记录每轮链路 |
-| `TRACE_STORE_PAYLOAD` | `true` | 是否保存工具入参/返回（含客户数据，截断保存）；合规敏感场景设 `false` |
+| `TRACE_STORE_PAYLOAD` | `false` | 是否保存工具入参/返回（含客户数据，截断保存）；默认关闭，需要排障时打开，合规敏感场景保持 `false` |
 | `TRACE_PAYLOAD_MAX_CHARS` | `2000` | payload 截断长度 |
 | `TRACE_SAMPLE_RATE` | `1.0` | 正常应答采样率；转人工与异常轮始终全量记录 |
 | `TRACE_RETENTION_DAYS` | `30` | 保留天数，供 `scripts/cleanup_traces.py` 使用 |

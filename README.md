@@ -204,7 +204,7 @@ admin-frontend/   运营管理台（Vue 3）
 packages/shared/  npm workspaces 共享包 @cs/shared（http / auth / SSE / 类型）
 docker/           镜像、入口脚本、Nginx 与 Caddy 配置
 scripts/          init_db / seed_data / rebuild_and_seed / migrate / eval / backup / cleanup_traces
-docs/             快速开始、配置、部署、评测、FAQ、运维手册、规范与更新记录
+docs/             快速开始、架构说明、配置、部署、评测、FAQ、运维手册、规范与更新记录
 ```
 
 ## 文档
@@ -212,6 +212,7 @@ docs/             快速开始、配置、部署、评测、FAQ、运维手册�
 | 文档 | 内容 |
 |---|---|
 | [快速开始](docs/quickstart.md) | 从零到首次对话，含常见报错 |
+| [架构说明](docs/architecture.md) | 组件拓扑、一轮对话链路、上下文工程、记忆生命周期、追踪模型与扩展点 |
 | [配置说明](docs/configuration.md) | `.env` 全量配置、默认值与生效优先级 |
 | [部署指南](docs/deployment.md) | Compose、生产叠加、HTTPS、备份恢复 |
 | [常见问题](docs/faq.md) | 模型接入、Qdrant、MCP、Windows 编码、端口冲突 |
