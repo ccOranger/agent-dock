@@ -227,7 +227,11 @@ function openBaseCreate() {
 }
 function openBaseEdit(row: KnowledgeBase) {
   baseEditing.value = true
-  Object.assign(baseForm, { namespace: row.namespace, display_name: row.display_name, description: row.description || '' })
+  Object.assign(baseForm, {
+    namespace: row.namespace,
+    display_name: row.display_name,
+    description: row.description || '',
+  })
   baseDialog.value = true
 }
 async function submitBase() {
@@ -235,7 +239,11 @@ async function submitBase() {
     if (baseEditing.value) {
       await apiUpdateBase(baseForm.namespace, { display_name: baseForm.display_name, description: baseForm.description })
     } else {
-      await apiCreateBase({ namespace: baseForm.namespace, display_name: baseForm.display_name, description: baseForm.description })
+      await apiCreateBase({
+        namespace: baseForm.namespace,
+        display_name: baseForm.display_name,
+        description: baseForm.description,
+      })
     }
     ElMessage.success('已保存')
     baseDialog.value = false

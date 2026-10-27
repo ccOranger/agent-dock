@@ -2,12 +2,17 @@
 
 - 若 hello-agents 未安装（如 CI 环境），注入最小桩模块，保证纯逻辑单测可运行
 - 真实集成测试请安装 hello-agents 后运行
+- 单测不应调用真实模型：无 .env 时注入占位 LLM 配置，避免 HelloAgentsLLM 构造即报错
 """
+import os
 import sys
 import types
 from types import SimpleNamespace
 
 import pytest
+
+os.environ.setdefault("LLM_API_KEY", "test-key")
+os.environ.setdefault("LLM_BASE_URL", "https://llm.invalid/v1")
 
 
 def _install_hello_agents_stub() -> None:

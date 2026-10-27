@@ -1,35 +1,47 @@
-"""自定义工具目录：代码侧已开发 BaseTool 的可发现清单。
+"""自定义工具目录：代码托管 BaseTool 的可发现清单。
 
 设计要点（见「自定义工具管理功能」方案）：
-- 工具实现永远来自代码，这里只做「登记入口」——把散落在各 custom/*.py 的 BaseTool
-  子类集中列举，暴露 name/description/parameters（parameters 即 JSON Schema），
-  供后台扫描展示、勾选登记到 tools 表（type=custom），再由动态 Agent 按名绑定。
-- 采用显式列举而非反射扫描整个包：避免误收 BaseTool 基类、mock_data 等非工具模块，
-  且登记顺序/内容可控，新增工具时在此加一行即可。
+- 工具实现在 app/tools/custom/ 下，本模块集中登记并暴露 name/description/parameters
+  （parameters 即 JSON Schema），供后台扫描展示、勾选登记到 tools 表（type=custom），
+  再由动态 Agent 按名绑定。
+- 新增工具：实现 BaseTool 子类，并在 _TOOL_CLASSES 中补一行。
 - 所有工具均为无参构造（会话上下文 user_id/session_id 由 orchestrator 执行时按参数
   声明自动注入），故 build() 直接 cls() 实例化。
 """
 from app.tools.custom.base import BaseTool
+from app.tools.custom.echo_tool import EchoTool
+from app.tools.custom.it_asset_tool import QueryItAssetTool
+from app.tools.custom.it_ticket_tool import CreateItTicketTool, EscalateItTool, UpdateItTicketTool
 from app.tools.custom.logistics_tool import QueryLogisticsTool
 from app.tools.custom.order_tool import ListOrdersTool, ModifyOrderTool, QueryOrderTool
 from app.tools.custom.refund_tool import QueryRefundTool, SubmitRefundTool
 from app.tools.custom.ticket_tool import CreateTicketTool, EscalateTool, UpdateTicketTool
 
-# name -> 工具类（键即类属性 name，全局唯一，与 tools.name / MCP 名共用唯一约束）
-CATALOG: dict[str, type[BaseTool]] = {
-    cls.name: cls
-    for cls in (
-        QueryOrderTool,
-        ListOrdersTool,
-        ModifyOrderTool,
-        QueryLogisticsTool,
-        SubmitRefundTool,
-        QueryRefundTool,
-        CreateTicketTool,
-        UpdateTicketTool,
-        EscalateTool,
-    )
-}
+# 代码托管的全部自定义工具：name 由类属性声明，全局唯一
+_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
+    EchoTool,
+    QueryOrderTool,
+    ListOrdersTool,
+    ModifyOrderTool,
+    QueryLogisticsTool,
+    SubmitRefundTool,
+    QueryRefundTool,
+    CreateTicketTool,
+    UpdateTicketTool,
+    EscalateTool,
+    CreateItTicketTool,
+    UpdateItTicketTool,
+    EscalateItTool,
+    QueryItAssetTool,
+)
+
+_tool_names = [cls.name for cls in _TOOL_CLASSES]
+_duplicates = sorted({n for n in _tool_names if _tool_names.count(n) > 1})
+if _duplicates:
+    raise RuntimeError(f"自定义工具名称重复: {_duplicates}")
+
+# name -> 工具类（与 tools.name / MCP 名共用唯一约束）
+CATALOG: dict[str, type[BaseTool]] = {cls.name: cls for cls in _TOOL_CLASSES}
 
 
 def exists(name: str) -> bool:

@@ -1,28 +1,39 @@
 """仓储层：对 ORM 的异步封装（Repo 模式）"""
+import secrets
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import SessionLocal
+from app.core.security import hash_api_key
 from app.models.entities import (
+    UNASSIGNED_INTEGRATION_ID,
     AgentMeta,
     AuditLog,
     CannedScript,
+    ChatEvent,
+    ChatUsageDaily,
     CustomerUser,
     Document,
+    Integration,
+    IntegrationKey,
+    IntegrationScene,
     KnowledgeBase,
     Memory,
     Message,
     RequestTrace,
+    Scene,
+    SceneAgent,
     Session,
     StaffUser,
     Ticket,
     ToolMeta,
+    Visitor,
 )
 
 
@@ -50,6 +61,40 @@ class StaffRepo:
     async def get_by_id(user_id: uuid.UUID | str) -> StaffUser | None:
         async with SessionLocal() as db:
             return await db.get(StaffUser, uuid.UUID(str(user_id)))
+
+    @staticmethod
+    async def list_all() -> list[StaffUser]:
+        """全部人员（含停用），按创建时间升序：配额页需要看到历史账号。"""
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(select(StaffUser).order_by(StaffUser.created_at))
+            ).scalars().all()
+            return list(rows)
+
+    @staticmethod
+    async def update(user_id: uuid.UUID | str, **fields) -> StaffUser | None:
+        """局部更新；只接受实体上存在的字段（quota / role / is_active / display_name）。"""
+        async with SessionLocal() as db:
+            row = await db.get(StaffUser, uuid.UUID(str(user_id)))
+            if row is None:
+                return None
+            for key, value in fields.items():
+                if value is not None and hasattr(row, key):
+                    setattr(row, key, value)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def set_password(user_id: uuid.UUID | str, password_hash: str) -> bool:
+        """重置密码（不校验旧密码，由后台管理员操作）。"""
+        async with SessionLocal() as db:
+            row = await db.get(StaffUser, uuid.UUID(str(user_id)))
+            if row is None:
+                return False
+            row.password_hash = password_hash
+            await db.commit()
+            return True
 
     @staticmethod
     async def create(username: str, password_hash: str, role: str = "agent", **kw) -> StaffUser:
@@ -86,6 +131,607 @@ class CustomerRepo:
             return user
 
 
+class SceneRepo:
+    """场景仓储：CRUD 与 Agent 绑定。默认场景的只读保护由 API 层执行。"""
+
+    @staticmethod
+    async def get_by_code(code: str) -> Scene | None:
+        async with SessionLocal() as db:
+            return (
+                await db.execute(select(Scene).where(Scene.code == code))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def get(scene_id: uuid.UUID | str) -> Scene | None:
+        async with SessionLocal() as db:
+            return await db.get(Scene, uuid.UUID(str(scene_id)))
+
+    @staticmethod
+    async def get_default() -> Scene | None:
+        async with SessionLocal() as db:
+            return (
+                await db.execute(select(Scene).where(Scene.is_default.is_(True)))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def existing_ids(scene_ids: list[uuid.UUID]) -> set[str]:
+        """批量校验场景 id 是否存在（接入方授权关系保存前用）。"""
+        if not scene_ids:
+            return set()
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(select(Scene.id).where(Scene.id.in_(scene_ids)))
+            ).scalars().all()
+        return {str(x) for x in rows}
+
+    @staticmethod
+    async def list_all() -> list[Scene]:
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(Scene).order_by(Scene.is_default.desc(), Scene.created_at)
+                )
+            ).scalars().all()
+            return list(rows)
+
+    @staticmethod
+    async def list_with_agent_counts() -> list[dict]:
+        """后台列表：带启用中的绑定 Agent 数，避免逐行查询造成 N+1。"""
+        enabled_agents = func.count(SceneAgent.agent_id).filter(SceneAgent.enabled.is_(True))
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(Scene, enabled_agents.label("agent_count"))
+                    .outerjoin(SceneAgent, SceneAgent.scene_id == Scene.id)
+                    .group_by(Scene.id)
+                    .order_by(Scene.is_default.desc(), Scene.created_at)
+                )
+            ).all()
+            return [SceneRepo.to_dict(scene, count) for scene, count in rows]
+
+    @staticmethod
+    async def get_bound_agent_ids(scene_id: uuid.UUID | str) -> list[str]:
+        """后台编辑用：含已停用的绑定，按候选顺序返回。"""
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(SceneAgent.agent_id)
+                    .where(SceneAgent.scene_id == uuid.UUID(str(scene_id)))
+                    .order_by(SceneAgent.sort_order)
+                )
+            ).scalars().all()
+            return [str(x) for x in rows]
+
+    @staticmethod
+    def to_dict(scene: Scene, agent_count: int = 0) -> dict:
+        return {
+            "id": str(scene.id),
+            "code": scene.code,
+            "display_name": scene.display_name,
+            "description": scene.description,
+            "status": scene.status,
+            "is_default": bool(scene.is_default),
+            "router_mode": scene.router_mode,
+            "router_model": scene.router_model,
+            "router_confidence_threshold": scene.router_confidence_threshold,
+            "router_max_intents": scene.router_max_intents,
+            "fallback_agent_id": str(scene.fallback_agent_id) if scene.fallback_agent_id else None,
+            "fallback_text": scene.fallback_text,
+            "extra_router_prompt": scene.extra_router_prompt,
+            "runtime_config": dict(getattr(scene, "runtime_config", None) or {}),
+            "publish_key": scene.publish_key,
+            "allowed_origins": list(scene.allowed_origins or []),
+            "widget_config": dict(getattr(scene, "widget_config", None) or {}),
+            "agent_count": int(agent_count or 0),
+            "created_at": scene.created_at.isoformat() if scene.created_at else None,
+            "updated_at": scene.updated_at.isoformat() if scene.updated_at else None,
+        }
+
+    @staticmethod
+    async def list_bound_agents(scene_id: uuid.UUID | str) -> list[dict]:
+        """本场景启用中的 Agent（含全局代码 Agent），sort_order 小者优先。
+
+        返回字段直接作为路由档案的候选输入：routing_* 决定它在路由提示词里
+        能拿到多少表达机会，后台看到的候选与运行时注入的候选完全同源。
+        """
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(AgentMeta, SceneAgent)
+                    .join(SceneAgent, SceneAgent.agent_id == AgentMeta.id)
+                    .where(
+                        SceneAgent.scene_id == uuid.UUID(str(scene_id)),
+                        SceneAgent.enabled.is_(True),
+                        AgentMeta.enabled.is_(True),
+                    )
+                    .order_by(SceneAgent.sort_order, AgentMeta.created_at)
+                )
+            ).all()
+            return [
+                {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "display_name": agent.display_name or agent.name,
+                    "description": agent.description,
+                    "source": agent.source,
+                    "scene_id": str(agent.scene_id) if agent.scene_id else None,
+                    "routing_keywords": list(agent.routing_keywords or []),
+                    "routing_examples": list(agent.routing_examples or []),
+                    "sort_order": link.sort_order,
+                }
+                for agent, link in rows
+            ]
+
+    @staticmethod
+    async def list_agents_for_admin(scene_id: uuid.UUID | str) -> list[dict]:
+        """后台绑定弹窗用：可绑定 Agent = 全局 Agent + 本场景专属 Agent。
+
+        其它场景专属的 Agent 不展示，避免把 A 场景的 Agent 绑到 B 场景造成跨场景读取。
+        """
+        sid = uuid.UUID(str(scene_id))
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(AgentMeta, SceneAgent)
+                    .outerjoin(
+                        SceneAgent,
+                        (SceneAgent.agent_id == AgentMeta.id) & (SceneAgent.scene_id == sid),
+                    )
+                    .where(
+                        (AgentMeta.scene_id.is_(None)) | (AgentMeta.scene_id == sid)
+                    )
+                    .order_by(AgentMeta.source, AgentMeta.sort_order, AgentMeta.created_at)
+                )
+            ).all()
+            return [
+                {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "display_name": agent.display_name or agent.name,
+                    "source": agent.source,
+                    "enabled": agent.enabled,
+                    "bound": link is not None,
+                    "scene_enabled": bool(link.enabled) if link else False,
+                    "sort_order": link.sort_order if link else 10_000,
+                }
+                for agent, link in rows
+            ]
+
+    @staticmethod
+    async def create(code: str, display_name: str, description: str | None = None, **fields) -> Scene:
+        async with SessionLocal() as db:
+            row = Scene(code=code, display_name=display_name, description=description, **fields)
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def update(scene_id: uuid.UUID | str, **fields) -> Scene | None:
+        async with SessionLocal() as db:
+            row = await db.get(Scene, uuid.UUID(str(scene_id)))
+            if row is None:
+                return None
+            for key, value in fields.items():
+                if hasattr(row, key):
+                    setattr(row, key, value)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def delete(scene_id: uuid.UUID | str) -> bool:
+        async with SessionLocal() as db:
+            row = await db.get(Scene, uuid.UUID(str(scene_id)))
+            if row is None:
+                return False
+            await db.delete(row)
+            await db.commit()
+            return True
+
+    @staticmethod
+    async def set_agents(
+        scene_id: uuid.UUID | str,
+        agent_ids: list[str],
+        db: AsyncSession | None = None,
+    ) -> None:
+        """全量替换绑定：顺序即路由候选顺序；被移除的绑定直接删除。"""
+        sid = uuid.UUID(str(scene_id))
+        # 保序去重，避免同一 Agent 重复插入触发主键冲突
+        wanted = list(dict.fromkeys(agent_ids))
+        own = db is None
+        async with _session(db) as s:
+            existing = {
+                link.agent_id: link
+                for link in (
+                    await s.execute(select(SceneAgent).where(SceneAgent.scene_id == sid))
+                ).scalars()
+            }
+            keep = {uuid.UUID(str(aid)) for aid in wanted}
+            for agent_id, link in existing.items():
+                if agent_id not in keep:
+                    await s.delete(link)
+            for order, raw_id in enumerate(wanted):
+                agent_id = uuid.UUID(str(raw_id))
+                link = existing.get(agent_id)
+                if link is None:
+                    s.add(
+                        SceneAgent(
+                            scene_id=sid, agent_id=agent_id, enabled=True, sort_order=order
+                        )
+                    )
+                else:
+                    link.enabled = True
+                    link.sort_order = order
+            # 外部传 db 时事务由调用方提交；自开 session 必须在这里落盘，
+            # 否则退出上下文直接回滚（绑定看起来保存成功但库里没有）
+            if own:
+                await s.commit()
+
+
+class VisitorRepo:
+    """访客：浏览器匿名按场景复用；服务端接入再按接入方隔离命名空间。"""
+
+    @staticmethod
+    async def get_or_create(
+        scene_id: uuid.UUID | str,
+        external_key: str | None = None,
+        integration_id: uuid.UUID | str | None = None,
+    ) -> Visitor:
+        sid = uuid.UUID(str(scene_id))
+        iid = uuid.UUID(str(integration_id)) if integration_id else None
+        if not external_key:
+            async with SessionLocal() as db:
+                row = Visitor(scene_id=sid, integration_id=iid, last_seen_at=func.now())
+                db.add(row)
+                await db.commit()
+                await db.refresh(row)
+                return row
+        async with SessionLocal() as db:
+            # 匿名与服务端接入走两套部分唯一索引：NULL 参与的唯一约束
+            # 在 PostgreSQL 里默认互不相等，必须按 integration_id 是否为空选索引。
+            if iid is None:
+                stmt = (
+                    pg_insert(Visitor)
+                    .values(scene_id=sid, external_key=external_key, last_seen_at=func.now())
+                    .on_conflict_do_update(
+                        index_elements=["scene_id", "external_key"],
+                        index_where=Visitor.integration_id.is_(None),
+                        set_={"last_seen_at": func.now()},
+                    )
+                    .returning(Visitor)
+                )
+            else:
+                stmt = (
+                    pg_insert(Visitor)
+                    .values(
+                        scene_id=sid,
+                        integration_id=iid,
+                        external_key=external_key,
+                        last_seen_at=func.now(),
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["integration_id", "scene_id", "external_key"],
+                        index_where=Visitor.integration_id.is_not(None),
+                        set_={"last_seen_at": func.now()},
+                    )
+                    .returning(Visitor)
+                )
+            row = (await db.execute(stmt)).scalar_one()
+            await db.commit()
+            return row
+
+
+class IntegrationRepo:
+    """接入方：API Key 归属、场景授权与命名空间查询。"""
+
+    @staticmethod
+    def new_public_code() -> str:
+        """生成可公开的嵌入标识；64 bit 随机数，碰撞可忽略。"""
+        return f"ic_{secrets.token_hex(8)}"
+
+    @staticmethod
+    def to_dict(integration: Integration, key_count: int = 0, scenes: list[dict] | None = None) -> dict:
+        return {
+            "id": str(integration.id),
+            "name": integration.name,
+            "public_code": integration.public_code,
+            "description": integration.description,
+            "status": integration.status,
+            "key_count": int(key_count or 0),
+            "scenes": scenes or [],
+            "created_at": integration.created_at.isoformat() if integration.created_at else None,
+            "updated_at": integration.updated_at.isoformat() if integration.updated_at else None,
+        }
+
+    @staticmethod
+    async def list_all() -> list[dict]:
+        """后台列表：一次查完接入方、Key 数、授权场景，避免逐行 N+1。"""
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(select(Integration).order_by(Integration.created_at))
+            ).scalars().all()
+            key_counts = dict(
+                (
+                    await db.execute(
+                        select(IntegrationKey.integration_id, func.count())
+                        .group_by(IntegrationKey.integration_id)
+                    )
+                ).all()
+            )
+            links = (
+                await db.execute(
+                    select(IntegrationScene, Scene)
+                    .join(Scene, Scene.id == IntegrationScene.scene_id)
+                    .order_by(Scene.is_default.desc(), Scene.created_at)
+                )
+            ).all()
+        scenes: dict[uuid.UUID, list[dict]] = {}
+        for link, scene in links:
+            scenes.setdefault(link.integration_id, []).append(
+                {"id": str(scene.id), "code": scene.code, "display_name": scene.display_name}
+            )
+        return [
+            IntegrationRepo.to_dict(row, key_counts.get(row.id, 0), scenes.get(row.id, []))
+            for row in rows
+        ]
+
+    @staticmethod
+    async def get(integration_id: uuid.UUID | str) -> Integration | None:
+        async with SessionLocal() as db:
+            return await db.get(Integration, uuid.UUID(str(integration_id)))
+
+    @staticmethod
+    async def detail(integration_id: uuid.UUID | str) -> dict | None:
+        iid = uuid.UUID(str(integration_id))
+        async with SessionLocal() as db:
+            row = await db.get(Integration, iid)
+            if row is None:
+                return None
+            keys = (
+                await db.execute(
+                    select(IntegrationKey)
+                    .where(IntegrationKey.integration_id == iid)
+                    .order_by(IntegrationKey.created_at)
+                )
+            ).scalars().all()
+            scenes = (
+                await db.execute(
+                    select(Scene)
+                    .join(IntegrationScene, IntegrationScene.scene_id == Scene.id)
+                    .where(IntegrationScene.integration_id == iid)
+                    .order_by(Scene.is_default.desc(), Scene.created_at)
+                )
+            ).scalars().all()
+        data = IntegrationRepo.to_dict(
+            row,
+            len(keys),
+            [
+                {"id": str(s.id), "code": s.code, "display_name": s.display_name}
+                for s in scenes
+            ],
+        )
+        data["keys"] = [
+            {
+                "id": str(k.id),
+                "hint": k.hint,
+                "created_at": k.created_at.isoformat() if k.created_at else None,
+            }
+            for k in keys
+        ]
+        return data
+
+    @staticmethod
+    async def create(
+        name: str,
+        description: str | None = None,
+        scene_ids: list[str] | None = None,
+    ) -> Integration:
+        async with SessionLocal() as db:
+            row = Integration(
+                name=name,
+                description=description,
+                public_code=IntegrationRepo.new_public_code(),
+            )
+            db.add(row)
+            await db.flush()
+            for raw_id in scene_ids or []:
+                db.add(
+                    IntegrationScene(
+                        integration_id=row.id, scene_id=uuid.UUID(str(raw_id))
+                    )
+                )
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def grant_scene_to_all(scene_id: uuid.UUID | str) -> int:
+        """单租户降级：把新场景授权给所有启用中的接入方。
+
+        平台内部所有调用方都应能访问新场景；不自动授权会导致已有 Key
+        调用新场景直接 403。返回新增授权条数。
+        """
+        sid = uuid.UUID(str(scene_id))
+        async with SessionLocal() as db:
+            integration_ids = (
+                await db.execute(select(Integration.id).where(Integration.status == "active"))
+            ).scalars().all()
+            added = 0
+            for iid in integration_ids:
+                if await db.get(IntegrationScene, (iid, sid)) is None:
+                    db.add(IntegrationScene(integration_id=iid, scene_id=sid))
+                    added += 1
+            await db.commit()
+            return added
+
+    @staticmethod
+    async def update(
+        integration_id: uuid.UUID | str,
+        scene_ids: list[str] | None = None,
+        **fields,
+    ) -> Integration | None:
+        iid = uuid.UUID(str(integration_id))
+        async with SessionLocal() as db:
+            row = await db.get(Integration, iid)
+            if row is None:
+                return None
+            for key, value in fields.items():
+                if hasattr(row, key):
+                    setattr(row, key, value)
+            if scene_ids is not None:
+                wanted = {uuid.UUID(str(x)) for x in scene_ids}
+                existing = {
+                    link.scene_id: link
+                    for link in (
+                        await db.execute(
+                            select(IntegrationScene).where(IntegrationScene.integration_id == iid)
+                        )
+                    ).scalars()
+                }
+                for scene_id, link in existing.items():
+                    if scene_id not in wanted:
+                        await db.delete(link)
+                for scene_id in wanted - set(existing):
+                    db.add(IntegrationScene(integration_id=iid, scene_id=scene_id))
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def delete(integration_id: uuid.UUID | str) -> bool:
+        async with SessionLocal() as db:
+            row = await db.get(Integration, uuid.UUID(str(integration_id)))
+            if row is None:
+                return False
+            await db.delete(row)
+            await db.commit()
+            return True
+
+    @staticmethod
+    async def has_visitors(integration_id: uuid.UUID | str) -> bool:
+        iid = uuid.UUID(str(integration_id))
+        async with SessionLocal() as db:
+            row = await db.execute(
+                select(Visitor.id).where(Visitor.integration_id == iid).limit(1)
+            )
+            return row.first() is not None
+
+    @staticmethod
+    async def list_keys(integration_id: uuid.UUID | str) -> list[dict]:
+        iid = uuid.UUID(str(integration_id))
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(IntegrationKey)
+                    .where(IntegrationKey.integration_id == iid)
+                    .order_by(IntegrationKey.created_at)
+                )
+            ).scalars().all()
+        return [
+            {
+                "id": str(row.id),
+                "hint": row.hint,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    async def create_key(integration_id: uuid.UUID | str, raw: str, hint: str) -> IntegrationKey:
+        async with SessionLocal() as db:
+            row = IntegrationKey(
+                integration_id=uuid.UUID(str(integration_id)),
+                key_hash=hash_api_key(raw),
+                hint=hint,
+            )
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            return row
+
+    @staticmethod
+    async def revoke_key(integration_id: uuid.UUID | str, key_id: uuid.UUID | str) -> bool:
+        iid = uuid.UUID(str(integration_id))
+        kid = uuid.UUID(str(key_id))
+        async with SessionLocal() as db:
+            row = await db.get(IntegrationKey, kid)
+            if row is None or row.integration_id != iid:
+                return False
+            await db.delete(row)
+            await db.commit()
+            return True
+
+    @staticmethod
+    async def resolve_key(raw: str) -> dict | None:
+        """按明文 Key 反查启用中的接入方及其已授权场景。
+
+        返回 None 表示 Key 不存在或接入方已停用；命中只代表 Key 有效，
+        是否允许访问某个场景由 authorize_scene_access 再校验。
+        """
+        digest = hash_api_key(raw)
+        async with SessionLocal() as db:
+            row = (
+                await db.execute(
+                    select(Integration)
+                    .join(IntegrationKey, IntegrationKey.integration_id == Integration.id)
+                    .where(
+                        IntegrationKey.key_hash == digest,
+                        Integration.status == "active",
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            scene_ids = (
+                await db.execute(
+                    select(IntegrationScene.scene_id).where(
+                        IntegrationScene.integration_id == row.id
+                    )
+                )
+            ).scalars().all()
+        return {
+            "id": str(row.id),
+            "name": row.name,
+            "public_code": row.public_code,
+            "via": "api_key",
+            "scene_ids": {str(x) for x in scene_ids},
+        }
+
+    @staticmethod
+    async def resolve_public_code(raw: str) -> dict | None:
+        """按公开标识反查启用中的接入方及其已授权场景。
+
+        匿名嵌入没有 API Key，只能用公开标识确定归属；它不承担鉴权强度，
+        只用于把访客落进正确的接入方命名空间，场景授权仍在这里校验。
+        """
+        async with SessionLocal() as db:
+            row = (
+                await db.execute(
+                    select(Integration).where(
+                        Integration.public_code == raw,
+                        Integration.status == "active",
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            scene_ids = (
+                await db.execute(
+                    select(IntegrationScene.scene_id).where(
+                        IntegrationScene.integration_id == row.id
+                    )
+                )
+            ).scalars().all()
+        return {
+            "id": str(row.id),
+            "name": row.name,
+            "public_code": row.public_code,
+            "via": "public_code",
+            "scene_ids": {str(x) for x in scene_ids},
+        }
+
+
 class SessionRepo:
     @staticmethod
     async def get_or_create(
@@ -108,9 +754,53 @@ class SessionRepo:
             return sess
 
     @staticmethod
-    async def create(user_id: uuid.UUID | str, title: str = "新对话") -> Session:
+    async def get_or_create_for_actor(
+        actor,
+        scene_id: uuid.UUID | str,
+        session_id: uuid.UUID | str | None,
+        db: AsyncSession | None = None,
+    ) -> Session:
+        """按 actor + 场景取会话；归属不匹配时视为无效 session_id，另起新会话。
+
+        不匹配不报错是有意为之：既不泄露“该 session 存在但不属于你”，
+        也与原实现「session 不属于当前用户就新建」保持一致。
+        """
+        own = db is None
+        async with _session(db) as s:
+            if session_id:
+                sess = await s.get(Session, uuid.UUID(str(session_id)))
+                if sess is not None and SessionRepo._belongs(sess, actor, scene_id):
+                    return sess
+            values: dict = {"scene_id": uuid.UUID(str(scene_id))}
+            if actor.is_visitor:
+                values["visitor_id"] = uuid.UUID(str(actor.id))
+            else:
+                values["user_id"] = uuid.UUID(str(actor.id))
+            sess = Session(**values)
+            s.add(sess)
+            await s.flush()
+            if own:
+                await s.commit()
+                await s.refresh(sess)
+            return sess
+
+    @staticmethod
+    def _belongs(sess: Session, actor, scene_id: uuid.UUID | str) -> bool:
+        if str(sess.scene_id) != str(scene_id):
+            return False
+        if actor.is_visitor:
+            return sess.visitor_id is not None and str(sess.visitor_id) == str(actor.id)
+        return sess.user_id is not None and str(sess.user_id) == str(actor.id)
+
+    @staticmethod
+    async def create(
+        user_id: uuid.UUID | str, title: str = "新对话", scene_id: uuid.UUID | str | None = None
+    ) -> Session:
         async with SessionLocal() as db:
-            sess = Session(user_id=uuid.UUID(str(user_id)), title=title)
+            values: dict = {"user_id": uuid.UUID(str(user_id)), "title": title}
+            if scene_id:
+                values["scene_id"] = uuid.UUID(str(scene_id))
+            sess = Session(**values)
             db.add(sess)
             await db.commit()
             await db.refresh(sess)
@@ -122,17 +812,24 @@ class SessionRepo:
             return await s.get(Session, uuid.UUID(str(session_id)))
 
     @staticmethod
-    async def list_by_user(user_id: uuid.UUID | str, page: int = 1, page_size: int = 20) -> tuple[list[Session], int]:
+    async def list_by_user(
+        user_id: uuid.UUID | str,
+        page: int = 1,
+        page_size: int = 20,
+        scene_id: uuid.UUID | str | None = None,
+    ) -> tuple[list[Session], int]:
+        """客户的会话列表；给定 scene_id 时只返回该场景下的会话（场景隔离）。"""
         async with SessionLocal() as db:
+            cond = [Session.user_id == uuid.UUID(str(user_id))]
+            if scene_id:
+                cond.append(Session.scene_id == uuid.UUID(str(scene_id)))
             total = (
-                await db.execute(
-                    select(func.count()).select_from(Session).where(Session.user_id == uuid.UUID(str(user_id)))
-                )
+                await db.execute(select(func.count()).select_from(Session).where(*cond))
             ).scalar_one()
             rows = (
                 await db.execute(
                     select(Session)
-                    .where(Session.user_id == uuid.UUID(str(user_id)))
+                    .where(*cond)
                     .order_by(Session.created_at.desc())
                     .offset((page - 1) * page_size)
                     .limit(page_size)
@@ -141,13 +838,15 @@ class SessionRepo:
             return list(rows), total
 
     @staticmethod
-    def _apply_filters(stmt, user_id, status, last_route_to, date_from, date_to):
+    def _apply_filters(stmt, user_id, status, last_route_to, date_from, date_to, scene_id=None):
         if user_id:
             stmt = stmt.where(Session.user_id == uuid.UUID(str(user_id)))
         if status:
             stmt = stmt.where(Session.status == status)
         if last_route_to:
             stmt = stmt.where(Session.last_route_to == last_route_to)
+        if scene_id:
+            stmt = stmt.where(Session.scene_id == uuid.UUID(str(scene_id)))
         if date_from:
             stmt = stmt.where(Session.created_at >= date_from)
         if date_to:
@@ -161,10 +860,15 @@ class SessionRepo:
         last_route_to: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        scene_id: uuid.UUID | str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
-        """跨客户会话查询（管理后台）：JOIN 用户带出客户名 + 消息数。"""
+        """跨客户会话查询（管理后台）：JOIN 用户带出客户名 + 消息数。
+
+        必须用外连接：嵌入场景的匿名访客会话 user_id 为 NULL，
+        内连接会把它们整批丢掉（咨询列表只剩登录客户的会话）。
+        """
         msg_count = (
             select(func.count())
             .select_from(Message)
@@ -174,15 +878,15 @@ class SessionRepo:
             .label("message_count")
         )
         async with SessionLocal() as db:
-            base = select(Session, CustomerUser.username, CustomerUser.display_name).join(
+            base = select(Session, CustomerUser.username, CustomerUser.display_name).outerjoin(
                 CustomerUser, CustomerUser.id == Session.user_id
             )
             count_base = select(func.count()).select_from(Session)
             base = SessionRepo._apply_filters(
-                base, user_id, status, last_route_to, date_from, date_to
+                base, user_id, status, last_route_to, date_from, date_to, scene_id
             )
             count_base = SessionRepo._apply_filters(
-                count_base, user_id, status, last_route_to, date_from, date_to
+                count_base, user_id, status, last_route_to, date_from, date_to, scene_id
             )
             total = (await db.execute(count_base)).scalar_one()
             rows = (
@@ -199,7 +903,9 @@ class SessionRepo:
                     "title": s.title,
                     "status": s.status,
                     "last_route_to": s.last_route_to,
-                    "user_id": str(s.user_id),
+                    "scene_id": str(s.scene_id),
+                    "user_id": str(s.user_id) if s.user_id else None,
+                    "visitor_id": str(s.visitor_id) if s.visitor_id else None,
                     "username": username,
                     "display_name": display_name,
                     "message_count": message_count,
@@ -217,15 +923,16 @@ class SessionRepo:
         last_route_to: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        scene_id: uuid.UUID | str | None = None,
         max_rows: int = 10000,
     ) -> list[dict]:
-        """导出用：返回满足过滤条件的会话（含首条客户问句摘要）。"""
+        """导出用：返回满足过滤条件的会话（含首条客户问句摘要）；同样外连接保留匿名访客会话。"""
         async with SessionLocal() as db:
             stmt = select(
                 Session, CustomerUser.username, CustomerUser.display_name
-            ).join(CustomerUser, CustomerUser.id == Session.user_id)
+            ).outerjoin(CustomerUser, CustomerUser.id == Session.user_id)
             stmt = SessionRepo._apply_filters(
-                stmt, user_id, status, last_route_to, date_from, date_to
+                stmt, user_id, status, last_route_to, date_from, date_to, scene_id
             )
             stmt = stmt.order_by(Session.created_at.desc()).limit(max_rows)
             rows = (await db.execute(stmt)).all()
@@ -243,8 +950,9 @@ class SessionRepo:
                 result.append(
                     {
                         "session_id": str(s.id),
-                        "customer": display_name or username,
-                        "username": username,
+                        "customer": display_name or username or ("匿名访客" if s.visitor_id else ""),
+                        "username": username or "",
+                        "scene_id": str(s.scene_id),
                         "title": s.title,
                         "status": s.status,
                         "last_route_to": s.last_route_to or "",
@@ -351,25 +1059,42 @@ class MessageRepo:
 
 class MemoryRepo:
     @staticmethod
+    def _actor_cond(subject: uuid.UUID | str) -> list:
+        """把隔离主体转成过滤条件：``visitor:<uuid>`` 走 visitor_id，其余走 user_id。"""
+        text = str(subject)
+        if text.startswith("visitor:"):
+            return [Memory.visitor_id == uuid.UUID(text[8:])]
+        return [Memory.user_id == uuid.UUID(text)]
+
+    @staticmethod
     async def upsert_mirror(
-        user_id: uuid.UUID | str,
-        memory_uid: str,
-        type_: str,
-        content: str,
+        user_id: uuid.UUID | str | None = None,
+        memory_uid: str = "",
+        type_: str = "working",
+        content: str = "",
         importance: float = 0.5,
         session_id: uuid.UUID | str | None = None,
         source_message_id: uuid.UUID | str | None = None,
         metadata: dict | None = None,
         db: AsyncSession | None = None,
+        visitor_id: uuid.UUID | str | None = None,
     ) -> Memory:
-        """原子 upsert：依赖 (user_id, memory_uid) 唯一约束，避免先查后插的并发重复。"""
+        """原子 upsert：依赖 (user_id, visitor_id, memory_uid) 唯一约束，避免先查后插的并发重复。
+
+        user_id 与 visitor_id 二选一（DB 侧 CHECK 约束）；直接传字符串 ``visitor:<uuid>``
+        到 user_id 也会被自动拆解，兼容记忆层沿用的 actor 主体格式。
+        """
         own = db is None
+        if visitor_id is None and user_id is not None and str(user_id).startswith("visitor:"):
+            visitor_id, user_id = str(user_id)[8:], None
         async with _session(db) as s:
-            uid = uuid.UUID(str(user_id))
+            uid = uuid.UUID(str(user_id)) if user_id else None
+            vid = uuid.UUID(str(visitor_id)) if visitor_id else None
             src_mid = uuid.UUID(str(source_message_id)) if source_message_id else None
             insert_values = {
                 Memory.__table__.c.id: uuid.uuid4(),
                 Memory.__table__.c.user_id: uid,
+                Memory.__table__.c.visitor_id: vid,
                 Memory.__table__.c.memory_uid: memory_uid,
                 Memory.__table__.c.type: type_,
                 Memory.__table__.c.content: content,
@@ -398,7 +1123,7 @@ class MemoryRepo:
                 pg_insert(Memory)
                 .values(insert_values)
                 .on_conflict_do_update(
-                    index_elements=["user_id", "memory_uid"],
+                    index_elements=["user_id", "visitor_id", "memory_uid"],
                     set_=conflict_set,
                 )
                 .returning(Memory)
@@ -412,13 +1137,14 @@ class MemoryRepo:
     async def touch_access(user_id: uuid.UUID | str, prefixes: list[str]) -> list[Memory]:
         """按内容前缀命中镜像记忆行，递增 access_count / 刷新 last_accessed_at。
 
+        user_id 接受 ``user:<uuid>`` / ``visitor:<uuid>`` 两种隔离主体，
         召回结果是截断后的内容前缀，故用等值 OR 前缀匹配；同前缀多行会被连带计数（概率极低）。
         返回本次被更新的行，晋升判定（type/access_count）由调用方完成。
         """
         touched: list[Memory] = []
         seen: set[str] = set()
+        actor_cond = MemoryRepo._actor_cond(user_id)
         async with SessionLocal() as db:
-            uid = uuid.UUID(str(user_id))
             for prefix in prefixes:
                 if not prefix or prefix in seen:
                     continue
@@ -430,7 +1156,7 @@ class MemoryRepo:
                     await db.execute(
                         update(Memory)
                         .where(
-                            Memory.user_id == uid,
+                            *actor_cond,
                             or_(Memory.content == prefix, Memory.content.like(escaped + "%")),
                         )
                         .values(
@@ -450,14 +1176,16 @@ class MemoryRepo:
     ) -> list[Memory]:
         """会话结束时把该会话未晋升的 working 行全量晋升为 episodic（spec 8.6）。
 
+        user_id 接受 ``user:<uuid>`` / ``visitor:<uuid>`` 两种隔离主体。
         返回被晋升的行，供调用方补写 hello_agents 长期层。
         """
+        actor_cond = MemoryRepo._actor_cond(user_id)
         async with SessionLocal() as db:
             rows = (
                 await db.execute(
                     update(Memory)
                     .where(
-                        Memory.user_id == uuid.UUID(str(user_id)),
+                        *actor_cond,
                         Memory.session_id == uuid.UUID(str(session_id)),
                         Memory.type == "working",
                     )
@@ -474,7 +1202,7 @@ class MemoryRepo:
 
         已晋升行 type 已翻转为 episodic/semantic，不在删除条件内。
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)
+        cutoff = datetime.now(UTC) - timedelta(seconds=ttl_seconds)
         async with SessionLocal() as db:
             result = await db.execute(
                 delete(Memory).where(Memory.type == "working", Memory.created_at < cutoff)
@@ -557,7 +1285,11 @@ class DocumentRepo:
                 count_stmt = count_stmt.where(Document.kind == kind)
             total = (await db.execute(count_stmt)).scalar_one()
             rows = (
-                await db.execute(stmt.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+                await db.execute(
+                    stmt.order_by(Document.created_at.desc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                )
             ).scalars().all()
             return list(rows), total
 
@@ -594,10 +1326,22 @@ class KnowledgeBaseRepo:
             return await db.get(KnowledgeBase, namespace)
 
     @staticmethod
-    async def create(namespace: str, display_name: str, description: str | None = None) -> KnowledgeBase:
+    async def create(
+        namespace: str,
+        display_name: str,
+        description: str | None = None,
+        created_by: uuid.UUID | str | None = None,
+    ) -> KnowledgeBase:
+        """知识库是全局资源：不记场景归属，检索范围由 Agent 的 rag_namespace(s) 决定。
+
+        created_by 只用于登录人配额计数，不参与检索与授权。
+        """
         async with SessionLocal() as db:
             row = KnowledgeBase(
-                namespace=namespace, display_name=display_name, description=description
+                namespace=namespace,
+                display_name=display_name,
+                description=description,
+                created_by=uuid.UUID(str(created_by)) if created_by else None,
             )
             db.add(row)
             await db.commit()
@@ -628,34 +1372,64 @@ class KnowledgeBaseRepo:
 
 
 class CannedScriptRepo:
-    """高频固定话术仓储（热路径每轮读一次，只走 enabled+priority 的窄查询）。"""
+    """高频固定话术仓储（热路径每轮读一次，只走 enabled+priority 的窄查询）。
+
+    场景化：``scene_id`` 为空表示全局话术（如 probing 探听拒答），非空表示场景覆盖。
+    运行时同一 key 场景行覆盖全局行；后台管理始终能分别看到两行。
+    """
 
     @staticmethod
-    async def list_enabled() -> list[CannedScript]:
+    def _merge_scene_overrides(rows: list[CannedScript]) -> list[CannedScript]:
+        """同 key 场景行覆盖全局行，再按优先级排序（与运行时判定顺序一致）。"""
+        by_key: dict[str, CannedScript] = {}
+        for row in rows:
+            prev = by_key.get(row.key)
+            if prev is None or (prev.scene_id is None and row.scene_id is not None):
+                by_key[row.key] = row
+        return sorted(by_key.values(), key=lambda r: (r.priority, r.key))
+
+    @staticmethod
+    async def list_enabled(scene_id: uuid.UUID | str | None = None) -> list[CannedScript]:
+        """本场景生效的话术：全局 + 本场景（同 key 场景行覆盖全局，含停用态）。
+
+        先合并再过滤 enabled：场景行被停用时，不会静默回落到同 key 全局行——
+        否则运营在场景里关掉一条话术，实际行为却是变成了全局文案。
+        """
+        async with SessionLocal() as db:
+            if scene_id:
+                cond = or_(
+                    CannedScript.scene_id.is_(None),
+                    CannedScript.scene_id == uuid.UUID(str(scene_id)),
+                )
+            else:
+                cond = CannedScript.scene_id.is_(None)
+            rows = (
+                (await db.execute(select(CannedScript).where(cond))).scalars().all()
+            )
+            merged = CannedScriptRepo._merge_scene_overrides(list(rows))
+            return [r for r in merged if r.enabled]
+
+    @staticmethod
+    async def list_all() -> list[CannedScript]:
+        """后台全量（全局 + 全部场景），不做覆盖合并：运营需要能看到每个场景的覆盖行。"""
         async with SessionLocal() as db:
             rows = (
                 await db.execute(
-                    select(CannedScript)
-                    .where(CannedScript.enabled == True)  # noqa: E712
-                    .order_by(CannedScript.priority, CannedScript.created_at)
+                    select(CannedScript).order_by(CannedScript.priority, CannedScript.created_at)
                 )
             ).scalars().all()
             return list(rows)
 
     @staticmethod
-    async def list_all() -> list[CannedScript]:
+    async def get_by_key(key: str, scene_id: uuid.UUID | str | None = None) -> CannedScript | None:
+        """按 (场景, key) 精确取行：scene_id 为空表示全局行，不回落场景覆盖。"""
         async with SessionLocal() as db:
-            rows = (
-                await db.execute(select(CannedScript).order_by(CannedScript.priority, CannedScript.created_at))
-            ).scalars().all()
-            return list(rows)
-
-    @staticmethod
-    async def get_by_key(key: str) -> CannedScript | None:
-        async with SessionLocal() as db:
-            return (
-                await db.execute(select(CannedScript).where(CannedScript.key == key))
-            ).scalar_one_or_none()
+            stmt = select(CannedScript).where(CannedScript.key == key)
+            if scene_id:
+                stmt = stmt.where(CannedScript.scene_id == uuid.UUID(str(scene_id)))
+            else:
+                stmt = stmt.where(CannedScript.scene_id.is_(None))
+            return (await db.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
     async def create(**fields) -> CannedScript:
@@ -667,11 +1441,14 @@ class CannedScriptRepo:
             return row
 
     @staticmethod
-    async def update(key: str, **fields) -> CannedScript | None:
+    async def update(key: str, scene_id: uuid.UUID | str | None = None, **fields) -> CannedScript | None:
         async with SessionLocal() as db:
-            row = (
-                await db.execute(select(CannedScript).where(CannedScript.key == key))
-            ).scalar_one_or_none()
+            stmt = select(CannedScript).where(CannedScript.key == key)
+            if scene_id:
+                stmt = stmt.where(CannedScript.scene_id == uuid.UUID(str(scene_id)))
+            else:
+                stmt = stmt.where(CannedScript.scene_id.is_(None))
+            row = (await db.execute(stmt)).scalar_one_or_none()
             if not row:
                 return None
             for k, v in fields.items():
@@ -683,26 +1460,21 @@ class CannedScriptRepo:
             return row
 
     @staticmethod
-    async def set_enabled(key: str, enabled: bool) -> CannedScript | None:
-        async with SessionLocal() as db:
-            row = (
-                await db.execute(select(CannedScript).where(CannedScript.key == key))
-            ).scalar_one_or_none()
-            if not row:
-                return None
-            row.enabled = enabled
-            row.updated_at = datetime.now()
-            await db.commit()
-            await db.refresh(row)
-            return row
+    async def set_enabled(
+        key: str, enabled: bool, scene_id: uuid.UUID | str | None = None
+    ) -> CannedScript | None:
+        return await CannedScriptRepo.update(key, scene_id, enabled=enabled)
 
     @staticmethod
-    async def delete(key: str) -> bool:
+    async def delete(key: str, scene_id: uuid.UUID | str | None = None) -> bool:
         """物理删除（调用方需先挡住 is_builtin，种子话术只允许停用不允许删）。"""
         async with SessionLocal() as db:
-            row = (
-                await db.execute(select(CannedScript).where(CannedScript.key == key))
-            ).scalar_one_or_none()
+            stmt = select(CannedScript).where(CannedScript.key == key)
+            if scene_id:
+                stmt = stmt.where(CannedScript.scene_id == uuid.UUID(str(scene_id)))
+            else:
+                stmt = stmt.where(CannedScript.scene_id.is_(None))
+            row = (await db.execute(stmt)).scalar_one_or_none()
             if not row:
                 return False
             await db.delete(row)
@@ -713,12 +1485,16 @@ class CannedScriptRepo:
     def to_dict(row: CannedScript) -> dict:
         return {
             "id": str(row.id),
+            "scene_id": str(row.scene_id) if row.scene_id else None,
             "key": row.key,
             "title": row.title,
             "category": row.category,
             "patterns": list(row.patterns or []),
             "keywords": list(row.keywords or []),
             "reply_text": row.reply_text or "",
+            # 测试替身/历史对象可能没有这两个字段，按默认值兜底
+            "answer_source": getattr(row, "answer_source", None) or "text",
+            "kb_namespaces": list(getattr(row, "kb_namespaces", None) or []),
             "priority": row.priority,
             "enabled": row.enabled,
             "is_builtin": row.is_builtin,
@@ -760,13 +1536,28 @@ class AgentRepo:
 
     @staticmethod
     async def get_by_name(name: str) -> AgentMeta | None:
+        """按名取一条 Agent 元信息；重名时全局 Agent 优先（场景内同名由 M3 路由档案区分）。"""
         async with SessionLocal() as db:
-            return (await db.execute(select(AgentMeta).where(AgentMeta.name == name))).scalar_one_or_none()
+            stmt = (
+                select(AgentMeta)
+                .where(AgentMeta.name == name)
+                .order_by(AgentMeta.scene_id.is_(None).desc(), AgentMeta.created_at)
+                .limit(1)
+            )
+            return (await db.execute(stmt)).scalar_one_or_none()
 
     @staticmethod
     async def set_enabled(name: str, enabled: bool) -> None:
         async with SessionLocal() as db:
-            row = (await db.execute(select(AgentMeta).where(AgentMeta.name == name))).scalar_one_or_none()
+            # 同名 Agent 可能分属不同场景：后台按 name 操作时命中的是全局那条
+            row = (
+                await db.execute(
+                    select(AgentMeta)
+                    .where(AgentMeta.name == name)
+                    .order_by(AgentMeta.scene_id.is_(None).desc(), AgentMeta.created_at)
+                    .limit(1)
+                )
+            ).scalars().first()
             if row:
                 row.enabled = enabled
                 await db.commit()
@@ -946,7 +1737,7 @@ def _ticket_uuid(value) -> uuid.UUID | None:
 
 
 def _ticket_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class TicketRepo:
@@ -970,6 +1761,7 @@ class TicketRepo:
             "status": t.status,
             "title": t.title,
             "content": t.content,
+            "metadata": dict(t.metadata_ or {}),
             "update_count": len(t.updates or []),
             "created_at": t.created_at.isoformat() if t.created_at else None,
             "updated_at": t.updated_at.isoformat() if t.updated_at else None,
@@ -988,6 +1780,7 @@ class TicketRepo:
         category: str = "general",
         urgency: str = "medium",
         title: str | None = None,
+        metadata_: dict | None = None,
     ) -> Ticket:
         async with SessionLocal() as db:
             row = Ticket(
@@ -1000,6 +1793,7 @@ class TicketRepo:
                 title=(title or content)[:256],
                 content=content[:4000],
                 updates=[],
+                metadata_=metadata_ or {},
             )
             db.add(row)
             await db.commit()
@@ -1031,7 +1825,7 @@ class TicketRepo:
             row.content = content[:4000]
             if row.status == "open":
                 row.status = "in_progress"
-            row.updated_at = datetime.now(timezone.utc)
+            row.updated_at = datetime.now(UTC)
             await db.commit()
             await db.refresh(row)
             return row
@@ -1051,7 +1845,7 @@ class TicketRepo:
                 row.updates = list(row.updates or []) + [
                     {"content": note[:2000], "at": _ticket_now(), "action": f"status->{status}"}
                 ]
-            row.updated_at = datetime.now(timezone.utc)
+            row.updated_at = datetime.now(UTC)
             await db.commit()
             await db.refresh(row)
             return row
@@ -1152,9 +1946,15 @@ class TraceRepo:
                     trace_id=str(row.get("trace_id") or "")[:64],
                     session_id=_trace_uuid(row.get("session_id")),
                     user_id=_trace_uuid(row.get("user_id")),
+                    scene_code=str(row.get("scene_code") or "default")[:32],
+                    visitor_id=_trace_uuid(row.get("visitor_id")),
                     user_message_id=_trace_uuid(row.get("user_message_id")),
                     assistant_message_id=_trace_uuid(row.get("assistant_message_id")),
                     intent_count=row.get("intent_count") or 0,
+                    router_skipped=bool(row.get("router_skipped")),
+                    router_fallback=bool(row.get("router_fallback")),
+                    router_ms=row.get("router_ms"),
+                    prompt_hash=(str(row["prompt_hash"])[:64] if row.get("prompt_hash") else None),
                     agent_names=row.get("agent_names") or [],
                     agent_sources=row.get("agent_sources") or [],
                     llm_models=row.get("llm_models") or [],
@@ -1186,6 +1986,11 @@ class TraceRepo:
             "trace_id": t.trace_id,
             "session_id": str(t.session_id) if t.session_id else None,
             "user_id": str(t.user_id) if t.user_id else None,
+            "scene_code": t.scene_code,
+            "router_skipped": t.router_skipped,
+            "router_fallback": t.router_fallback,
+            "router_ms": t.router_ms,
+            "prompt_hash": t.prompt_hash,
             "user_message_id": str(t.user_message_id) if t.user_message_id else None,
             "assistant_message_id": str(t.assistant_message_id) if t.assistant_message_id else None,
             "intent_count": t.intent_count,
@@ -1217,6 +2022,7 @@ class TraceRepo:
         *,
         session_id,
         user_id,
+        scene_code,
         agent_name,
         tool_name,
         mcp_server,
@@ -1225,11 +2031,16 @@ class TraceRepo:
         min_latency_ms,
         date_from,
         date_to,
+        trace_id=None,
     ):
+        if trace_id:
+            stmt = stmt.where(RequestTrace.trace_id == str(trace_id))
         if session_id:
             stmt = stmt.where(RequestTrace.session_id == uuid.UUID(str(session_id)))
         if user_id:
             stmt = stmt.where(RequestTrace.user_id == uuid.UUID(str(user_id)))
+        if scene_code:
+            stmt = stmt.where(RequestTrace.scene_code == str(scene_code))
         # 数组列用 @> 包含判定（GIN 索引可命中）
         if agent_name:
             stmt = stmt.where(RequestTrace.agent_names.contains([agent_name]))
@@ -1255,7 +2066,9 @@ class TraceRepo:
     async def list_filtered(
         *,
         session_id=None,
+        trace_id=None,
         user_id=None,
+        scene_code=None,
         agent_name=None,
         tool_name=None,
         mcp_server=None,
@@ -1269,7 +2082,9 @@ class TraceRepo:
     ) -> tuple[list[dict], int]:
         kw = {
             "session_id": session_id,
+            "trace_id": trace_id,
             "user_id": user_id,
+            "scene_code": scene_code,
             "agent_name": agent_name,
             "tool_name": tool_name,
             "mcp_server": mcp_server,
@@ -1361,7 +2176,7 @@ class TraceRepo:
         column = getattr(RequestTrace, field, None)
         if column is None:
             return []
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
         async with SessionLocal() as db:
             values = (
                 (
@@ -1379,12 +2194,331 @@ class TraceRepo:
         return [{"name": k, "count": c} for k, c in sorted(counter.items(), key=lambda x: -x[1])]
 
     @staticmethod
+    async def router_stats(scene_code: str | None = None, hours: int = 24) -> dict:
+        """近 N 小时的路由质量聚合（可按场景过滤）。
+
+        只统计已完成并且写入了链路的请求：客户端中途断连的轮次不写入，
+        因此分母是“真正走完的请求”，比率不会被半截请求拉低。
+        """
+        window = max(1, int(hours))
+        since = datetime.now(UTC) - timedelta(hours=window)
+        stmt = select(
+            func.count().label("requests"),
+            func.count().filter(RequestTrace.router_skipped.is_(True)).label("router_skipped"),
+            func.count().filter(RequestTrace.router_fallback.is_(True)).label("router_fallback"),
+            func.count().filter(RequestTrace.outcome == "handover").label("handover"),
+            func.avg(RequestTrace.router_ms).label("avg_router_ms"),
+            func.avg(RequestTrace.total_latency_ms).label("avg_total_ms"),
+        ).where(RequestTrace.created_at >= since)
+        if scene_code:
+            stmt = stmt.where(RequestTrace.scene_code == scene_code)
+        async with SessionLocal() as db:
+            row = (await db.execute(stmt)).one()
+
+        total = int(row.requests or 0)
+
+        def _rate(count) -> float:
+            return round(int(count or 0) / total, 4) if total else 0.0
+
+        return {
+            "scene_code": scene_code,
+            "hours": window,
+            "requests": total,
+            "router_skipped": int(row.router_skipped or 0),
+            "router_fallback": int(row.router_fallback or 0),
+            "handover": int(row.handover or 0),
+            "skip_rate": _rate(row.router_skipped),
+            "fallback_rate": _rate(row.router_fallback),
+            "handover_rate": _rate(row.handover),
+            "avg_router_ms": (
+                round(float(row.avg_router_ms), 1) if row.avg_router_ms is not None else None
+            ),
+            "avg_total_latency_ms": (
+                round(float(row.avg_total_ms), 1) if row.avg_total_ms is not None else None
+            ),
+        }
+
+    @staticmethod
     async def delete_older_than(days: int) -> int:
         """保留期清理（由 scripts/ 定期调用）。"""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
         async with SessionLocal() as db:
             result = await db.execute(
                 RequestTrace.__table__.delete().where(RequestTrace.created_at < cutoff)
             )
             await db.commit()
             return int(result.rowcount or 0)
+
+
+class ChatEventRepo:
+    """对话埋点：旁路写入，全量记录，不受 request_traces 采样影响。"""
+
+    @staticmethod
+    def _safe_uuid(value) -> uuid.UUID | None:
+        """客户端传入的 session/visitor 可能不是 UUID：落库前统一兜底为 None。"""
+        try:
+            return uuid.UUID(str(value)) if value else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    @staticmethod
+    async def record(
+        *,
+        trace_id: str,
+        scene_code: str,
+        session_id=None,
+        visitor_id=None,
+        user_id=None,
+        integration_id=None,
+        ext: dict | None = None,
+        message_chars: int = 0,
+    ) -> None:
+        async with SessionLocal() as db:
+            db.add(
+                ChatEvent(
+                    trace_id=str(trace_id or "")[:64],
+                    scene_code=str(scene_code or "default")[:32],
+                    session_id=ChatEventRepo._safe_uuid(session_id),
+                    visitor_id=ChatEventRepo._safe_uuid(visitor_id),
+                    user_id=ChatEventRepo._safe_uuid(user_id),
+                    integration_id=ChatEventRepo._safe_uuid(integration_id),
+                    ext=ext or {},
+                    message_chars=max(int(message_chars or 0), 0),
+                )
+            )
+            await db.commit()
+
+    @staticmethod
+    async def count_by_scene_today() -> dict[str, int]:
+        """今日各场景请求数（一次 GROUP BY，供后台场景列表展示用量）。
+
+        “今日”按进程本地时区 00:00 起算，与 Redis 日额度桶（time.strftime）同口径；
+        被限流拦住的请求也已在埋点里（埋点在限流之前），所以用量含被拒的请求。
+        """
+        since = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(ChatEvent.scene_code, func.count())
+                    .where(ChatEvent.created_at >= since)
+                    .group_by(ChatEvent.scene_code)
+                )
+            ).all()
+        return {str(code): int(count) for code, count in rows}
+
+    @staticmethod
+    async def attach_identity(
+        *,
+        trace_id: str,
+        session_id=None,
+        visitor_id=None,
+        user_id=None,
+    ) -> int:
+        """按 trace_id 回填服务端解析出的真实身份，返回更新行数。
+
+        埋点在会话/访客创建之前写入：首轮 session_id 为空，匿名请求带的是
+        external_key（v_xxx，不是 UUID）。这里用 sessions.id / visitors.id
+        覆盖，保证 chat_events 能 join 会话与访客；无可用字段时直接跳过。
+        """
+        tid = str(trace_id or "")[:64]
+        values = {}
+        for key, raw in (
+            ("session_id", session_id),
+            ("visitor_id", visitor_id),
+            ("user_id", user_id),
+        ):
+            parsed = ChatEventRepo._safe_uuid(raw)
+            if parsed is not None:
+                values[key] = parsed
+        if not tid or not values:
+            return 0
+        async with SessionLocal() as db:
+            result = await db.execute(
+                update(ChatEvent).where(ChatEvent.trace_id == tid).values(**values)
+            )
+            await db.commit()
+            return int(result.rowcount or 0)
+
+    @staticmethod
+    async def record_usage(
+        *,
+        trace_id: str,
+        scene_code: str,
+        integration_id=None,
+        tokens: int = 0,
+        estimated: bool = True,
+        handover: bool = False,
+        error: bool = False,
+        day: date | None = None,
+    ) -> None:
+        """一轮对话的用量：明细回填 chat_events，同时累加到 chat_usage_daily。
+
+        - 与链路采集完全解耦：request_traces 关闭或采样丢弃时照样记账；
+        - 明细 UPDATE 命中 0 行（埋点写入失败/被限流拦下的请求）不影响日聚合落库，
+          账单依据始终是 chat_usage_daily；
+        - day 用进程本地日期，与 count_by_scene_today、Redis 日额度桶同口径。
+        """
+        usage_day = day or datetime.now().astimezone().date()
+        tid = str(trace_id or "")[:64]
+        total = max(int(tokens or 0), 0)
+        # 零 UUID 表示“未归属”：PG 唯一约束里 NULL 互不相等，不能用 NULL 做主键列
+        iid = ChatEventRepo._safe_uuid(integration_id) or UNASSIGNED_INTEGRATION_ID
+        async with SessionLocal() as db:
+            if tid:
+                await db.execute(
+                    update(ChatEvent)
+                    .where(ChatEvent.trace_id == tid)
+                    .values(total_tokens=total, tokens_estimated=estimated)
+                )
+            stmt = pg_insert(ChatUsageDaily).values(
+                day=usage_day,
+                scene_code=str(scene_code or "default")[:32],
+                integration_id=iid,
+                requests=1,
+                tokens=total,
+                estimated_requests=1 if estimated else 0,
+                handoffs=1 if handover else 0,
+                errors=1 if error else 0,
+            )
+            await db.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=["day", "scene_code", "integration_id"],
+                    set_={
+                        "requests": ChatUsageDaily.requests + stmt.excluded.requests,
+                        "tokens": ChatUsageDaily.tokens + stmt.excluded.tokens,
+                        "estimated_requests": (
+                            ChatUsageDaily.estimated_requests + stmt.excluded.estimated_requests
+                        ),
+                        "handoffs": ChatUsageDaily.handoffs + stmt.excluded.handoffs,
+                        "errors": ChatUsageDaily.errors + stmt.excluded.errors,
+                        "updated_at": func.now(),
+                    },
+                )
+            )
+            await db.commit()
+
+
+_USAGE_METRICS = ("requests", "tokens", "estimated_requests", "handoffs", "errors")
+
+
+class UsageRepo:
+    """用量报表：只读 chat_usage_daily（账单依据，长期保留）。"""
+
+    @staticmethod
+    def _filters(date_from: date, date_to: date, scene_code: str | None) -> list:
+        conds = [ChatUsageDaily.day >= date_from, ChatUsageDaily.day <= date_to]
+        if scene_code:
+            conds.append(ChatUsageDaily.scene_code == scene_code)
+        return conds
+
+    @staticmethod
+    def _metrics(row, offset: int = 1) -> dict:
+        # sum(bigint) 在 PG 里是 numeric，asyncpg 会返回 Decimal，统一转 int
+        return {m: int(row[offset + i] or 0) for i, m in enumerate(_USAGE_METRICS)}
+
+    @staticmethod
+    async def summary(
+        *,
+        group_by: str,
+        date_from: date,
+        date_to: date,
+        scene_code: str | None = None,
+    ) -> dict:
+        """按 day / scene / integration 聚合，返回 rows 与 totals（一次查询内自洽）。"""
+        conds = UsageRepo._filters(date_from, date_to, scene_code)
+        sums = [
+            func.coalesce(func.sum(getattr(ChatUsageDaily, m)), 0).label(m)
+            for m in _USAGE_METRICS
+        ]
+        if group_by == "day":
+            stmt = select(ChatUsageDaily.day.label("key"), *sums).where(*conds)
+            stmt = stmt.group_by(ChatUsageDaily.day).order_by(ChatUsageDaily.day.asc())
+        elif group_by == "scene":
+            stmt = select(ChatUsageDaily.scene_code.label("key"), *sums).where(*conds)
+            stmt = stmt.group_by(ChatUsageDaily.scene_code).order_by(
+                func.sum(ChatUsageDaily.tokens).desc()
+            )
+        else:
+            # 接入方维度带上名称：后台不用再发一轮请求拼名字
+            stmt = (
+                select(
+                    ChatUsageDaily.integration_id.label("key"),
+                    Integration.name.label("name"),
+                    *sums,
+                )
+                .select_from(ChatUsageDaily)
+                .outerjoin(Integration, Integration.id == ChatUsageDaily.integration_id)
+                .where(*conds)
+                .group_by(ChatUsageDaily.integration_id, Integration.name)
+                .order_by(func.sum(ChatUsageDaily.tokens).desc())
+            )
+
+        async with SessionLocal() as db:
+            result = await db.execute(stmt)
+            rows = result.all()
+
+        items: list[dict] = []
+        totals = dict.fromkeys(_USAGE_METRICS, 0)
+        for row in rows:
+            metrics = UsageRepo._metrics(row, offset=2 if group_by == "integration" else 1)
+            for key in _USAGE_METRICS:
+                totals[key] += metrics[key]
+            if group_by == "day":
+                items.append({"day": row[0].isoformat(), **metrics})
+            elif group_by == "scene":
+                items.append({"scene_code": str(row[0]), **metrics})
+            else:
+                iid = row[0]
+                unassigned = iid == UNASSIGNED_INTEGRATION_ID
+                items.append(
+                    {
+                        "integration_id": str(iid),
+                        "integration_name": None if unassigned else row[1],
+                        "unassigned": unassigned,
+                        **metrics,
+                    }
+                )
+        return {"rows": items, "totals": totals}
+
+    @staticmethod
+    async def export_rows(
+        *, date_from: date, date_to: date, scene_code: str | None = None
+    ) -> list[dict]:
+        """导出用明细：(日 × 场景 × 接入方) 逐行，供对账/开票。"""
+        conds = UsageRepo._filters(date_from, date_to, scene_code)
+        sums = [getattr(ChatUsageDaily, m) for m in _USAGE_METRICS]
+        stmt = (
+            select(
+                ChatUsageDaily.day,
+                ChatUsageDaily.scene_code,
+                ChatUsageDaily.integration_id,
+                Integration.name.label("integration_name"),
+                *sums,
+            )
+            .select_from(ChatUsageDaily)
+            .outerjoin(Integration, Integration.id == ChatUsageDaily.integration_id)
+            .where(*conds)
+            .order_by(
+                ChatUsageDaily.day.asc(),
+                ChatUsageDaily.scene_code.asc(),
+                ChatUsageDaily.integration_id.asc(),
+            )
+        )
+        async with SessionLocal() as db:
+            rows = (await db.execute(stmt)).all()
+        return [
+            {
+                "day": row.day.isoformat(),
+                "scene_code": row.scene_code,
+                "integration_id": str(row.integration_id),
+                "integration_name": None
+                if row.integration_id == UNASSIGNED_INTEGRATION_ID
+                else row.integration_name,
+                "requests": int(row.requests or 0),
+                "tokens": int(row.tokens or 0),
+                "estimated_requests": int(row.estimated_requests or 0),
+                "handoffs": int(row.handoffs or 0),
+                "errors": int(row.errors or 0),
+            }
+            for row in rows
+        ]

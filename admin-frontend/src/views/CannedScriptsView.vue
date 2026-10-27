@@ -4,6 +4,21 @@
       <div class="card-header">
         <b>固定话术</b>
         <div class="header-ops">
+          <el-select
+            v-model="sceneFilter"
+            placeholder="全部场景"
+            clearable
+            style="width: 150px"
+            @change="load"
+          >
+            <el-option label="全部场景" value="" />
+            <el-option
+              v-for="scene in scenes"
+              :key="scene.code"
+              :label="scene.display_name"
+              :value="scene.code"
+            />
+          </el-select>
           <el-button size="small" @click="load">刷新</el-button>
           <el-button type="primary" size="small" @click="openCreate">新增话术</el-button>
         </div>
@@ -46,6 +61,9 @@
           <template v-if="matchResult.matched">
             <el-tag size="small" type="success">{{ matchResult.title || matchResult.key }}</el-tag>
             <el-tag size="small" type="info">{{ categoryLabel(matchResult.category) }}</el-tag>
+            <el-tag v-if="matchResult.answer_source === 'kb'" size="small" type="warning">
+              知识库：{{ (matchResult.kb_namespaces || []).join('、') || '未选库' }}
+            </el-tag>
           </template>
           <el-tag v-else size="small" type="info">未命中，本轮交给路由与大模型</el-tag>
         </div>
@@ -59,6 +77,15 @@
           <div class="expand-box">
             <div class="expand-title">应答正文（逐字下发，支持 Markdown）</div>
             <pre class="reply-pre">{{ row.reply_text }}</pre>
+            <div class="expand-title">回答来源</div>
+            <div class="tag-wrap">
+              <template v-if="row.answer_source === 'kb'">
+                <el-tag size="small" type="warning">知识库检索拼接（不经模型改写）</el-tag>
+                <el-tag v-for="ns in row.kb_namespaces" :key="ns" size="small" type="info">{{ ns }}</el-tag>
+                <span v-if="!row.kb_namespaces.length" class="muted">未选择知识库</span>
+              </template>
+              <span v-else class="muted">文本逐字下发</span>
+            </div>
             <div class="expand-title">问法（{{ row.patterns.length }}）</div>
             <div class="tag-wrap">
               <el-tag v-for="p in row.patterns" :key="p" size="small" type="info">{{ p }}</el-tag>
@@ -73,6 +100,12 @@
         </template>
       </el-table-column>
       <el-table-column prop="priority" label="优先级" width="80" sortable />
+      <el-table-column label="归属" width="120">
+        <template #default="{ row }">
+          <el-tag v-if="row.scene_id" size="small" type="success">{{ sceneName(row) }}</el-tag>
+          <el-tag v-else size="small" type="info">全局</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="标识" width="150">
         <template #default="{ row }">
           <span>{{ row.key }}</span>
@@ -90,6 +123,12 @@
           <el-tag size="small" :type="row.category === 'probing' ? 'danger' : ''">
             {{ categoryLabel(row.category) }}
           </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="回答来源" width="110">
+        <template #default="{ row }">
+          <el-tag v-if="row.answer_source === 'kb'" size="small" type="warning">知识库</el-tag>
+          <el-tag v-else size="small" type="info">文本</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="title" label="名称" width="150" show-overflow-tooltip>
@@ -127,6 +166,20 @@
     <el-form :model="form" label-width="110px">
       <el-form-item label="标识" required>
         <el-input v-model="form.key" :disabled="editing" placeholder="唯一标识，小写字母/数字/下划线，如 business_hours" />
+      </el-form-item>
+      <el-form-item label="归属场景">
+        <el-select v-model="form.scene_code" :disabled="editing" clearable placeholder="全局" style="width: 100%">
+          <el-option label="全局（所有场景共用）" value="" />
+          <el-option
+            v-for="scene in scenes"
+            :key="scene.code"
+            :label="scene.display_name"
+            :value="scene.code"
+          />
+        </el-select>
+        <div class="rule-tip">
+          全局话术（如探听拒答）对所有场景生效；场景话术只在绑定场景内生效，且同标识会覆盖全局行。归属创建后不可修改。
+        </div>
       </el-form-item>
       <el-form-item label="名称">
         <el-input v-model="form.title" placeholder="可选，后台展示用，如 营业时间" />
@@ -176,12 +229,47 @@
         />
         <div class="rule-tip">当前 {{ form.keywords.length }} 条（上限 60）</div>
       </el-form-item>
-      <el-form-item label="应答正文" required>
+      <el-form-item label="回答来源">
+        <el-radio-group v-model="form.answer_source">
+          <el-radio value="text">文本（逐字下发）</el-radio>
+          <el-radio value="kb">知识库（检索拼接）</el-radio>
+        </el-radio-group>
+        <div class="rule-tip">
+          知识库模式按固定格式拼接检索结果，不经过模型改写，适合“公司介绍/服务范围”这类会变的问答；
+          高频且必须逐字一致的“你是谁”仍建议用文本。
+        </div>
+      </el-form-item>
+      <el-form-item v-if="form.answer_source === 'kb'" label="知识库" required>
+        <el-select
+          v-model="form.kb_namespaces"
+          multiple
+          clearable
+          collapse-tags
+          placeholder="选择检索范围（必选）"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="kb in activeBases"
+            :key="kb.namespace"
+            :label="`${kb.display_name}（${kb.namespace}）`"
+            :value="kb.namespace"
+          />
+        </el-select>
+        <div class="rule-tip">只能选启用中的库，最多 10 个；留空会被后端拒绝保存。</div>
+      </el-form-item>
+      <el-form-item
+        :label="form.answer_source === 'kb' ? '引导语' : '应答正文'"
+        :required="form.answer_source === 'text'"
+      >
         <el-input
           v-model="form.reply_text"
           type="textarea"
-          :rows="8"
-          placeholder="命中后逐字下发给客户的内容，不经过大模型改写"
+          :rows="form.answer_source === 'kb' ? 3 : 8"
+          :placeholder="
+            form.answer_source === 'kb'
+              ? '可选：命中后先发这句话，再接检索结果；留空则直接下发检索内容'
+              : '命中后逐字下发给客户的内容，不经过大模型改写'
+          "
           maxlength="2000"
           show-word-limit
         />
@@ -217,14 +305,28 @@ import {
   apiCannedScriptMatch,
   apiCreateCannedScript,
   apiDeleteCannedScript,
+  apiListBases,
   apiListCannedScripts,
+  apiSceneOptions,
   apiToggleCannedScript,
   apiUpdateCannedScript,
 } from '@/api'
-import type { CannedMatchResult, CannedScript, CannedScriptCategory, CannedScriptPayload } from '@/types'
+import type {
+  CannedAnswerSource,
+  CannedMatchResult,
+  CannedScript,
+  CannedScriptCategory,
+  CannedScriptPayload,
+  KnowledgeBase,
+  SceneOption,
+} from '@/types'
 import { CANNED_CATEGORY_LABELS } from '@/types'
 
 const scripts = ref<CannedScript[]>([])
+const scenes = ref<SceneOption[]>([])
+// 知识库选择器只要启用中的库：停用库后端会直接拒掉
+const activeBases = ref<KnowledgeBase[]>([])
+const sceneFilter = ref('')
 const loading = ref(false)
 const dialogVisible = ref(false)
 const editing = ref(false)
@@ -239,16 +341,27 @@ const categoryOptions = (Object.keys(CANNED_CATEGORY_LABELS) as CannedScriptCate
   label: CANNED_CATEGORY_LABELS[value],
 }))
 
-// 表单里 title 用空串表示“未填”，提交时再转成 null，避免可空字段到处判空
-type ScriptForm = Omit<CannedScriptPayload, 'title'> & { title: string }
+// 表单里 title 用空串表示“未填”，scene_code 用空串表示“全局”，提交时再转成 null
+type ScriptForm = Omit<
+  CannedScriptPayload,
+  'title' | 'scene_code' | 'answer_source' | 'kb_namespaces'
+> & {
+  title: string
+  scene_code: string
+  answer_source: CannedAnswerSource
+  kb_namespaces: string[]
+}
 
 const form = reactive<ScriptForm>({
   key: '',
+  scene_code: '',
   title: '',
   category: 'business',
   patterns: [],
   keywords: [],
   reply_text: '',
+  answer_source: 'text',
+  kb_namespaces: [],
   priority: 100,
   enabled: true,
 })
@@ -259,6 +372,33 @@ function categoryLabel(category?: CannedScriptCategory | null) {
 
 const enabledCount = computed(() => scripts.value.filter((s) => s.enabled).length)
 
+const sceneById = computed(() => new Map(scenes.value.map((s) => [s.id, s])))
+
+function sceneName(row: CannedScript) {
+  if (!row.scene_id) return '全局'
+  const scene = sceneById.value.get(row.scene_id)
+  if (scene) return scene.display_name
+  // 停用/归档场景不在启用列表里，用服务端下发的场景码兜底展示
+  return row.scene_code ? `${row.scene_code}（已停用）` : '未知场景'
+}
+
+function sceneCodeOf(row: CannedScript) {
+  // 优先用服务端下发的 scene_code：场景停用/归档后不在 /scenes/options 里，反查会落空
+  if (row.scene_code) return row.scene_code
+  if (!row.scene_id) return null
+  return sceneById.value.get(row.scene_id)?.code || null
+}
+
+/** 场景行必须能解析出 scene_code：解析不到就当全局行操作会串场景，直接中止 */
+function requireSceneCode(row: CannedScript): string | null {
+  if (!row.scene_id) return null
+  const code = sceneCodeOf(row)
+  if (!code) {
+    throw new Error('该场景已停用或归档，无法定位这条话术；请先在「业务场景」启用该场景')
+  }
+  return code
+}
+
 function oneLine(text: string) {
   return (text || '').replace(/\s+/g, ' ').trim().slice(0, 60)
 }
@@ -266,7 +406,7 @@ function oneLine(text: string) {
 async function load() {
   loading.value = true
   try {
-    scripts.value = await apiListCannedScripts()
+    scripts.value = await apiListCannedScripts(sceneFilter.value || undefined)
   } finally {
     loading.value = false
   }
@@ -280,7 +420,7 @@ async function runMatch() {
   }
   matching.value = true
   try {
-    matchResult.value = await apiCannedScriptMatch(query)
+    matchResult.value = await apiCannedScriptMatch(query, sceneFilter.value || null)
   } catch (e: any) {
     ElMessage.error(e?.message || '命中测试失败')
   } finally {
@@ -290,11 +430,14 @@ async function runMatch() {
 
 function resetForm() {
   form.key = ''
+  form.scene_code = sceneFilter.value || ''
   form.title = ''
   form.category = 'business'
   form.patterns = []
   form.keywords = []
   form.reply_text = ''
+  form.answer_source = 'text'
+  form.kb_namespaces = []
   form.priority = 100
   form.enabled = true
 }
@@ -306,21 +449,39 @@ function openCreate() {
 }
 
 function openEdit(row: CannedScript) {
+  let sceneCode: string | null
+  try {
+    sceneCode = requireSceneCode(row)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '无法定位话术所属场景')
+    return
+  }
   editing.value = true
   form.key = row.key
+  form.scene_code = sceneCode || ''
   form.title = row.title || ''
   form.category = row.category
   form.patterns = [...row.patterns]
   form.keywords = [...row.keywords]
   form.reply_text = row.reply_text
+  form.answer_source = row.answer_source || 'text'
+  form.kb_namespaces = [...(row.kb_namespaces || [])]
   form.priority = row.priority
   form.enabled = row.enabled
   dialogVisible.value = true
 }
 
 async function submit() {
-  if (!form.key.trim() || !form.reply_text.trim()) {
-    ElMessage.warning('标识与应答正文都要填写')
+  if (!form.key.trim()) {
+    ElMessage.warning('标识要填写')
+    return
+  }
+  if (form.answer_source === 'text' && !form.reply_text.trim()) {
+    ElMessage.warning('文本模式必须填写应答正文')
+    return
+  }
+  if (form.answer_source === 'kb' && !form.kb_namespaces.length) {
+    ElMessage.warning('知识库模式至少选择一个知识库')
     return
   }
   if (!form.patterns.length && !form.keywords.length) {
@@ -331,16 +492,20 @@ async function submit() {
   try {
     const payload: CannedScriptPayload = {
       key: form.key.trim(),
+      scene_code: form.scene_code || null,
       title: form.title.trim() || null,
       category: form.category,
       patterns: form.patterns,
       keywords: form.keywords,
       reply_text: form.reply_text,
+      answer_source: form.answer_source,
+      // 切回文本时保留已选库（后端也允许），便于来回切换
+      kb_namespaces: form.kb_namespaces,
       priority: form.priority,
       enabled: form.enabled,
     }
     if (editing.value) {
-      await apiUpdateCannedScript(form.key, payload)
+      await apiUpdateCannedScript(form.key, payload, form.scene_code || null)
     } else {
       await apiCreateCannedScript(payload)
     }
@@ -356,7 +521,7 @@ async function submit() {
 
 async function onToggle(row: CannedScript) {
   try {
-    await apiToggleCannedScript(row.key, row.enabled)
+    await apiToggleCannedScript(row.key, row.enabled, requireSceneCode(row))
     ElMessage.success(`${row.title || row.key} 已${row.enabled ? '启用' : '停用'}`)
   } catch (e: any) {
     ElMessage.error(e?.message || '操作失败')
@@ -371,7 +536,7 @@ async function remove(row: CannedScript) {
       '删除话术',
       { type: 'warning' },
     )
-    await apiDeleteCannedScript(row.key)
+    await apiDeleteCannedScript(row.key, requireSceneCode(row))
     ElMessage.success('已删除')
     await load()
   } catch (e: any) {
@@ -379,7 +544,16 @@ async function remove(row: CannedScript) {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  scenes.value = await apiSceneOptions()
+  await load()
+  try {
+    const bases = await apiListBases()
+    activeBases.value = bases.filter((b) => b.is_active)
+  } catch {
+    activeBases.value = []
+  }
+})
 </script>
 
 <style scoped>

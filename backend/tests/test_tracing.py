@@ -1,9 +1,6 @@
 """链路采集器单测：span 结构、载荷裁剪、采样与拍平维度（纯内存，不碰 DB）"""
 import json
 
-import pytest
-
-from app.core import tracing as tr
 from app.core.config import settings
 from app.core.tracing import (
     OUTCOME_ANSWERED,
@@ -33,6 +30,24 @@ def test_new_request_trace_id_is_16_hex_grepable():
     assert len(tid) == 16
     int(tid, 16)  # 可 hex 解析，能与 structlog / X-Trace-Id 直接对比
     assert tid != new_request_trace_id()
+
+
+def test_chat_endpoint_reuses_middleware_trace_id():
+    """响应头、日志与 request_traces 必须是同一个 trace_id。
+
+    端点自己再 new 一个会造成“拿着 X-Trace-Id 查不到链路”（运维与
+    评测执行器的 RAG/token 回读都靠这个 id 对齐）。
+    """
+    from types import SimpleNamespace
+
+    from app.api.v1.chat import _request_trace_id
+
+    request = SimpleNamespace(state=SimpleNamespace(trace_id="ab" * 8))
+    assert _request_trace_id(request) == "ab" * 8
+    # 没有中间件（如精简测试应用）时自行生成，仍是可 grep 的 16 位 hex
+    minted = _request_trace_id(SimpleNamespace(state=SimpleNamespace()))
+    assert len(minted) == 16
+    int(minted, 16)
 
 
 def test_disabled_collector_records_nothing():
@@ -272,7 +287,11 @@ def test_ddl_and_orm_columns_stay_in_sync():
         re.S,
     )
     assert block, "init_db.sql 里找不到 request_traces 建表语句"
-    ddl_cols = {line.strip().split()[0] for line in block.group(1).splitlines() if line.strip() and not line.strip().startswith("--")}
+    ddl_cols = {
+        line.strip().split()[0]
+        for line in block.group(1).splitlines()
+        if line.strip() and not line.strip().startswith("--")
+    }
     orm_cols = {c.name for c in RequestTrace.__table__.columns}
     assert orm_cols == ddl_cols
 

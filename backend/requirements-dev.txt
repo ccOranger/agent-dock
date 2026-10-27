@@ -1,0 +1,5 @@
+# 开发 / CI 依赖（生产镜像只安装 requirements.txt）
+-r requirements.txt
+
+# 代码检查：版本钉死，避免 CI 因规则升级产生无关告警
+ruff==0.17.1

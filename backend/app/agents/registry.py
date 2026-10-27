@@ -1,6 +1,8 @@
 """
 AgentRegistry：业务 Agent 类注册表
-每个业务 Agent 是一个类，独立开发，注册到这里即可被路由分发
+业务 Agent 实现在 app/agents/business/ 下，这里显式登记；
+业务 Agent 统一由后台动态配置（agents 表 source=dynamic），代码侧只保留内核默认助手；
+确需代码托管时：实现 BaseBusinessAgent 子类，并在 _CODE_AGENTS 中补一行。
 """
 import ast
 import inspect
@@ -8,20 +10,32 @@ import sys
 import textwrap
 
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.business.complaint_agent import ComplaintAgent
-from app.agents.business.knowledge_agent import KnowledgeAgent
-from app.agents.business.order_agent import OrderAgent
+from app.agents.business.default_agent import DefaultAssistantAgent
 from app.core.config import settings
 from app.tools import custom_catalog
 from app.tools.custom.base import BaseTool
 
-# 新增业务 Agent：只需 import 并加入此表
-AGENT_REGISTRY: dict[str, type[BaseBusinessAgent]] = {
-    KnowledgeAgent.name: KnowledgeAgent,
-    OrderAgent.name: OrderAgent,
-    ComplaintAgent.name: ComplaintAgent,
-    # RefundAgent.name: RefundAgent,
-}
+# 代码托管业务 Agent：name 由类属性声明，全局唯一。
+# 业务 Agent 已全部迁移为后台动态 Agent，这里不再登记业务线；
+# 仅 default_assistant 作为内核 Agent 独立注册（见 _KERNEL_AGENTS）。
+_CODE_AGENTS: tuple[type[BaseBusinessAgent], ...] = ()
+
+_agent_names = [cls.name for cls in _CODE_AGENTS]
+_duplicates = sorted({n for n in _agent_names if _agent_names.count(n) > 1})
+if _duplicates:
+    raise RuntimeError(f"业务 Agent 名称重复: {_duplicates}")
+
+# name -> Agent 类
+AGENT_REGISTRY: dict[str, type[BaseBusinessAgent]] = {cls.name: cls for cls in _CODE_AGENTS}
+
+# 内核 Agent：默认场景唯一成员，不属于任何业务线。
+# 业务 Agent 不得占用该名字，否则默认场景会被偷换，启动时直接报错。
+_KERNEL_AGENTS = (DefaultAssistantAgent,)
+for _cls in _KERNEL_AGENTS:
+    registered = AGENT_REGISTRY.get(_cls.name)
+    if registered is not None and registered is not _cls:
+        raise RuntimeError(f"内核 Agent 名称被占用: {_cls.name}")
+    AGENT_REGISTRY[_cls.name] = _cls
 
 
 def get_agent_class(name: str) -> type[BaseBusinessAgent] | None:

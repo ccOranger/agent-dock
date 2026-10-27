@@ -34,6 +34,20 @@ SAMPLE_ROWS = [
         "created_at": datetime(2025, 1, 2, 9, 0, 0),
         "updated_at": datetime(2025, 1, 2, 9, 1, 0),
     },
+    # 嵌入场景的匿名访客会话：user_id 为 NULL，列表必须能看到（外连接修复回归）
+    {
+        "id": "s-3",
+        "title": "我要开发票",
+        "status": "active",
+        "last_route_to": "mcd_service",
+        "user_id": None,
+        "visitor_id": "v-1",
+        "username": None,
+        "display_name": None,
+        "message_count": 2,
+        "created_at": datetime(2025, 1, 3, 9, 0, 0),
+        "updated_at": datetime(2025, 1, 3, 9, 2, 0),
+    },
 ]
 
 SAMPLE_EXPORT_ROWS = [
@@ -63,7 +77,11 @@ def _capture_list(monkeypatch, captured: dict):
         captured.update(filters)
         return SAMPLE_ROWS, 42
 
+    async def fake_scenes():
+        return []
+
     monkeypatch.setattr(ai.SessionRepo, "list_all_filtered", fake_list_all_filtered)
+    monkeypatch.setattr(ai.SceneRepo, "list_all", fake_scenes)
 
 
 def test_list_sessions_pagination_and_filters_passthrough(client, monkeypatch):
@@ -86,8 +104,12 @@ def test_list_sessions_pagination_and_filters_passthrough(client, monkeypatch):
     body = resp.json()
     assert body["data"]["total"] == 42
     assert body["data"]["page"] == 2
-    assert len(body["data"]["items"]) == 2
+    assert len(body["data"]["items"]) == 3
     assert body["data"]["items"][0]["display_name"] == "爱丽丝"
+    # 匿名访客行不被丢掉：user_id 为 None，带 visitor_id
+    visitor_row = body["data"]["items"][2]
+    assert visitor_row["user_id"] is None
+    assert visitor_row["visitor_id"] == "v-1"
     # 过滤条件正确透传到 Repo 层，且时间已解析为 datetime
     assert captured["status"] == "closed"
     assert captured["last_route_to"] == "order_service"
@@ -119,6 +141,11 @@ def test_export_csv_header_bom_and_rows(client, monkeypatch):
 
     monkeypatch.setattr(ai.SessionRepo, "export_rows", fake_export_rows)
 
+    async def fake_scenes():
+        return []
+
+    monkeypatch.setattr(ai.SceneRepo, "list_all", fake_scenes)
+
     resp = client.get(f"{ai.router.prefix}/sessions/export", params={"status": "closed"})
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
@@ -135,10 +162,12 @@ def test_export_csv_header_bom_and_rows(client, monkeypatch):
 
 
 def test_get_inquiry_detail_with_messages(client, monkeypatch):
+    sid = "11111111-1111-1111-1111-111111111111"
     sess = SimpleNamespace(
         id="s-1",
         title="订单查询",
         status="closed",
+        scene_id="scene-1",
         last_route_to="order_service",
         user_id="u-c1",
         created_at=datetime(2025, 1, 1, 10, 0, 0),
@@ -147,16 +176,20 @@ def test_get_inquiry_detail_with_messages(client, monkeypatch):
     messages = [{"id": "m-1", "role": "user", "content": "我的订单到哪了"}]
 
     async def fake_get(session_id):
-        assert session_id == "s-1"
+        assert session_id == sid
         return sess
+
+    async def fake_scene_get(scene_id):
+        return SimpleNamespace(code="mall_order")
 
     async def fake_list_by_session(session_id):
         return messages
 
     monkeypatch.setattr(ai.SessionRepo, "get", fake_get)
+    monkeypatch.setattr(ai.SceneRepo, "get", fake_scene_get)
     monkeypatch.setattr(ai.MessageRepo, "list_by_session", fake_list_by_session)
 
-    resp = client.get(f"{ai.router.prefix}/sessions/s-1")
+    resp = client.get(f"{ai.router.prefix}/sessions/{sid}")
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["session"]["id"] == "s-1"
@@ -170,15 +203,27 @@ def test_get_inquiry_not_found(client, monkeypatch):
 
     monkeypatch.setattr(ai.SessionRepo, "get", fake_get)
 
-    resp = client.get(f"{ai.router.prefix}/sessions/missing")
+    resp = client.get(f"{ai.router.prefix}/sessions/99999999-0000-0000-0000-000000000000")
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == 3001
+
+
+def test_get_inquiry_rejects_malformed_id(client):
+    """非 UUID 的路径参数返回 400，而不是让 uuid.UUID 抛 500。"""
+    resp = client.get(f"{ai.router.prefix}/sessions/93e20f49fa8e44f3")
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == 1001
 
 
 def test_customer_forbidden_on_all_inquiry_endpoints(make_test_app):
     app = make_test_app([ai.router], prefix="")
     customer_client = TestClient(make_test_app.as_role(app, "customer"))
-    for path in [f"{ai.router.prefix}/sessions", f"{ai.router.prefix}/sessions/export", f"{ai.router.prefix}/sessions/s-1"]:
+    paths = [
+        f"{ai.router.prefix}/sessions",
+        f"{ai.router.prefix}/sessions/export",
+        f"{ai.router.prefix}/sessions/s-1",
+    ]
+    for path in paths:
         resp = customer_client.get(path)
         assert resp.status_code == 403
         assert resp.json()["detail"]["code"] == 2003

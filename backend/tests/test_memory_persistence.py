@@ -258,7 +258,7 @@ async def test_persist_purges_expired_working(monkeypatch):
     monkeypatch.setattr(ce_mod, "get_memory_tool", lambda user_id: _RecordingMemoryTool())
     monkeypatch.setattr(repo_mod.MemoryRepo, "upsert_mirror", fake_upsert_mirror)
     monkeypatch.setattr(repo_mod.MemoryRepo, "purge_expired_working", fake_purge)
-    monkeypatch.setattr(ce_mod, "_last_working_purge", 0.0)
+    monkeypatch.setattr(ce_mod, "_last_working_purge", None)  # None = 本进程从未清理过
 
     engineer = ContextEngineer()
     await engineer.persist_after_run(

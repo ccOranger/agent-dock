@@ -1,10 +1,10 @@
 """自定义工具：订单查询 / 修改。
 
 历史版本通过 httpx 访问固定假域名 http://order-service:8080（并不存在，必然失败）。
-现改为读取项目内的固定数据集 app.tools.custom.mock_data，可直接演示与测试。
+现改为读取固定数据集 app.tools.custom.mock_data，可直接演示与测试。
 """
-from app.tools.custom.base import BaseTool
 from app.tools.custom import mock_data
+from app.tools.custom.base import BaseTool
 
 
 class QueryOrderTool(BaseTool):

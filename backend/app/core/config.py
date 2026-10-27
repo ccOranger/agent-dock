@@ -1,5 +1,8 @@
 """应用配置：基于 pydantic-settings，从环境变量 / .env 加载"""
+
+import os
 from functools import lru_cache
+from urllib.request import getproxies
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +11,32 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # 而 pydantic-settings 不会写入 os.environ，故在此显式加载 .env 到进程环境。
 # （必须在实例化 Settings / 框架读取之前执行）
 load_dotenv(".env")
+
+
+def _bypass_proxy_for_loopback() -> None:
+    """本机服务（Qdrant 等）直连，不走系统代理。
+
+    Windows 开了 Clash 一类代理后，httpx 会把 http://127.0.0.1:6333 也交给代理，
+    代理对回环地址返回 502，表现为 RAG 工具初始化失败、上传文档 500。
+    这里把回环地址并入 no_proxy；同时把系统代理固化成环境变量，避免只设
+    no_proxy 时 urllib 不再读注册表代理、连外网的 LLM/embedding 反而断掉。
+    """
+    proxies = getproxies()
+    for scheme in ("http", "https"):
+        value = proxies.get(scheme)
+        if value and not os.environ.get(f"{scheme}_proxy") and not os.environ.get(f"{scheme.upper()}_PROXY"):
+            os.environ[f"{scheme}_proxy"] = value
+
+    hosts = {
+        h.strip() for h in (os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or "").split(",") if h.strip()
+    }
+    hosts.update({"localhost", "127.0.0.1", "::1"})
+    merged = ",".join(sorted(hosts))
+    os.environ["no_proxy"] = merged
+    os.environ["NO_PROXY"] = merged
+
+
+_bypass_proxy_for_loopback()
 
 
 class Settings(BaseSettings):
@@ -49,6 +78,8 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = 64
     rag_top_k: int = 5
     rag_min_score: float = 0.3
+    # 单次 RAG/记忆检索的超时（秒）：Qdrant/embedding 挂起时降级为空，不阻塞对话
+    rag_timeout: int = 15
     # 单次上传文档大小上限（MB）：超限在落盘阶段直接拒绝，避免磁盘/内存被拖垮
     upload_max_size_mb: int = 20
 
@@ -106,6 +137,15 @@ class Settings(BaseSettings):
     # true = 交给兜底 Agent 先应答，false = 仍按低置信走转人工
     router_fallback_answer: bool = True
 
+    # ===== 多场景 / 公开接入 =====
+    # 公开聊天限流（按 scene + IP/visitor）；0 表示关闭
+    public_chat_rate_limit_per_minute: int = 30
+    public_chat_daily_quota: int = 2000
+    # 同一主体同时未结束的流式对话上限；0 表示不限制
+    public_chat_max_concurrent: int = 3
+    # 场景 allowed_origins 的进程内缓存秒数，避免每次请求都回库
+    scene_origin_cache_ttl: int = 60
+
     # ===== 链路追踪（request_traces）=====
     trace_enabled: bool = True
     # 工具入参/返回是否入库（含客户数据）：只存截断后的文本，关闭则仅存工具名与耗时
@@ -116,6 +156,20 @@ class Settings(BaseSettings):
     # 保留天数，供清理脚本使用
     trace_retention_days: int = 30
 
+    # ===== 用量计量（chat_events / chat_usage_daily）=====
+    # 供应商 usage 不可得时按字符估算 token；本系数供客户按账单整体校准（1.0 = 不校正）
+    token_estimate_factor: float = 1.0
+    # 报表单次查询的最大跨度（天），防止一次扫穿整张聚合表
+    usage_query_max_days: int = 366
+
+    # ===== License 与版本分层 =====
+    # 授权文件路径（JSON + Ed25519 signature）；不存在时静默按社区版运行
+    license_file: str = "./license.json"
+    # 签发方公钥：Base64 裸 32 字节或 PEM；为空则无法校验签名，一律社区版
+    license_public_key: str = ""
+    # 部署指纹（初始化时生成一次，随数据卷长期存在）。留空 = 未绑定，跳过指纹校验
+    deployment_id: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -125,13 +179,17 @@ def get_settings() -> Settings:
 settings = get_settings()
 
 
+def is_weak_jwt_secret(secret: str) -> bool:
+    """HS256 建议 ≥32 字节随机串；仅黑名单匹配挡不住 changeme / 123456 这类弱密钥。"""
+    value = (secret or "").strip()
+    return len(value) < 32 or value in {"change_me_in_prod", "dev", "secret"}
+
+
 def validate_runtime_config() -> None:
     """启动自检：生产环境禁止使用默认/过短的 JWT 密钥（否则 token 可被伪造）。"""
     if settings.app_env.strip().lower() not in {"prod", "production"}:
         return
-    secret = settings.jwt_secret.strip()
-    # HS256 建议 ≥32 字节随机串；仅黑名单匹配挡不住 changeme / 123456 这类弱密钥
-    if len(secret) < 32 or secret in {"change_me_in_prod", "dev", "secret"}:
+    if is_weak_jwt_secret(settings.jwt_secret):
         raise RuntimeError(
             "生产环境必须通过环境变量 JWT_SECRET 配置 ≥32 字节的随机密钥"
         )

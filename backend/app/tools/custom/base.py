@@ -9,7 +9,7 @@ orchestrator 的异步执行链），故在此对 `Tool` 做一层薄适配：
 - get_parameters：把子类的 parameters(JSON-schema dict) 转成 ToolParameter 列表
 子类只需按原有写法声明 name/description/parameters 并实现 async run 即可。
 """
-from typing import Any, List
+from typing import Any
 
 from hello_agents.tools import Tool, ToolParameter
 
@@ -23,10 +23,10 @@ class BaseTool(Tool):
     def __init__(self) -> None:
         super().__init__(name=self.name, description=self.description)
 
-    def get_parameters(self) -> List[ToolParameter]:
+    def get_parameters(self) -> list[ToolParameter]:
         props: dict[str, Any] = self.parameters.get("properties", {}) or {}
         required = set(self.parameters.get("required", []) or [])
-        result: List[ToolParameter] = []
+        result: list[ToolParameter] = []
         for pname, pdef in props.items():
             pdef = pdef or {}
             result.append(

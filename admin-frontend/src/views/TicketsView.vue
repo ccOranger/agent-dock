@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="head">
-          <b>客诉工单</b>
+          <b>工单管理</b>
           <span class="hint">共 {{ total }} 张</span>
         </div>
       </template>
@@ -15,7 +15,7 @@
         <el-select v-model="filters.urgency" placeholder="紧急度" clearable style="width: 120px">
           <el-option v-for="(label, val) in TICKET_URGENCY_LABELS" :key="val" :label="label" :value="val" />
         </el-select>
-        <el-input v-model="filters.category" placeholder="分类（如 logistics）" clearable style="width: 180px" />
+        <el-input v-model="filters.category" placeholder="分类（如 it_network / logistics）" clearable style="width: 200px" />
         <el-input v-model="filters.keyword" placeholder="工单号 / 内容关键字" clearable style="width: 220px" />
         <el-date-picker
           v-model="dateRange"
@@ -34,7 +34,7 @@
         <el-table-column prop="ticket_no" label="工单号" width="150">
           <template #default="{ row }"><span class="mono">{{ row.ticket_no }}</span></template>
         </el-table-column>
-        <el-table-column prop="content" label="投诉内容" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="content" label="问题描述" min-width="220" show-overflow-tooltip />
         <el-table-column prop="category" label="分类" width="120" />
         <el-table-column prop="urgency" label="紧急度" width="90">
           <template #default="{ row }">
@@ -79,10 +79,10 @@
           </el-descriptions-item>
           <el-descriptions-item label="分类">{{ current.category }}</el-descriptions-item>
           <el-descriptions-item label="紧急度">{{ urgencyLabel(current.urgency) }}</el-descriptions-item>
-          <el-descriptions-item label="客户 ID">
+          <el-descriptions-item label="用户 ID">
             <span class="mono">{{ current.user_id || '-' }}</span>
           </el-descriptions-item>
-          <el-descriptions-item label="投诉内容">{{ current.content }}</el-descriptions-item>
+          <el-descriptions-item label="问题描述">{{ current.content }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ fmt(current.created_at) }}</el-descriptions-item>
         </el-descriptions>
 
@@ -96,7 +96,7 @@
         </div>
 
         <div class="add-note">
-          <el-input v-model="noteText" type="textarea" :rows="2" placeholder="补录一条信息（订单号 / 快递单号 / 处理进展…）" />
+          <el-input v-model="noteText" type="textarea" :rows="2" placeholder="补录一条信息（资产编号 / 报错信息 / 处理进展…）" />
           <el-button type="primary" :loading="noteSaving" @click="onAddNote" style="margin-top: 8px">保存补录</el-button>
         </div>
       </div>

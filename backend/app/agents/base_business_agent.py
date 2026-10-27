@@ -2,6 +2,7 @@
 BaseBusinessAgent：所有业务 Agent 的抽象基类
 """
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 
 from hello_agents.agents import SimpleAgent
 from hello_agents.tools import ToolRegistry
@@ -77,6 +78,25 @@ class BaseBusinessAgent(ABC):
             tool_registry=registry,
         )
 
+    @staticmethod
+    def _time_facts() -> str:
+        """当前时间事实段：模型自身不知道今天是几号，不注入时「今天几号/现在几点」
+        只能答“无法获取系统时间”。业务 Agent 每轮新建，注入值始终是当轮新鲜时间；
+        精确到分钟即可，秒级抖动没有意义。"""
+        now = datetime.now().astimezone()
+        weekday = ("一", "二", "三", "四", "五", "六", "日")[now.weekday()]
+        offset = now.utcoffset() or timedelta(0)
+        minutes = int(offset.total_seconds() // 60)
+        sign = "+" if minutes >= 0 else "-"
+        hh, mm = divmod(abs(minutes), 60)
+        tz = f"UTC{sign}{hh}" + (f":{mm:02d}" if mm else "")
+        return (
+            "## 当前时间（服务器时钟，可直接采信）\n"
+            f"今天是 {now.strftime('%Y-%m-%d')}（星期{weekday}，{tz}），"
+            f"现在 {now.strftime('%H:%M')}。日期时间类问题直接据此回答，"
+            "不要声称无法获取系统时间，也不要建议用户自行查看日历。"
+        )
+
     def _final_system_prompt(self, available_tool_names: list[str]) -> str:
         """当确实带来了可用工具（代码自定义工具 / MCP）时，附加“必须调用工具”约束。
 
@@ -85,11 +105,11 @@ class BaseBusinessAgent(ABC):
         实时数据”而直接编造答案。因此只要有工具注册成功，就在系统提示里强制要求
         先调用工具再作答。
 
-        返回内容 = 子类业务提示词 + FORMAT_RULES（输出格式）+ 工具使用要求（仅在有工具时）。
+        返回内容 = 子类业务提示词 + 当前时间（事实）+ FORMAT_RULES（输出格式）+ 工具使用要求（仅在有工具时）。
         """
         prompt = (self.system_prompt or "").strip()
         # 格式约束统一后置：代码 Agent 与后台动态 Agent（system_prompt 来自 DB）拿到同一套排版口径
-        base = f"{prompt}\n\n{self.FORMAT_RULES}" if prompt else self.FORMAT_RULES
+        base = "\n\n".join(part for part in (prompt, self._time_facts(), self.FORMAT_RULES) if part)
         if not available_tool_names:
             return base
         tools_line = "、".join(available_tool_names)

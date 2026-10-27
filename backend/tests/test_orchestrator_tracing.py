@@ -15,13 +15,14 @@ from app.core.tracing import (
     SPAN_BUILD,
     SPAN_MEMORY,
     SPAN_PERSIST,
-    SPAN_RESOLVE,
     SPAN_RAG,
+    SPAN_RESOLVE,
     SPAN_ROUTER,
     SPAN_RUN,
     SPAN_TOOL,
     TraceCollector,
 )
+from app.tools import mcp_loader as mcp_loader_mod
 
 
 class FakeRouter:
@@ -43,7 +44,7 @@ class FakeRouter:
 
 
 class FakeCtx:
-    async def build(self, user_id, query, rag_namespaces, collector=None):
+    async def build(self, user_id, query, rag_namespaces, collector=None, runtime=None):
         if collector:
             collector.memory_hit_count = 2
             collector.add(SPAN_MEMORY, "memory_search", hit_count=2)
@@ -100,6 +101,12 @@ def _make_orch(monkeypatch, intents, agents, known=None, stream_events=None):
         for event in stream_events or [{"type": "text", "data": {"content": "答案"}}]:
             yield event
 
+    async def fake_fetch_mcp_configs(names):
+        # 链路测试不依赖 DB：MCP 配置缺失时按“未注册”处理，只验证 span 记录
+        return {}
+
+    # orchestrator 在 _run_business_agent 内部才 import fetch_mcp_configs，需补丁源头模块
+    monkeypatch.setattr(mcp_loader_mod, "fetch_mcp_configs", fake_fetch_mcp_configs)
     monkeypatch.setattr(orch_mod, "resolve_business_agent", fake_resolve)
     monkeypatch.setattr(orch_mod, "CONFIDENCE_THRESHOLD", 0.5)
     monkeypatch.setattr(Orchestrator, "_astream", staticmethod(fake_astream))
@@ -252,7 +259,15 @@ async def test_tool_error_counted_and_persisted_under_zero_sample(monkeypatch):
         {"order_service": FakeAgent("order_service")},
         stream_events=[
             {"type": "tool_call", "data": {"id": "c1", "name": "refund_apply", "args": {}}},
-            {"type": "tool_result", "data": {"id": "c1", "name": "refund_apply", "result": None, "error": "工具执行失败"}},
+            {
+                "type": "tool_result",
+                "data": {
+                    "id": "c1",
+                    "name": "refund_apply",
+                    "result": None,
+                    "error": "工具执行失败",
+                },
+            },
             {"type": "text", "data": {"content": "稍后再试"}},
         ],
     )

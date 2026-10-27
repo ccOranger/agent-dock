@@ -16,6 +16,9 @@ from qdrant_client import models as qmodels
 RAG_COLLECTION = os.getenv("RAG_QDRANT_COLLECTION", "rag_knowledge_base")
 KB_ROOT = os.getenv("RAG_KB_ROOT", "./data/knowledge_bases")
 
+# Qdrant HTTP 客户端超时（秒）：不设置时底层默认无限等待，集群不响应会挂死调用方
+_QDRANT_TIMEOUT_SECONDS = 10
+
 _client: QdrantClient | None = None
 
 
@@ -25,9 +28,9 @@ def get_qdrant_client() -> QdrantClient:
         url = os.getenv("QDRANT_URL")
         api_key = os.getenv("QDRANT_API_KEY")
         if url:
-            _client = QdrantClient(url=url, api_key=api_key or None)
+            _client = QdrantClient(url=url, api_key=api_key or None, timeout=_QDRANT_TIMEOUT_SECONDS)
         else:
-            _client = QdrantClient(host="localhost", port=6333)
+            _client = QdrantClient(host="localhost", port=6333, timeout=_QDRANT_TIMEOUT_SECONDS)
     return _client
 
 

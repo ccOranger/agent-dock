@@ -1,0 +1,61 @@
+name: 部署求助
+description: 安装、启动或升级过程中遇到问题
+title: "[Deploy] "
+labels: ["deployment"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        部署问题请尽量提供完整环境信息。提交前请先阅读 README 的快速开始与 docs/runbook.md。
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 部署方式
+      options:
+        - Docker Compose
+        - 本地开发
+        - 手动部署到服务器
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      placeholder: 例如 Ubuntu 24.04 / Windows 11 / macOS 15
+    validations:
+      required: true
+
+  - type: textarea
+    id: step
+    attributes:
+      label: 卡在哪一步
+      description: 对应文档步骤或命令
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: 完整报错
+      description: 请脱敏后粘贴
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已尝试的处理
+      description: 可选
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已阅读快速开始与运维手册
+          required: true
+        - label: 已移除密钥与客户敏感数据
+          required: true

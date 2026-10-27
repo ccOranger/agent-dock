@@ -1,0 +1,119 @@
+# 生产叠加编排：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# 需要 Compose v2.24.4+（web.ports 用到 !reset）
+#
+# 前置（仓库根 .env）：
+#   APP_ENV=production、JWT_SECRET、POSTGRES_PASSWORD、REDIS_PASSWORD、QDRANT_API_KEY、
+#   DOMAIN（解析到本机的域名）、DATA_ROOT（默认 /srv/smart-cs）
+# 首次部署先跑一次性初始化（见 docs/runbook.md §2.2），之后保持 INIT_ON_START=false。
+# 注意：本文件面向 Linux 主机；Windows 本地验证请把 DATA_ROOT 指到 D: 盘路径。
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?生产环境必须设置 POSTGRES_PASSWORD}
+    volumes:
+      - ${DATA_ROOT:-/srv/smart-cs}/pgdata:/var/lib/postgresql/data
+    cpus: 1.0
+    mem_limit: 1g
+    logging: *default-logging
+
+  qdrant:
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?生产环境必须设置 QDRANT_API_KEY}
+    volumes:
+      - ${DATA_ROOT:-/srv/smart-cs}/qdrantdata:/qdrant/storage
+      # 快照目录单独持久化，备份脚本从这里复制
+      - ${DATA_ROOT:-/srv/smart-cs}/qdrant_snapshots:/qdrant/snapshots
+    cpus: 2.0
+    mem_limit: 2g
+    logging: *default-logging
+
+  redis:
+    # healthcheck 里的 redis-cli 通过 REDISCLI_AUTH 自动带密码；
+    # 密码也会出现在 docker inspect 的 Command 中，生产也可改用挂载 redis.conf
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?生产环境必须设置 REDIS_PASSWORD}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?生产环境必须设置 REDIS_PASSWORD}
+    volumes:
+      - ${DATA_ROOT:-/srv/smart-cs}/redisdata:/data
+    cpus: 0.5
+    mem_limit: 512m
+    logging: *default-logging
+
+  # backend 以 appuser(1000) 运行，bind mount 首次创建时属主是 root，先校正再启动
+  init-perms:
+    image: pgvector/pgvector:pg16
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R 1000:1000 /data/backend /data/memory
+        echo "[init-perms] backenddata/memorydata 属主已调整为 1000:1000"
+    volumes:
+      - ${DATA_ROOT:-/srv/smart-cs}/backenddata:/data/backend
+      - ${DATA_ROOT:-/srv/smart-cs}/memorydata:/data/memory
+    restart: "no"
+    logging: *default-logging
+
+  backend:
+    environment:
+      APP_ENV: production
+      SEED_DEMO: "false"
+      # 生产不在每次启动时做建表/种子；初始化用一次性命令
+      INIT_ON_START: ${INIT_ON_START:-false}
+      # 密码含 @ : / 等字符时需 URL 编码，建议使用字母数字随机串
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cs_user}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:-cs_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?}@redis:6379/0
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?}
+    volumes:
+      - ${DATA_ROOT:-/srv/smart-cs}/backenddata:/app/backend/data
+      - ${DATA_ROOT:-/srv/smart-cs}/memorydata:/app/backend/memory_data
+    depends_on:
+      init-perms:
+        condition: service_completed_successfully
+    cpus: 2.0
+    mem_limit: 2g
+    logging: *default-logging
+
+  web:
+    # 只在 Docker 网络内给 Caddy 用，不再对外发布 8080
+    ports: !reset []
+    expose:
+      - "80"
+    cpus: 0.5
+    mem_limit: 256m
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2.8-alpine
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?生产环境必须设置 DOMAIN（已解析到本机的域名）}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 256m
+    logging: *default-logging
+
+volumes:
+  caddydata:
+  caddyconfig:

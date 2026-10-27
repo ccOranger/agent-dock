@@ -13,6 +13,7 @@ import time
 from app.core.config import settings
 from app.core.tracing import SPAN_MEMORY, SPAN_PERSIST, SPAN_RAG
 from app.tools.memory_factory import get_memory_tool
+from app.utils.async_io import run_in_pool
 from app.utils.text import compute_importance, estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,8 @@ _BG_TASKS: set = set()
 
 # working 镜像行过期清理节流：进程内至多 5 分钟扫一次，避免每轮对话都发 DELETE
 _WORKING_PURGE_INTERVAL_SECONDS = 300
-_last_working_purge: float = 0.0
+# None 表示本进程从未清理过；不能初始化为 0.0，否则开机不足 5 分钟（monotonic 很小）时首轮会被误判为刚扫过
+_last_working_purge: float | None = None
 
 # MemoryTool 检索结果行格式："N. [类型标签] 内容预览 (重要性: 0.55)"，预览超 80 字符带 ...
 _HIT_LINE_RE = re.compile(r"^\s*\d+\.\s*\[[^\]]+\]\s*(.*?)\s*(?:\(重要性: [0-9.]+\)|\(importance: [0-9.]+\))\s*$")
@@ -38,7 +40,7 @@ def _maybe_purge_expired_working() -> None:
     """按 spec 8.1 的 30 分钟寿命清理未晋升的 working 镜像行，fire-and-forget 不阻塞主链路"""
     global _last_working_purge
     now = time.monotonic()
-    if now - _last_working_purge < _WORKING_PURGE_INTERVAL_SECONDS:
+    if _last_working_purge is not None and now - _last_working_purge < _WORKING_PURGE_INTERVAL_SECONDS:
         return
     _last_working_purge = now
 
@@ -57,6 +59,11 @@ def _maybe_purge_expired_working() -> None:
     task.add_done_callback(_BG_TASKS.discard)
 
 
+async def _empty() -> str:
+    """与 _recall_rag 同形状的空结果：rag.inject=false 时用，保持 gather 结构不变。"""
+    return ""
+
+
 class ContextEngineer:
     async def build(
         self,
@@ -64,15 +71,23 @@ class ContextEngineer:
         query: str,
         rag_namespaces: list[str] | None,
         collector=None,
+        runtime=None,
     ) -> str:
         """构建增强后的 query：注入记忆与知识库上下文
 
         collector 不为空时，把“召回了多少、哪个知识库命中、是否因预算被丢弃”
         记为 span，否则这些只能靠日志推测。
+
+        runtime 是本场景生效的运行参数（检索条数/最低分/超时/是否自动注入），
+        为空时全部回退全局 Settings，行为与旧版本一致。
         """
+        rag_inject = True if runtime is None else bool(runtime.rag_inject)
         memory_ctx, rag_ctx = await asyncio.gather(
-            self._recall_memory(user_id, query, collector),
-            self._recall_rag(rag_namespaces or [], query, collector),
+            self._recall_memory(user_id, query, collector, runtime),
+            # inject=false 只关掉“自动注入”，不阻止模型主动调用 RAG 工具
+            self._recall_rag(rag_namespaces or [], query, collector, runtime)
+            if rag_inject
+            else _empty(),
         )
 
         # Token 预算裁剪：为 system + history 预留
@@ -102,13 +117,17 @@ class ContextEngineer:
             return query
         return "\n\n".join(parts) + f"\n\n【客户问题】\n{query}"
 
-    async def _recall_memory(self, user_id: str, query: str, collector=None) -> str:
+    async def _recall_memory(self, user_id: str, query: str, collector=None, runtime=None) -> str:
         """记忆检索，失败降级为空"""
         started_ms = collector.now_ms() if collector else 0
+        timeout = runtime.rag_timeout if runtime is not None else settings.rag_timeout
         try:
             tool = get_memory_tool(user_id)
-            result = await asyncio.to_thread(
-                tool.run, {"action": "search", "query": query, "limit": 5}
+            # 硬超时 + 专用线程池：记忆检索底层也是 Qdrant/embedding，挂起时降级为空，
+            # 不能让“preparing”阶段无限等待，也不能占满事件循环默认线程池
+            result = await asyncio.wait_for(
+                run_in_pool(tool.run, {"action": "search", "query": query, "limit": 5}),
+                timeout=timeout,
             )
             items = self._flatten(result) if result else []
             if collector:
@@ -143,7 +162,9 @@ class ContextEngineer:
                 )
             return ""
 
-    async def _recall_rag(self, namespaces: list[str], query: str, collector=None) -> str:
+    async def _recall_rag(
+        self, namespaces: list[str], query: str, collector=None, runtime=None
+    ) -> str:
         """知识库检索（跨多个命名空间，按相似度归并），失败降级为空"""
         namespaces = [n for n in namespaces if n]
         if not namespaces:
@@ -151,7 +172,9 @@ class ContextEngineer:
         from app.services.rag_service import RagService
 
         svc = RagService()
-        top_k = settings.rag_top_k
+        top_k = runtime.rag_top_k if runtime is not None else settings.rag_top_k
+        min_score = runtime.rag_min_score if runtime is not None else None
+        timeout = runtime.rag_timeout if runtime is not None else None
 
         if collector:
             for ns in namespaces:
@@ -161,7 +184,9 @@ class ContextEngineer:
             started_ms = collector.now_ms() if collector else 0
             try:
                 # 纯向量检索（关闭 HyDE+MQE 高级检索）以保证对话延迟
-                results = await svc.search(ns, query, top_k=top_k, advanced=False)
+                results = await svc.search(
+                    ns, query, top_k=top_k, min_score=min_score, advanced=False, timeout=timeout
+                )
                 return ns, list(results or []), None, started_ms
             except Exception as e:  # noqa: BLE001
                 return ns, [], e, started_ms
@@ -298,7 +323,7 @@ class ContextEngineer:
 
         tool = get_memory_tool(user_id)
         for row in rows:
-            await asyncio.to_thread(
+            await run_in_pool(
                 tool.run,
                 {
                     "action": "add",
@@ -310,6 +335,8 @@ class ContextEngineer:
             )
             await MemoryRepo.upsert_mirror(
                 user_id=row.user_id,
+                # 访客镜像行的归属列是 visitor_id，user_id 为空；直接透传两列避免写成 NULL 丢隔离
+                visitor_id=getattr(row, "visitor_id", None),
                 memory_uid=row.memory_uid,
                 type_="episodic",
                 content=row.content,
@@ -356,7 +383,7 @@ class ContextEngineer:
             importance = compute_importance(query, metadata, signals)
             tool = get_memory_tool(user_id)
             # spec 8.1：每轮都写 working 层（进程内、带 TTL，参与召回最高优先），不再因未达阈而丢弃
-            await asyncio.to_thread(
+            await run_in_pool(
                 tool.run,
                 {
                     "action": "add",
@@ -377,7 +404,7 @@ class ContextEngineer:
             )
             mirror_type = "working"
             if promote:
-                await asyncio.to_thread(
+                await run_in_pool(
                     tool.run,
                     {
                         "action": "add",

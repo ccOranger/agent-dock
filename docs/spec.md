@@ -26,6 +26,18 @@
 | U07 | 人员/客户分表（staff_users / customer_users）与双入口鉴权 | §4、§12 | [↗](updates/07-staff-customer-auth-split.md) |
 | U08 | 知识库管理增强（namespace CRUD / 归档下载 / 手工 FAQ / 分块浏览 / 高级检索） | §4、§9 | [↗](updates/08-knowledge-base-admin.md) |
 | U09 | 异步自定义工具执行机制（协程工具回投主 loop 真正落地） | §6、§7 | [↗](updates/09-async-tool-execution.md) |
+| U10 | 自定义工具管理（代码 BaseTool 目录登记、MCP 描述字段） | §4、§6 | [↗](updates/10-custom-tool-management.md) |
+| U11 | 代码 Agent 信息透明与状态治理 | §4、§7 | [↗](updates/11-code-agent-transparency-state.md) |
+| U12 | Agent 路由线索与兜底动态化 | §7 | [↗](updates/12-agent-routing-clues.md) |
+| U13 | 路由分发器后台只读视图 | §5、§7 | [↗](updates/13-router-agent-readonly.md) |
+| U14 | 兜底意图应答通道（`ROUTER_FALLBACK_ANSWER`） | §7、§10 | [↗](updates/14-fallback-answer-path.md) |
+| U15 | 链路详情显示路由意图依据（`clue_basis`） | §7、§14 | [↗](updates/15-route-intent-evidence.md) |
+| U16 | 高频固定话术（硬模板 + 后台可配） | §4、§7 | [↗](updates/16-canned-scripts-db.md) |
+| U17 | IT Helpdesk 场景包与包启停（历史，机制已移除） | §3、§7 | [↗](updates/17-it-helpdesk-pack.md) |
+| U18 | 接入方与 Key 归属（integrations） | §4、§12 | [↗](updates/18-integration-keys.md) |
+| U19 | 匿名接入的接入方归属 | §4、§12 | [↗](updates/19-anonymous-integration-attribution.md) |
+| U20 | 单租户降级与自定义埋点（chat_events） | §4、§12 | [↗](updates/20-single-tenant-degradation.md) |
+| U21 | 场景身份话术、场景运行参数与登录人配额 | §4、§12、§13 | [↗](updates/21-scene-identity-runtime-quota.md) |
 
 > 接口清单以 [`api.md`](api.md) 为准（已同步全部实际端点与 SSE 事件）；部署/运维以 [`runbook.md`](runbook.md) 为准。
 
@@ -336,31 +348,31 @@ smart-cs/
 │   │   │   ├── base_business_agent.py
 │   │   │   ├── router_agent.py
 │   │   │   ├── orchestrator.py
-│   │   │   ├── registry.py
+│   │   │   ├── registry.py               # 显式登记代码 Agent（_CODE_AGENTS）
+│   │   │   ├── canned_scripts.py
+│   │   │   ├── llm_factory.py
 │   │   │   ├── business/
 │   │   │   │   ├── __init__.py
+│   │   │   │   ├── dynamic_agent.py      # 动态 Agent（内核能力）
 │   │   │   │   ├── knowledge_agent.py
 │   │   │   │   ├── order_agent.py
-│   │   │   │   └── complaint_agent.py
+│   │   │   │   ├── complaint_agent.py
+│   │   │   │   └── it_*.py               # IT 知识/故障/资产
 │   │   │   └── prompts/
 │   │   │       ├── __init__.py
-│   │   │       ├── router.py
-│   │   │       ├── knowledge.py
-│   │   │       ├── order.py
-│   │   │       └── complaint.py
+│   │   │       ├── router.py             # 路由提示词（内核）
+│   │   │       └── {knowledge,order,complaint,it_*}.py
 │   │   ├── tools/
 │   │   │   ├── __init__.py
 │   │   │   ├── memory_factory.py
 │   │   │   ├── rag_factory.py
 │   │   │   ├── mcp_loader.py
+│   │   │   ├── custom_catalog.py
+│   │   │   ├── custom_loader.py
 │   │   │   └── custom/
 │   │   │       ├── __init__.py
-│   │   │       ├── base.py                # BaseTool 适配层（async run(**kwargs)）
-│   │   │       ├── mock_data.py           # 固定数据集（进程内工具与 MCP 服务共用）
-│   │   │       ├── order_tool.py
-│   │   │       ├── logistics_tool.py
-│   │   │       ├── ticket_tool.py
-│   │   │       └── refund_tool.py
+│   │   │       ├── base.py               # BaseTool 适配层（async run(**kwargs)）
+│   │   │       └── {order,logistics,refund,ticket,it_*}_tool.py + mock_*.py
 │   │   ├── models/
 │   │   ├── schemas/
 │   │   ├── services/
@@ -381,7 +393,7 @@ smart-cs/
 │   ├── pyproject.toml
 │   ├── requirements.txt
 │   └── .env.example
-├── frontend/                     # Vue3 客户对话端（端口 5173）
+├── frontend/                     # Vue3 客户对话端（npm workspace，端口 5173）
 │   ├── src/
 │   │   ├── main.ts
 │   │   ├── App.vue
@@ -392,17 +404,21 @@ smart-cs/
 │   │   │   ├── customer/
 │   │   │   └── LoginView.vue
 │   │   ├── components/
-│   │   └── types/
+│   │   └── types/               # 基础类型转出 @cs/shared，业务类型本地维护
 │   ├── package.json
-│   ├── vite.config.ts
+│   ├── vite.config.ts            # alias @shared -> packages/shared/src
 │   └── tsconfig.json
-├── admin-frontend/               # Vue3 管理后台（独立工程，端口 5174）
+├── admin-frontend/               # Vue3 管理后台（npm workspace，端口 5174）
 │   ├── src/
 │   │   ├── api/  components/  layouts/  router/  stores/  types/
 │   │   └── views/               # AgentList/KnowledgeBaseView/TicketsView/
 │   │                             # TracesView/MemoryView/InquiriesView/McpServersView/Dashboard
 │   ├── package.json
 │   └── vite.config.ts
+├── packages/
+│   └── shared/                   # @cs/shared：http（401 单飞刷新）/auth store/SSE/基础类型
+│       └── src/
+├── package.json                  # npm workspaces 根：dev:chat / dev:admin / build
 ├── docs/
 │   ├── spec.md
 │   ├── api.md
@@ -455,6 +471,8 @@ CREATE TABLE staff_users (
                     CHECK (role IN ('agent','admin')),
     display_name    VARCHAR(64),
     metadata        JSONB DEFAULT '{}'::jsonb,
+    -- 资源创建配额：键缺失/null=不限，0=禁止创建，正数=上限（U21）
+    quota           JSONB NOT NULL DEFAULT '{}'::jsonb,
     is_active       BOOLEAN DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -670,13 +688,83 @@ CREATE INDEX IF NOT EXISTS idx_traces_outcome_created ON request_traces(outcome,
 CREATE INDEX IF NOT EXISTS idx_traces_agents ON request_traces USING gin (agent_names);
 CREATE INDEX IF NOT EXISTS idx_traces_tools ON request_traces USING gin (tool_names);
 CREATE INDEX IF NOT EXISTS idx_traces_mcp ON request_traces USING gin (mcp_server_names);
+
+-- ========== 业务场景（无 scene_code 的请求落默认场景） ==========
+CREATE TABLE scenes (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code            VARCHAR(32) UNIQUE NOT NULL,          -- 对外场景码，创建后不可改
+    display_name    VARCHAR(64) NOT NULL,
+    description     TEXT,
+    status          VARCHAR(16) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active','paused','archived')),
+    is_default      BOOLEAN NOT NULL DEFAULT FALSE,       -- 全库唯一（部分唯一索引）
+    router_mode     VARCHAR(16) NOT NULL DEFAULT 'auto'
+                    CHECK (router_mode IN ('auto','llm','direct')),
+    fallback_agent_id UUID,                               -- 不建外键
+    runtime_config  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- 场景运行参数，{} = 全部继承全局（U21）
+    widget_config   JSONB NOT NULL DEFAULT '{}'::jsonb,
+    allowed_origins JSONB NOT NULL DEFAULT '[]'::jsonb,
+    publish_key     VARCHAR(64),                          -- 前端嵌入公开标识（非密钥）
+    created_by      UUID,                                 -- 创建人，登录人配额按此统计（U21）
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_scenes_single_default ON scenes(is_default) WHERE is_default;
+CREATE INDEX idx_scenes_created_by ON scenes(created_by);
+
+-- ========== 场景 ↔ Agent（多对多；enabled 只影响本场景） ==========
+CREATE TABLE scene_agents (
+    scene_id        UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+    agent_id        UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order      INT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (scene_id, agent_id)
+);
+CREATE INDEX idx_scene_agents_scene_enabled ON scene_agents(scene_id, enabled, sort_order);
+
+-- ========== 固定话术（scene_id NULL = 全局模板，同 key 场景行覆盖全局） ==========
+CREATE TABLE canned_scripts (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scene_id      UUID REFERENCES scenes(id) ON DELETE CASCADE,
+    key           VARCHAR(64) NOT NULL,                   -- 业务可读标识
+    title         VARCHAR(128),
+    category      VARCHAR(16) NOT NULL DEFAULT 'business',-- identity | capability | probing | business
+    patterns      JSONB NOT NULL DEFAULT '[]'::jsonb,     -- 问法主干（整句全等）
+    keywords      JSONB NOT NULL DEFAULT '[]'::jsonb,     -- 关键词（包含即命中）
+    reply_text    TEXT NOT NULL DEFAULT '',
+    answer_source VARCHAR(16) NOT NULL DEFAULT 'text'     -- text=逐字下发；kb=检索后拼接（U21）
+                  CHECK (answer_source IN ('text','kb')),
+    kb_namespaces JSONB NOT NULL DEFAULT '[]'::jsonb,     -- answer_source=kb 的检索范围
+    priority      INT NOT NULL DEFAULT 0,                 -- 小者优先
+    enabled       BOOLEAN NOT NULL DEFAULT TRUE,
+    is_builtin    BOOLEAN NOT NULL DEFAULT FALSE,         -- 可改文案/停用，不可删
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_canned_scripts_scene_key UNIQUE NULLS NOT DISTINCT (scene_id, key)
+);
+CREATE INDEX idx_canned_scripts_scene_enabled_priority
+    ON canned_scripts(scene_id, enabled, priority);
+
+-- ========== schema 版本（启动时断言；不匹配请跑迁移） ==========
+-- 当前值 8；新增列/表必须同时提升 init_db.sql 与 app 侧的 SCHEMA_VERSION，并补一个 scripts/migrations/NNNN_*.sql
+INSERT INTO schema_meta (key, value) VALUES ('version', '8')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 ```
+
+> `agents` / `knowledge_bases` 同样带 `created_by`（代码 Agent 与种子知识库为 `NULL`，不计入任何人的配额）；`chat_events` 是 U20 引入的全量埋点表，带 `(scene_code, created_at)` 索引。
 
 ### 4.2 迁移与 Schema 演进
 
-- **本项目处开发阶段，schema 频繁变动**（如 `users` 拆分、工单迁表、链路表新增）。改 ORM 模型后**无需手写增量迁移**，直接对目标库全量重建 + 灌种子（⚠️ 清空业务数据，仅限开发）：`python scripts/rebuild_and_seed.py`（DROP 旧表含遗留 `users` → `create_all` 建表 → seed；单往返 simple query 适配云库代理）。
-- `init_db.sql` 与 ORM（`models/entities.py`）保持一致；新增列/表在 SQL 里用 `CREATE TABLE IF NOT EXISTS` 便于既有库增量补建。
-- 进入稳定期后再引入 Alembic：`alembic upgrade head` / `alembic downgrade -1`，提交前双向测试。
+- **存量库走版本化迁移**（W1 落地）：`scripts/migrations/NNNN_slug.sql` + `schema_migrations` 记录表，
+  `python -m app.migrate` 顺序升级（`--check` 只读、`--dry-run` 事务内试跑后回滚、`--backup` 先 `pg_dump`）；
+  每个文件独立事务、checksum 按 LF 归一化、历史文件被改即中止。空库仍由 `init_db.sql` 一次建到最新结构（不存 baseline 副本，避免双份 DDL 漂移）。
+- **全量重建仅限开发/演示**：`python scripts/rebuild_and_seed.py`（DROP 旧表 → `init_db.sql` 建表 → seed），
+  `APP_ENV=production` 时默认拒执行（需显式 `--force`）。
+- `init_db.sql` 与 ORM（`models/entities.py`）保持一致，`scripts/verify_schema.py` 逐表逐列比对两条路径；新增列/表在迁移 SQL 里用 `IF NOT EXISTS` 便于新库已到位时幂等补跑。
+- `schema_meta.version` 是唯一的结构版本源（当前 `8`）：后端启动断言，`verify_schema.py` 校验，不匹配直接报错而不是带病运行。版本历史：`2`（多场景）→ `3`（接入方三表 + `visitors.integration_id`）→ `4`（`integrations.public_code`）→ `5`（`chat_events`）→ `6`（`canned_scripts.answer_source/kb_namespaces`、`scenes.runtime_config/created_by`、`agents.created_by`、`knowledge_bases.created_by`、`staff_users.quota`）→ `7`（`chat_usage_daily` + `chat_events.tokens_estimated`，W2）→ `8`（`eval_runs`，W4）。
+- 不引入 Alembic：本项目 DDL 以手写 SQL 为单一真相（`init_db.sql` 与迁移文件同源），且需保持无额外依赖可部署。
 
 ---
 
@@ -1533,7 +1621,8 @@ class Orchestrator:
 
 ### 7.7 新增业务 Agent 的标准流程（SOP）
 
-**目标**：不修改路由逻辑、不修改 Orchestrator，即可新增一个业务。
+**目标**：新增业务 Agent 只改 Agent 类与登记表，不修改路由逻辑与 Orchestrator。
+业务 Agent 放在 `app/agents/business/`，并在 `registry.py` 的 `_CODE_AGENTS` 中登记。
 
 #### Step 1：创建业务 Agent 类
 
@@ -1543,14 +1632,15 @@ touch backend/app/agents/business/refund_agent.py
 
 ```python
 from hello_agents.tools import ToolRegistry
+
 from app.agents.base_business_agent import BaseBusinessAgent
 from app.agents.prompts.refund import REFUND_SYSTEM_PROMPT
-from app.tools.memory_factory import get_memory_tool
 from app.tools.custom.refund_tool import SubmitRefundTool
+from app.tools.memory_factory import get_memory_tool
 
 
 class RefundAgent(BaseBusinessAgent):
-    name = "refund_service"
+    name = "refund_service"          # 全局唯一，路由与 DB 均以它为标识
     description = "退款服务：申请退款、查询退款进度、退款政策咨询"
     system_prompt = REFUND_SYSTEM_PROMPT
     llm_model = "gpt-4o"
@@ -1569,25 +1659,33 @@ touch backend/app/agents/prompts/refund.py
 
 #### Step 3：开发业务专属工具（可选）
 
+工具继承内核的 `app.tools.custom.base.BaseTool`，实现放在 `app/tools/custom/`：
+
 ```bash
 touch backend/app/tools/custom/refund_tool.py
 ```
 
-#### Step 4：注册到注册表
+#### Step 4：登记 Agent 与工具
 
 ```python
 # backend/app/agents/registry.py
 from app.agents.business.refund_agent import RefundAgent
 
-AGENT_REGISTRY = {
-    KnowledgeAgent.name: KnowledgeAgent,
-    OrderAgent.name: OrderAgent,
-    ComplaintAgent.name: ComplaintAgent,
-    RefundAgent.name: RefundAgent,          # 新增一行
-}
+_CODE_AGENTS = (..., RefundAgent)
+
+# backend/app/tools/custom_catalog.py
+from app.tools.custom.refund_tool import SubmitRefundTool
+
+_TOOL_CLASSES = (..., SubmitRefundTool)
 ```
 
-#### Step 5：DB 登记（可选，重启时会自动补登）
+注册表在进程启动时构建：Agent 必须是 `BaseBusinessAgent` 子类、工具必须是 `BaseTool` 子类，
+name 全局唯一。
+
+#### Step 5：重启后端
+
+注册表在进程启动时构建，重启后生效。
+如需在后台展示自定义名称或控制开关，可在 `agents` 表补一行（可选，不补时按默认启用处理）：
 
 ```sql
 INSERT INTO agents (name, display_name, description, enabled)
@@ -1597,19 +1695,18 @@ VALUES ('refund_service', '退款服务', '申请退款、查询进度', true);
 #### Step 6：测试
 
 ```python
-# tests/agents/test_refund_agent.py
-async def test_refund_agent_route():
-    orch = Orchestrator()
-    events = [e async for e in orch.dispatch(
-        user_id="u1", session_id="s1",
-        query="我要申请退款", history=[],
-    )]
-    assert any(e["type"] == "text" for e in events)
+# 注册表已生效（无需真模型）
+from app.agents.registry import AGENT_REGISTRY
+
+
+def test_refund_agent_registered():
+    assert "refund_service" in AGENT_REGISTRY
 ```
 
 #### Step 7：完成
 
-路由 Agent 会自动在 prompt 中看到 `refund_service`（因为 `RouterAgent._build_prompt()` 从注册表动态生成），无需改路由代码。
+路由 Agent 会自动在 prompt 中看到 `refund_service`（`RouterAgent._build_prompt()` 从
+`AGENT_REGISTRY` + DB 动态 Agent 生成），无需改路由代码。
 
 ### 7.8 自定义工具（继承 BaseTool）
 
@@ -2135,6 +2232,30 @@ SENSITIVE_PATTERNS = [
 | 单 IP 登录 | 10 次/分钟 |
 | 全局并发 SSE | 500 |
 
+单主体限流参数走 `PUBLIC_CHAT_*` 环境变量（默认 30 次/分、2000 次/日、并发 3），Redis 故障 fail-open；本表是进程级兜底，与场景维度额度同时生效。
+
+### 12.5 创建配额与场景额度（U21）
+
+**登录人创建配额**：`staff_users.quota` JSONB，键 `max_scenes` / `max_agents` / `max_knowledge_bases`。
+
+| 值 | 含义 |
+|----|------|
+| 键缺失 / `null` | 不限（新账号默认） |
+| `0` | 禁止创建 |
+| `> 0` | 上限 |
+
+- 只统计 `created_by = 当前登录人`；`created_by IS NULL`（默认场景、seed 代码 Agent、演示数据）不计入任何人；
+- 删除立即释放，编辑不消耗，归档场景仍占用（行还在）；
+- 超限 `QuotaExceeded`（`3006` / 403），同时写 `audit_logs(action="quota.reject")`；
+- 并发用进程内 `(user_id, kind)` 的 `asyncio.Lock` 串行化「校验 + 创建」，多进程部署接受极小超额窗口；
+- 管理员不能改自己的配额与角色，后台「人员与配额」页只对 `staff_users` 生效（客户账号不受限）。
+
+**场景请求额度**：`scenes.runtime_config.quota.per_minute` / `quota.daily`（范围 0–600 / 0–100000）。
+
+- `0` / 空 = **不限**，且**不继承** `PUBLIC_CHAT_*`（后者限的是单主体，场景额度限的是整场景）；
+- Redis 桶由 3 个扩到 5 个（主体分钟/日 + 场景分钟/日 + 主体并发流），仍是一次 pipeline 提交全部 `INCR`，在内存判定；任一超限就回滚**本次已自增的全部键**再抛 `4029`（回滚到 ≤0 时删键，避免跨分钟留下无 TTL 的负计数）；
+- 后台场景列表的 `today_requests` / `quota_daily` / `quota_source` 由一条 `GROUP BY scene_code` 聚合，禁止逐场景 count。
+
 ---
 
 ## 13. 错误码规范
@@ -2149,6 +2270,7 @@ SENSITIVE_PATTERNS = [
 | 2004 | 404 | 账号不存在，请先注册（客户登录引导） |
 | 3001 | 404 | 资源不存在 |
 | 3002 | 409 | 资源冲突（重名 / 仍被引用） |
+| 3006 | 403 | 创建数量已达上限（登录人配额） |
 | 4001 | 400 | 工具参数校验失败 |
 | 4003 | 400 | 输入包含不安全内容 |
 | 4029 | 429 | 请求过于频繁 |

@@ -1,4 +1,5 @@
 """路由分发器只读接口：档案字段、生效提示词实时渲染、无线上修改入口、RBAC（Repo 全 mock）"""
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import admin_router as ar
 from app.core.config import settings
-from app.models.repositories import AgentRepo
+from app.models.repositories import AgentRepo, CannedScriptRepo
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME, DEFAULT_SCENE_ID, SceneContext
 
 PATH = ar.router.prefix  # /admin/router
 
@@ -23,6 +25,15 @@ def _dyn_row(name="refund_service", **kw):
         rag_namespace=kw.get("rag_namespace", None),
         mcp_tool_names=kw.get("mcp_tool_names", []),
     )
+
+
+def _stub_scene_scripts(monkeypatch, rows=None):
+    """身份话术警告要读 canned_scripts：按场景归组，测试里不落库。"""
+
+    async def fake_list_all():
+        return rows or []
+
+    monkeypatch.setattr(CannedScriptRepo, "list_all", fake_list_all)
 
 
 def _stub_agents(monkeypatch, *, dynamic_rows=None, code_rows=None):
@@ -59,22 +70,29 @@ def test_router_info_reports_effective_params(admin_client, monkeypatch):
     # 模板原文与占位符说明都要能查到
     assert "{agent_list}" in data["system_prompt_template"]
     placeholders = {p["name"] for p in data["placeholders"]}
-    assert placeholders == {"{agent_list}", "{conversation}", "{last_agent}", "{max_intents}", "{fallback_agent}"}
+    assert placeholders == {
+        "{scene_rules}",
+        "{agent_list}",
+        "{conversation}",
+        "{last_agent}",
+        "{max_intents}",
+        "{fallback_agent}",
+    }
 
 
 def test_router_prompt_reflects_current_agent_library(admin_client, monkeypatch):
     _stub_agents(monkeypatch, dynamic_rows=[_dyn_row()])
     data = admin_client.get(f"{PATH}/prompt").json()["data"]
     prompt = data["prompt"]
-    # 代码 Agent 与库中动态 Agent 都进入清单
-    assert "- order_service：" in prompt
+    # 内核代码 Agent 与库中动态 Agent 都进入清单
+    assert f"- {DEFAULT_ASSISTANT_NAME}：" in prompt
     assert "- refund_service：" in prompt
     assert "关键词：退款、到账" in prompt
     assert "典型问法：钱什么时候退回来" in prompt
     names = {c["name"] for c in data["candidates"]}
-    assert {"order_service", "refund_service"} <= names
+    assert {DEFAULT_ASSISTANT_NAME, "refund_service"} <= names
     assert data["candidate_count"] == len(data["candidates"])
-    assert data["fallback_agent"] == "knowledge_qa"
+    assert data["fallback_agent"] == DEFAULT_ASSISTANT_NAME
     assert data["fallback_from_candidates"] is True
 
 
@@ -105,12 +123,13 @@ def test_router_prompt_reports_clue_level_and_truncation(admin_client, monkeypat
     assert kw["keywords_injected"][:2] == ["k0", "k1"]
 
 
-def test_fallback_degrades_when_knowledge_qa_disabled(admin_client, monkeypatch):
-    disabled = SimpleNamespace(name="knowledge_qa", source="code", enabled=False)
-    _stub_agents(monkeypatch, code_rows=[disabled])
+def test_fallback_degrades_when_preferred_agent_disabled(admin_client, monkeypatch):
+    disabled = SimpleNamespace(name=DEFAULT_ASSISTANT_NAME, source="code", enabled=False)
+    # 优先候选被禁用，但清单里仍有其它可用 Agent（动态 Agent）→ 降级到首项
+    _stub_agents(monkeypatch, code_rows=[disabled], dynamic_rows=[_dyn_row()])
     data = admin_client.get(f"{PATH}/prompt").json()["data"]
     names = {c["name"] for c in data["candidates"]}
-    assert "knowledge_qa" not in names
+    assert DEFAULT_ASSISTANT_NAME not in names
     # 兜底不再指向被禁用的 Agent，而是降级到生效清单首项
     assert data["fallback_agent"] in names
     assert data["fallback_from_candidates"] is False
@@ -136,3 +155,261 @@ def test_non_admin_cannot_view_router(make_test_app):
         resp = client.get(PATH)
         assert resp.status_code == 403, role
         assert resp.json()["detail"]["code"] == 2003
+
+
+# ===== M3 场景路由档案 =====
+def _cand(name: str) -> dict:
+    return {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "display_name": name,
+        "description": f"{name} 的适用范围",
+        "source": "dynamic",
+        "scene_id": "scene-1",
+        "routing_keywords": [],
+        "routing_examples": [],
+        "sort_order": 0,
+    }
+
+
+def _ctx(*, code: str = "mall_order", name: str = "商城订单", candidates=None, **kw) -> SceneContext:
+    candidates = tuple(candidates or [])
+    base = {
+        "scene_id": DEFAULT_SCENE_ID,
+        "code": code,
+        "is_default": False,
+        "router_mode": "auto",
+        "agent_names": tuple(c["name"] for c in candidates),
+        "direct_agent": None,
+        "name": name,
+        "status": "active",
+        "candidates": candidates,
+    }
+    base.update(kw)
+    return SceneContext(**base)
+
+
+def test_router_template_matches_legacy_path(admin_client):
+    assert admin_client.get(f"{PATH}/template").json()["data"] == admin_client.get(PATH).json()["data"]
+
+
+def test_router_scenes_lists_summaries(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service"), _cand("refund_service")])
+
+    async def fake_list_all():
+        return [SimpleNamespace(id=DEFAULT_SCENE_ID, code="mall_order", display_name="商城订单")]
+
+    async def fake_load(code, require_active=True):
+        assert code == "mall_order"
+        assert require_active is False  # 后台要能看停用场景的档案
+        return ctx
+
+    monkeypatch.setattr(ar.SceneRepo, "list_all", fake_list_all)
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(monkeypatch)
+
+    data = admin_client.get(f"{PATH}/scenes").json()["data"]
+    assert len(data) == 1
+    assert data[0]["scene_code"] == "mall_order"
+    assert data[0]["mode"] == "llm"
+    assert data[0]["candidate_count"] == 2
+    # 列表不带候选明细与提示词正文
+    assert "candidates" not in data[0]
+    assert "prompt" not in data[0]
+
+
+def test_router_scene_detail_returns_candidates(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service"), _cand("refund_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(monkeypatch)
+    data = admin_client.get(f"{PATH}/scenes/mall_order").json()["data"]
+    assert data["scene_name"] == "商城订单"
+    assert data["candidate_count"] == 2
+    assert {c["name"] for c in data["candidates"]} == {"order_service", "refund_service"}
+    assert isinstance(data["warnings"], list)
+    assert len(data["prompt_hash"]) == 12
+
+
+# ===== 身份话术警告：没配本场景身份话术就提醒 =====
+def _scene_detail(client):
+    return client.get(f"{PATH}/scenes/mall_order").json()["data"]
+
+
+def test_scene_detail_warns_without_identity_script(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(monkeypatch)
+
+    data = _scene_detail(admin_client)
+    assert "no_identity_script" in data["warnings"]
+
+
+def test_scene_detail_clears_warning_with_scene_row(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(
+        monkeypatch,
+        [
+            SimpleNamespace(
+                scene_id=uuid.UUID(DEFAULT_SCENE_ID), key="identity", enabled=True
+            )
+        ],
+    )
+
+    data = _scene_detail(admin_client)
+    assert "no_identity_script" not in data["warnings"]
+
+
+def test_global_identity_row_does_not_clear_warning(admin_client, monkeypatch):
+    """只有全局行时仍要提醒：继承全局文案正是要让运营看到的事"""
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(
+        monkeypatch, [SimpleNamespace(scene_id=None, key="identity", enabled=True)]
+    )
+
+    data = _scene_detail(admin_client)
+    assert "no_identity_script" in data["warnings"]
+
+
+def test_disabled_scene_identity_row_still_warns(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(
+        monkeypatch,
+        [
+            SimpleNamespace(
+                scene_id=uuid.UUID(DEFAULT_SCENE_ID), key="identity", enabled=False
+            )
+        ],
+    )
+
+    data = _scene_detail(admin_client)
+    assert "no_identity_script" in data["warnings"]
+
+
+def test_scene_list_warns_per_scene(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service")])
+
+    async def fake_list_all():
+        return [SimpleNamespace(id=DEFAULT_SCENE_ID, code="mall_order", display_name="商城订单")]
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar.SceneRepo, "list_all", fake_list_all)
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    _stub_scene_scripts(monkeypatch)
+
+    summaries = admin_client.get(f"{PATH}/scenes").json()["data"]
+    assert "no_identity_script" in summaries[0]["warnings"]
+
+
+def test_router_scene_prompt_is_scene_scoped(admin_client, monkeypatch):
+    ctx = _ctx(candidates=[_cand("order_service"), _cand("refund_service")])
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    data = admin_client.get(f"{PATH}/scenes/mall_order/prompt").json()["data"]
+    assert "code: mall_order" in data["prompt"]
+    assert "本场景可用 Agent：order_service、refund_service" in data["prompt"]
+    assert data["prompt_chars"] > 0
+    assert data["prompt_hash"] == data["prompt_hash"][:12]
+    assert len(data["prompt_hash"]) == 12
+
+
+def test_router_scene_test_direct_does_not_call_model(admin_client, monkeypatch):
+    ctx = _ctx(
+        code="default",
+        name="默认场景",
+        candidates=[_cand("default_assistant")],
+        router_mode="direct",
+        is_default=True,
+    )
+
+    async def fake_load(code, require_active=True):
+        return ctx
+
+    class _NoLLM:
+        def __init__(self):  # pragma: no cover - 被创建即失败
+            raise AssertionError("直连场景不应创建路由 Agent")
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    monkeypatch.setattr(ar, "RouterAgent", _NoLLM)
+
+    data = admin_client.post(f"{PATH}/scenes/default/test", json={"message": "你好"}).json()["data"]
+    assert data["router_skipped"] is True
+    assert data["mode"] == "direct"
+    assert data["agent_name"] == "default_assistant"
+    assert data["intents"][0]["reason"] == "scene_direct"
+
+
+def test_router_scene_test_rejects_blank_message(admin_client, monkeypatch):
+    async def fake_load(code, require_active=True):
+        return _ctx(candidates=[_cand("a")])
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    resp = admin_client.post(f"{PATH}/scenes/mall_order/test", json={"message": "   "})
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == 1001
+
+
+def test_router_scene_test_unconfigured_returns_3005(admin_client, monkeypatch):
+    async def fake_load(code, require_active=True):
+        return _ctx(candidates=[])
+
+    monkeypatch.setattr(ar, "load_scene_context", fake_load)
+    resp = admin_client.post(f"{PATH}/scenes/mall_order/test", json={"message": "你好"})
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == 3005
+
+
+def test_router_scene_stats_merges_scene_name(admin_client, monkeypatch):
+    async def fake_get(code):
+        return SimpleNamespace(code=code, display_name="商城订单")
+
+    async def fake_stats(code, hours=24):
+        assert code == "mall_order"
+        return {
+            "scene_code": code,
+            "hours": hours,
+            "requests": 10,
+            "router_skipped": 2,
+            "router_fallback": 1,
+            "handover": 1,
+            "skip_rate": 0.2,
+            "fallback_rate": 0.1,
+            "handover_rate": 0.1,
+            "avg_router_ms": 123.4,
+            "avg_total_latency_ms": 456.7,
+        }
+
+    monkeypatch.setattr(ar.SceneRepo, "get_by_code", fake_get)
+    monkeypatch.setattr(ar.TraceRepo, "router_stats", fake_stats)
+
+    data = admin_client.get(f"{PATH}/scenes/mall_order/stats").json()["data"]
+    assert data["scene_name"] == "商城订单"
+    assert data["requests"] == 10
+    assert data["fallback_rate"] == 0.1

@@ -1,0 +1,20 @@
+# 生产 HTTPS 入口（由 docker-compose.prod.yml 的 caddy 服务加载）
+# DOMAIN 由 compose 注入（如 cs.example.com）；Caddy 自动申请/续期证书。
+# 前提：域名已解析到本机，且 80/443 对外可达（80 用于 ACME HTTP 挑战）。
+# 不启用 encode：避免 SSE 被压缩缓冲；静态资源压缩可按需在 web 的 nginx 层开启。
+
+{$DOMAIN} {
+	reverse_proxy web:80 {
+		# SSE 立即下发，禁止代理缓冲
+		flush_interval -1
+		# XFF 不用手写：Caddy 作为边缘会丢弃客户端传入的 X-Forwarded-For，
+		# 默认覆写为真实对端 IP（已实测：伪造 1.2.3.4 被替换），
+		# 因此 backend 拿到的是真实客户端 IP，无伪造风险。
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}

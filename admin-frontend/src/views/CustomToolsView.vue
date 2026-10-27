@@ -11,7 +11,7 @@
       type="info"
       :closable="false"
       show-icon
-      title="工具实现来自代码（app/tools/custom），此处仅做后台登记、启用/禁用，并供动态 Agent 绑定；新增工具需先在代码中开发并加入目录后刷新。"
+      title="工具实现位于代码目录 app/tools/custom/（基类 BaseTool 同目录），此处仅做后台登记、启用/禁用，并供动态 Agent 绑定；新增工具需先在该目录开发，并在 app/tools/custom_catalog.py 的 _TOOL_CLASSES 中登记，重启后端后刷新。"
       style="margin-bottom: 12px"
     />
 

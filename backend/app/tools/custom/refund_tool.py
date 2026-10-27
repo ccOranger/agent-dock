@@ -3,8 +3,8 @@
 历史版本访问固定假域名 http://refund-service:8080（不存在）。现改为读写共享
 固定数据集 mock_data；同一份退款数据也被本地 MCP 服务 mcp_refund 使用。
 """
-from app.tools.custom.base import BaseTool
 from app.tools.custom import mock_data
+from app.tools.custom.base import BaseTool
 
 
 class SubmitRefundTool(BaseTool):

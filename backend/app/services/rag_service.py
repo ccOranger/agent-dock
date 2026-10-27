@@ -5,6 +5,7 @@ import os
 from app.core.config import settings
 from app.services import qdrant_helper
 from app.tools.rag_factory import get_rag_tool
+from app.utils.async_io import run_in_pool
 
 
 class RagService:
@@ -15,11 +16,14 @@ class RagService:
         top_k: int | None = None,
         min_score: float | None = None,
         advanced: bool = True,
+        timeout: int | None = None,
     ) -> list[dict]:
         """检索知识库，返回结构化结果列表。
 
         直接调 RAGTool 内部的 pipeline（而非 tool.run("search")），
         因为后者返回的是给人看的格式化字符串，不适合前端渲染。
+
+        timeout 由调用方决定：场景运行参数可覆盖全局 RAG_TIMEOUT（如固定话术只给 3 秒）。
         """
         ns = namespace or settings.rag_default_namespace
         tool = get_rag_tool(ns)
@@ -57,19 +61,18 @@ class RagService:
                 )
             return out
 
-        return await asyncio.to_thread(_run)
+        # 硬超时：Qdrant/embedding 挂起时抛 TimeoutError，由上层（对话链路）降级为空
+        return await asyncio.wait_for(
+            run_in_pool(_run), timeout=timeout or settings.rag_timeout
+        )
 
     async def list_documents(self, namespace: str):
         tool = get_rag_tool(namespace)
-        return await asyncio.to_thread(
-            tool.run, {"action": "stats", "namespace": namespace}
-        )
+        return await run_in_pool(tool.run, {"action": "stats", "namespace": namespace})
 
     async def reindex(self, namespace: str):
         tool = get_rag_tool(namespace)
-        return await asyncio.to_thread(
-            tool.run, {"action": "reindex", "namespace": namespace}
-        )
+        return await run_in_pool(tool.run, {"action": "reindex", "namespace": namespace})
 
     async def list_chunks(
         self,
@@ -80,7 +83,7 @@ class RagService:
     ) -> dict:
         """浏览已索引分块（直连 Qdrant）。source_path 传入则按文档过滤。"""
         ns = namespace or settings.rag_default_namespace
-        chunks, next_offset = await asyncio.to_thread(
+        chunks, next_offset = await run_in_pool(
             qdrant_helper.scroll_chunks, ns, source_path, limit, offset
         )
         return {

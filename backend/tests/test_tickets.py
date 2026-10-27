@@ -35,7 +35,16 @@ def test_tickets_ddl_and_orm_columns_stay_in_sync():
 async def test_create_ticket_tool_writes_to_repo(monkeypatch):
     captured = {}
 
-    async def fake_create(content, *, ticket_no=None, user_id=None, session_id=None, category="general", urgency="medium", title=None):
+    async def fake_create(
+        content,
+        *,
+        ticket_no=None,
+        user_id=None,
+        session_id=None,
+        category="general",
+        urgency="medium",
+        title=None,
+    ):
         captured.update({"content": content, "user_id": user_id, "category": category, "urgency": urgency})
         return SimpleNamespace(ticket_no="TK-ABC12345", status="open")
 
@@ -159,7 +168,11 @@ def test_admin_get_ticket_detail(client, monkeypatch):
     row = SimpleNamespace(ticket_no="TK-ABC12345")
 
     monkeypatch.setattr(TicketRepo, "get_by_ticket_no", lambda tn: _ret(row))
-    monkeypatch.setattr(TicketRepo, "to_dict", lambda t, include_updates=False: {"ticket_no": t.ticket_no, "updates": []})
+    monkeypatch.setattr(
+        TicketRepo,
+        "to_dict",
+        lambda t, include_updates=False: {"ticket_no": t.ticket_no, "updates": []},
+    )
     resp = client.get(f"{at.router.prefix}/TK-ABC12345")
     assert resp.status_code == 200
     assert resp.json()["data"]["ticket_no"] == "TK-ABC12345"
@@ -185,7 +198,11 @@ def test_admin_update_status(client, monkeypatch):
         return SimpleNamespace(ticket_no=ticket_no, status=status)
 
     monkeypatch.setattr(TicketRepo, "set_status", fake_set_status)
-    monkeypatch.setattr(TicketRepo, "to_dict", lambda t, include_updates=False: {"ticket_no": t.ticket_no, "status": t.status})
+    monkeypatch.setattr(
+        TicketRepo,
+        "to_dict",
+        lambda t, include_updates=False: {"ticket_no": t.ticket_no, "status": t.status},
+    )
     resp = client.patch(f"{at.router.prefix}/TK-ABC12345/status", json={"status": "resolved", "note": "已赔付"})
     assert resp.status_code == 200
     assert calls == {"ticket_no": "TK-ABC12345", "status": "resolved"}

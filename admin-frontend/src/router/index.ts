@@ -13,19 +13,25 @@ const routes: RouteRecordRaw[] = [
       { path: 'tickets', component: () => import('@/views/TicketsView.vue'), meta: { title: '工单管理' } },
       { path: 'traces', component: () => import('@/views/TracesView.vue'), meta: { title: '链路追踪' } },
       { path: 'knowledge', component: () => import('@/views/KnowledgeBaseView.vue'), meta: { title: '知识库维护' } },
+      { path: 'scenes', component: () => import('@/views/ScenesView.vue'), meta: { title: '业务场景', roles: ['admin'] } },
+      { path: 'integrations', component: () => import('@/views/IntegrationsView.vue'), meta: { title: '接入方管理', roles: ['admin'] } },
       { path: 'agents', component: () => import('@/views/AgentList.vue'), meta: { title: 'Agent 管理', roles: ['admin'] } },
+      { path: 'staff', component: () => import('@/views/StaffQuotaView.vue'), meta: { title: '人员与配额', roles: ['admin'] } },
       { path: 'router', component: () => import('@/views/RouterInfoView.vue'), meta: { title: '路由分发器', roles: ['admin'] } },
       { path: 'mcp-servers', component: () => import('@/views/McpServersView.vue'), meta: { title: 'MCP 服务管理', roles: ['admin'] } },
       { path: 'custom-tools', component: () => import('@/views/CustomToolsView.vue'), meta: { title: '自定义工具', roles: ['admin'] } },
       { path: 'canned-scripts', component: () => import('@/views/CannedScriptsView.vue'), meta: { title: '固定话术', roles: ['admin'] } },
       { path: 'memory/:userId?', component: () => import('@/views/MemoryView.vue'), meta: { title: '记忆管理', roles: ['agent', 'admin'] } },
       { path: 'dashboard', component: () => import('@/views/Dashboard.vue'), meta: { title: '仪表盘', roles: ['admin'] } },
+      { path: 'usage', component: () => import('@/views/UsageView.vue'), meta: { title: '用量报表', roles: ['admin'] } },
+      { path: 'license', component: () => import('@/views/LicenseView.vue'), meta: { title: '授权与版本', roles: ['admin'] } },
     ],
   },
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  // 开发为 /，生产镜像挂在 /admin/（由 Vite base 注入）
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
 

@@ -15,12 +15,12 @@ import pytest
 
 from app.agents import canned_scripts as cs
 from app.agents.base_business_agent import BaseBusinessAgent
-from app.agents.business.knowledge_agent import KnowledgeAgent
+from app.agents.business.default_agent import DEFAULT_ASSISTANT_PROMPT, DefaultAssistantAgent
 from app.agents.canned_scripts import (
-    SEED_RULES,
     CAPABILITY_TEXT,
     IDENTITY_TEXT,
     PROBING_TEXT,
+    SEED_RULES,
     match_canned_script,
     match_rules,
     normalize_query,
@@ -28,12 +28,11 @@ from app.agents.canned_scripts import (
     rule_from_row,
 )
 from app.agents.orchestrator import Orchestrator
-from app.agents.prompts.knowledge import KNOWLEDGE_SYSTEM_PROMPT
 from app.core.tracing import OUTCOME_ANSWERED, SPAN_CANNED, TraceCollector
 from app.models.repositories import CannedScriptRepo
 
 # 业务提示词开头片段（用于断言格式约束是后置追加、没顶掉原有提示词）
-KNOWLEDGE_HEAD = KNOWLEDGE_SYSTEM_PROMPT.strip()[:12]
+BUSINESS_HEAD = DEFAULT_ASSISTANT_PROMPT.strip()[:12]
 
 
 def _key(query: str) -> str | None:
@@ -174,7 +173,7 @@ def _row(
 
 
 async def _patch_enabled(monkeypatch, rows):
-    async def fake_list_enabled():
+    async def fake_list_enabled(scene_id=None):
         return [_FakeRow(r) for r in rows]
 
     monkeypatch.setattr(CannedScriptRepo, "list_enabled", fake_list_enabled)
@@ -216,7 +215,7 @@ async def test_empty_table_means_no_canned_scripts(monkeypatch):
 
 
 async def test_db_failure_skips_canned_without_breaking_chat(monkeypatch):
-    async def boom():
+    async def boom(scene_id=None):
         raise RuntimeError("表不存在")
 
     monkeypatch.setattr(CannedScriptRepo, "list_enabled", boom)
@@ -260,7 +259,8 @@ async def test_dispatch_hits_canned_without_routing(monkeypatch):
 
 async def test_dispatch_canned_records_trace(monkeypatch):
     await _patch_enabled(
-        monkeypatch, [_row(key="capability", category="capability", patterns=["你能做什么"], text="能力清单。", priority=30)]
+        monkeypatch,
+        [_row(key="capability", category="capability", patterns=["你能做什么"], text="能力清单。", priority=30)],
     )
     orch = _make_orch(monkeypatch)
     collector = TraceCollector(trace_id="t1", user_id="u1", session_id="s1")
@@ -293,14 +293,24 @@ def test_format_rules_cover_non_canned_requirements():
 
 def test_format_rules_appended_to_business_agent_prompt():
     """代码 Agent 与后台动态 Agent 共用基类，有无工具都要带上格式约束"""
-    agent = KnowledgeAgent(user_id="u1", session_id="s1")
+    agent = DefaultAssistantAgent(user_id="u1", session_id="s1")
     with_tools = agent._final_system_prompt(["memory"])
-    assert KNOWLEDGE_HEAD in with_tools
+    assert BUSINESS_HEAD in with_tools
     assert agent.FORMAT_RULES in with_tools
     assert "工具使用要求" in with_tools
     without_tools = agent._final_system_prompt([])
     assert agent.FORMAT_RULES in without_tools
     assert "工具使用要求" not in without_tools
+
+
+def test_current_time_injected_into_business_agent_prompt():
+    """模型不自知今天几号：系统提示必须注入当轮服务器时间，否则时间类问题只能致歉"""
+    from datetime import datetime
+
+    agent = DefaultAssistantAgent(user_id="u1", session_id="s1")
+    prompt = agent._final_system_prompt([])
+    assert "当前时间" in prompt
+    assert datetime.now().strftime("%Y-%m-%d") in prompt
 
 
 def test_seed_rules_shape():

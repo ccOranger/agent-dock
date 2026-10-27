@@ -18,6 +18,18 @@
         </template>
       </el-table-column>
       <el-table-column prop="description" label="描述" show-overflow-tooltip />
+      <el-table-column label="归属场景" width="140">
+        <template #default="{ row }">
+          <el-tooltip
+            v-if="row.scene_id"
+            placement="top"
+            content="动态 Agent 只在创建它的场景内可被绑定；代码 Agent 为全局可用"
+          >
+            <el-tag size="small" type="success">{{ sceneName(row.scene_id) }}</el-tag>
+          </el-tooltip>
+          <span v-else class="muted">全局</span>
+        </template>
+      </el-table-column>
       <el-table-column width="200">
         <template #header>
           知识库
@@ -161,7 +173,6 @@
           v-model="form.rag_namespaces"
           multiple
           clearable
-          :disabled="form.search_all_knowledge_bases"
           placeholder="可选，额外跨库检索（与主库合并去重）"
         >
           <el-option
@@ -171,19 +182,6 @@
             :value="kb.namespace"
           />
         </el-select>
-        <div v-if="form.search_all_knowledge_bases" class="muted hint">已开启“全部知识库”，此处选择被忽略</div>
-      </el-form-item>
-      <el-form-item>
-        <template #label>
-          全部知识库
-          <el-tooltip
-            placement="top"
-            content="开启后覆盖全部启用中的知识库（含后台新建的库，无需改代码），并忽略上方主知识库 / 附加知识库的单独选择。"
-          >
-            <span class="q-help">?</span>
-          </el-tooltip>
-        </template>
-        <el-switch v-model="form.search_all_knowledge_bases" />
       </el-form-item>
       <el-form-item label="MCP 工具">
         <el-select v-model="form.mcp_tool_names" multiple clearable placeholder="选择已配置的 MCP 服务">
@@ -238,6 +236,10 @@
         </el-descriptions-item>
         <el-descriptions-item label="启用">
           <el-tag :type="detail.enabled ? 'success' : 'danger'" size="small">{{ detail.enabled ? '启用' : '禁用' }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="归属场景">
+          <el-tag v-if="detail.scene_id" size="small" type="success">{{ sceneName(detail.scene_id) }}</el-tag>
+          <span v-else class="muted">全局（所有场景可绑定）</span>
         </el-descriptions-item>
         <el-descriptions-item label="模型">{{ detail.model || '—' }}</el-descriptions-item>
         <el-descriptions-item label="知识库">
@@ -299,16 +301,23 @@ import {
   apiListBases,
   apiListCustomTools,
   apiListMcpServers,
+  apiListScenes,
   apiToggleAgent,
   apiUpdateAgent,
 } from '@/api'
-import type { AgentInfo, CustomToolSpec, DynamicAgentPayload, KnowledgeBase, MCPServer } from '@/types'
+import type { AgentInfo, CustomToolSpec, DynamicAgentPayload, KnowledgeBase, MCPServer, Scene } from '@/types'
 
 const agents = ref<AgentInfo[]>([])
 const mcpServers = ref<MCPServer[]>([])
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const customTools = ref<CustomToolSpec[]>([])
+const scenes = ref<Scene[]>([])
 const loading = ref(false)
+
+/** 场景 id → 展示名：列表与详情共用，避免逐行查询 */
+function sceneName(sceneId: string): string {
+  return scenes.value.find((s) => s.id === sceneId)?.display_name || '未知场景'
+}
 
 // 仅已登记的自定义工具可作为绑定候选（未登记表示代码有但未开放给 Agent）
 const registeredCustomTools = computed(() => customTools.value.filter((t) => t.registered))
@@ -341,16 +350,18 @@ const form = reactive<DynamicAgentPayload>(emptyForm())
 async function load() {
   loading.value = true
   try {
-    const [a, m, k, ct] = await Promise.all([
+    const [a, m, k, ct, sc] = await Promise.all([
       apiListAgents(),
       apiListMcpServers(),
       apiListBases(),
       apiListCustomTools(),
+      apiListScenes(),
     ])
     agents.value = a
     mcpServers.value = m
     knowledgeBases.value = k
     customTools.value = ct
+    scenes.value = sc
   } finally {
     loading.value = false
   }
@@ -397,7 +408,8 @@ function openEdit(row: AgentInfo) {
     llm_model: row.model ?? '',
     rag_namespace: row.rag_namespace ?? null,
     rag_namespaces: [...(row.rag_namespaces ?? [])],
-    search_all_knowledge_bases: row.search_all_knowledge_bases ?? false,
+    // “全部知识库”开关不再开放配置：编辑时固定归 false，检索范围只由主库/附加库决定
+    search_all_knowledge_bases: false,
     mcp_tool_names: [...(row.mcp_tools ?? [])],
     custom_tool_names: [...(row.custom_tool_names ?? [])],
     enabled: row.enabled,

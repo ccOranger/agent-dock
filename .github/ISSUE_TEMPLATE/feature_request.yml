@@ -1,0 +1,48 @@
+name: 功能建议
+description: 提出新能力或改进建议
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 请描述使用场景与当前痛点，而不是直接给实现方案
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 你期望的交互或能力边界
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的替代方案
+      description: 可选
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 平台内核（Agent / 路由 / 记忆 / 工具）
+        - 管理端
+        - 聊天端 / 挂件
+        - 部署与运维
+        - 场景包
+        - 文档
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已搜索现有 issue
+          required: true

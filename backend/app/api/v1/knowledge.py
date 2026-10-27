@@ -17,6 +17,7 @@ from app.schemas.api import (
 )
 from app.schemas.common import ApiResponse, PaginatedData
 from app.services.document_service import DocumentService
+from app.services.quota_service import KIND_KNOWLEDGE_BASE, create_guard
 from app.services.rag_service import RagService
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -168,6 +169,7 @@ async def update_entry(doc_id: uuid.UUID, body: KnowledgeEntryUpdate, user=Depen
 # ===== 知识库命名空间 CRUD =====
 @router.get("/bases", response_model=ApiResponse[list])
 async def list_bases(user=Depends(require_staff)):
+    """知识库列表：全局资源，不区分场景归属（绑给哪些 Agent 由 Agent 侧展示）。"""
     rows = await KnowledgeBaseRepo.list_all()
     data = []
     for r in rows:
@@ -187,11 +189,19 @@ async def list_bases(user=Depends(require_staff)):
 async def create_base(body: KnowledgeBaseCreate, user=Depends(require_admin)):
     if await KnowledgeBaseRepo.get(body.namespace) is not None:
         raise Conflict("命名空间已存在")
-    row = await KnowledgeBaseRepo.create(
-        namespace=body.namespace, display_name=body.display_name, description=body.description
-    )
+    async with create_guard(user, KIND_KNOWLEDGE_BASE):
+        row = await KnowledgeBaseRepo.create(
+            namespace=body.namespace,
+            display_name=body.display_name,
+            description=body.description,
+            created_by=user.id,
+        )
     return ApiResponse(
-        data={"namespace": row.namespace, "display_name": row.display_name, "is_active": row.is_active}
+        data={
+            "namespace": row.namespace,
+            "display_name": row.display_name,
+            "is_active": row.is_active,
+        }
     )
 
 

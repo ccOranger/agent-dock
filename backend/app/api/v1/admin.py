@@ -19,6 +19,8 @@ from app.schemas.api import (
     MCPServerUpdate,
 )
 from app.schemas.common import ApiResponse
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME
+from app.services.quota_service import KIND_AGENT, create_guard
 from app.tools import custom_catalog
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -42,10 +44,12 @@ async def agents(user=Depends(require_admin)):
                 "stale": False,
                 "enabled": meta.enabled if meta else True,
                 "display_name": (meta.display_name if meta and meta.display_name else item["name"]),
+                "scene_id": None,
             }
         )
     # 2) 动态 Agent + 已失效的孤儿代码行（定义均来自 DB）
     for name, meta in db_rows.items():
+        scene_id = str(meta.scene_id) if getattr(meta, "scene_id", None) else None
         if meta.source == "dynamic":
             result.append(
                 {
@@ -66,6 +70,7 @@ async def agents(user=Depends(require_admin)):
                     "search_all_knowledge_bases": meta.search_all_knowledge_bases,
                     "registered_tools": _dynamic_registered_tools(meta),
                     "sort_order": meta.sort_order,
+                    "scene_id": scene_id,
                 }
             )
         elif meta.source == "code" and name not in registry_names:
@@ -83,6 +88,7 @@ async def agents(user=Depends(require_admin)):
                     "enabled": meta.enabled,
                     "display_name": meta.display_name or meta.name,
                     "system_prompt": meta.system_prompt,
+                    "scene_id": scene_id,
                 }
             )
     return ApiResponse(data=result)
@@ -91,6 +97,7 @@ async def agents(user=Depends(require_admin)):
 @router.get("/agents/{name}", response_model=ApiResponse[dict])
 async def agent_detail(name: str, user=Depends(require_admin)):
     meta = await AgentRepo.get_by_name(name)
+    scene_id = str(meta.scene_id) if meta is not None and getattr(meta, "scene_id", None) else None
     if meta is not None and meta.source == "dynamic":
         return ApiResponse(
             data={
@@ -109,12 +116,19 @@ async def agent_detail(name: str, user=Depends(require_admin)):
                 "rag_namespaces": list(meta.rag_namespaces or []),
                 "search_all_knowledge_bases": meta.search_all_knowledge_bases,
                 "registered_tools": _dynamic_registered_tools(meta),
+                "scene_id": scene_id,
             }
         )
     for item in list_agents():
         if item["name"] == name:
             return ApiResponse(
-                data={**item, "source": "code", "stale": False, "enabled": meta.enabled if meta else True}
+                data={
+                    **item,
+                    "source": "code",
+                    "stale": False,
+                    "enabled": meta.enabled if meta else True,
+                    "scene_id": None,
+                }
             )
     # 代码已下线的孤儿 source=code 行：以 DB 镜像回显，标记已失效
     if meta is not None and meta.source == "code":
@@ -133,6 +147,7 @@ async def agent_detail(name: str, user=Depends(require_admin)):
                 "system_prompt": meta.system_prompt,
                 "rag_namespaces": list(meta.rag_namespaces or []),
                 "search_all_knowledge_bases": meta.search_all_knowledge_bases,
+                "scene_id": scene_id,
             }
         )
     raise NotFound("Agent 不存在")
@@ -151,22 +166,24 @@ async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
     await _validate_rag_namespaces(body.rag_namespaces)
     await _validate_custom_tool_bindings(body.custom_tool_names)
 
-    row = await AgentRepo.create_dynamic(
-        name=body.name,
-        display_name=body.display_name,
-        description=body.description,
-        routing_keywords=[k.strip() for k in body.routing_keywords if str(k).strip()],
-        routing_examples=[e.strip() for e in body.routing_examples if str(e).strip()],
-        system_prompt=body.system_prompt,
-        llm_model=body.llm_model,
-        rag_namespace=body.rag_namespace,
-        rag_namespaces=body.rag_namespaces,
-        search_all_knowledge_bases=body.search_all_knowledge_bases,
-        mcp_tool_names=body.mcp_tool_names,
-        custom_tool_names=body.custom_tool_names,
-        enabled=body.enabled,
-        sort_order=body.sort_order,
-    )
+    async with create_guard(user, KIND_AGENT):
+        row = await AgentRepo.create_dynamic(
+            name=body.name,
+            display_name=body.display_name,
+            description=body.description,
+            routing_keywords=[k.strip() for k in body.routing_keywords if str(k).strip()],
+            routing_examples=[e.strip() for e in body.routing_examples if str(e).strip()],
+            system_prompt=body.system_prompt,
+            llm_model=body.llm_model,
+            rag_namespace=body.rag_namespace,
+            rag_namespaces=body.rag_namespaces,
+            search_all_knowledge_bases=body.search_all_knowledge_bases,
+            mcp_tool_names=body.mcp_tool_names,
+            custom_tool_names=body.custom_tool_names,
+            enabled=body.enabled,
+            sort_order=body.sort_order,
+            created_by=user.id,
+        )
     await AuditRepo.write(action="admin.agent.create", user_id=str(user.id), target_type="agent", target_id=row.name)
     return ApiResponse(data={"name": row.name})
 
@@ -218,6 +235,9 @@ async def toggle_agent(name: str, body: AgentToggleRequest, user=Depends(require
     meta = await AgentRepo.get_by_name(name)
     if meta is None:
         raise NotFound("Agent 未登记")
+    # 默认场景只绑定这一个兜底 Agent：停用它等于把无 scene_code 的请求全部打挂
+    if name == DEFAULT_ASSISTANT_NAME and not body.enabled:
+        raise ParamError("默认场景的兜底助手不可停用")
     await AgentRepo.set_enabled(name, body.enabled)
     return ApiResponse()
 
@@ -308,11 +328,15 @@ async def test_mcp_server(body: MCPServerCreate, user=Depends(require_admin)):
     try:
         from hello_agents.protocols.mcp.client import MCPClient
 
-        async with MCPClient(source) as client:
-            tools = await client.list_tools()
+        async def _probe() -> list:
+            async with MCPClient(source) as client:
+                return await client.list_tools()
+
+        # 与相邻的"查看工具列表"保持一致：MCPClient 内部无超时，不响应的服务会永久挂起
+        tools = await asyncio.wait_for(_probe(), timeout=body.timeout_seconds)
         return ApiResponse(data={"ok": True, "tool_count": len(tools), "tools": tools})
     except Exception as e:  # noqa: BLE001
-        return ApiResponse(code=0, data={"ok": False, "error": str(e)})
+        return ApiResponse(code=0, data={"ok": False, "error": str(e) or "连接失败"})
 
 
 @router.get("/mcp-servers/{server_id}/tools", response_model=ApiResponse[dict])

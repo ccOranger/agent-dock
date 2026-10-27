@@ -1,8 +1,8 @@
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <h2>智能客服 · 管理后台</h2>
-      <p class="sub">客服 / 运维人员登录</p>
+      <h2>AgentDock 管理后台</h2>
+      <p class="sub">运营 / 运维人员登录</p>
       <el-form :model="form" @submit.prevent="onLogin">
         <el-form-item>
           <el-input v-model="form.username" placeholder="用户名" />

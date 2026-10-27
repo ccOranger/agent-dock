@@ -14,6 +14,14 @@
           <el-option label="已关闭" value="closed" />
           <el-option label="转人工" value="handover" />
         </el-select>
+        <el-select v-model="filters.scene_code" placeholder="场景" clearable style="width: 150px">
+          <el-option
+            v-for="scene in scenes"
+            :key="scene.code"
+            :label="scene.display_name"
+            :value="scene.code"
+          />
+        </el-select>
         <el-select v-model="filters.last_route_to" placeholder="路由 Agent" clearable style="width: 170px">
           <el-option v-for="a in agents" :key="a.name" :label="a.display_name || a.name" :value="a.name" />
         </el-select>
@@ -39,11 +47,20 @@
         </el-table-column>
         <el-table-column prop="user_id" label="客户 ID" width="200" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="mono">{{ row.user_id }}</span>
+            <span v-if="row.user_id" class="mono">{{ row.user_id }}</span>
+            <span v-else class="muted">访客 {{ (row.visitor_id || '').slice(0, 8) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="display_name" label="客户" width="140">
-          <template #default="{ row }">{{ row.display_name || row.username }}</template>
+          <template #default="{ row }">
+            <span v-if="row.display_name || row.username">{{ row.display_name || row.username }}</span>
+            <el-tag v-else size="small" type="info">匿名访客</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="场景" width="130">
+          <template #default="{ row }">
+            <el-tag size="small" type="info">{{ sceneName(row.scene_code) }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="title" label="会话标题" min-width="160" />
         <el-table-column prop="status" label="状态" width="100">
@@ -75,7 +92,12 @@
       />
     </el-card>
 
-    <el-drawer v-model="drawerVisible" :title="current?.session.title || '对话详情'" size="45%">
+    <el-drawer v-model="drawerVisible" :title="drawerTitle" size="45%">
+      <div v-if="current" class="detail-meta">
+        <el-tag size="small" type="info">{{ sceneName(current.session.scene_code) }}</el-tag>
+        <span class="muted" v-if="current.session.scene_code">{{ current.session.scene_code }}</span>
+        <span class="muted mono-id">会话 {{ current.session.id }}</span>
+      </div>
       <div v-loading="detailLoading" class="conversation">
         <div
           v-for="m in current?.messages"
@@ -100,12 +122,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { apiExportInquiries, apiInquiryDetail, apiListAgents, apiListInquiries } from '@/api'
-import type { AgentInfo, ChatMessage, InquiryDetail, InquirySession } from '@/types'
+import { apiExportInquiries, apiInquiryDetail, apiListAgents, apiListInquiries, apiSceneOptions } from '@/api'
+import type { AgentInfo, ChatMessage, InquiryDetail, InquirySession, SceneOption } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -116,18 +138,29 @@ function fmt(v?: string | null) {
 
 const rows = ref<InquirySession[]>([])
 const agents = ref<AgentInfo[]>([])
+const scenes = ref<SceneOption[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
 const exporting = ref(false)
 
-const filters = ref<{ status?: string; last_route_to?: string; user_id?: string }>({})
+const filters = ref<{ status?: string; scene_code?: string; last_route_to?: string; user_id?: string }>({})
 const dateRange = ref<[string, string] | null>(null)
 
 const drawerVisible = ref(false)
 const detailLoading = ref(false)
 const current = ref<InquiryDetail | null>(null)
+
+const drawerTitle = computed(() => {
+  const title = current.value?.session.title || '对话详情'
+  return title
+})
+
+function sceneName(code?: string | null) {
+  if (!code) return '默认'
+  return scenes.value.find((s) => s.code === code)?.display_name || code
+}
 
 function statusType(s: string) {
   return ({ active: 'primary', closed: 'info', handover: 'warning' } as any)[s] ?? 'info'
@@ -214,6 +247,11 @@ onMounted(async () => {
   } catch {
     /* agents 仅 admin 可见，agent 角色忽略 */
   }
+  apiSceneOptions()
+    .then((list) => (scenes.value = list))
+    .catch(() => {
+      /* 场景下拉失败不影响咨询列表 */
+    })
 })
 </script>
 
@@ -242,6 +280,20 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.muted {
+  color: #909399;
+  font-size: 12px;
+}
+.mono-id {
+  font-family: Consolas, Menlo, monospace;
+  margin-left: auto;
 }
 .msg {
   max-width: 85%;

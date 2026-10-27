@@ -4,6 +4,7 @@
 - 纯内存累加，不做任何 IO；落库由调用方（ChatService）在流结束后一次性完成
 - 维度拍平成标量/数组列便于后台过滤，明细统一放 spans JSONB
 - 工具入参与返回属客户数据：受 TRACE_STORE_PAYLOAD / TRACE_PAYLOAD_MAX_CHARS 约束
+- 用量（prompt/completion token）与链路开关、采样**解耦**：链路可以不记，账必须有
 """
 from __future__ import annotations
 
@@ -13,9 +14,12 @@ import time
 import uuid
 
 from app.core.config import settings
+from app.utils.tokens import estimate_tokens
 
 # ===== span 类型（后台按类型分组着色）=====
 SPAN_ROUTER = "router.llm"
+# 场景直连：没有 LLM 调用，但仍记一条 span，后台才能解释“这轮为什么没走路由”
+SPAN_ROUTE = "route.decision"
 SPAN_INTENT = "route.intent"
 SPAN_MEMORY = "context.memory"
 SPAN_RAG = "context.rag"
@@ -67,11 +71,15 @@ class TraceCollector:
         trace_id: str,
         user_id: str | None = None,
         session_id: str | None = None,
+        scene_code: str | None = None,
+        visitor_id: str | None = None,
         enabled: bool = True,
     ):
         self.trace_id = trace_id
         self.user_id = user_id
         self.session_id = session_id
+        self.scene_code = scene_code
+        self.visitor_id = visitor_id
         self.enabled = bool(enabled and settings.trace_enabled)
 
         self._t0 = time.monotonic()
@@ -89,11 +97,19 @@ class TraceCollector:
         # ---- 计数与结论 ----
         self.intent_count = 0
         self.confidence: float | None = None
+        # 路由旁路标记：直连/单 Agent 场景跳过路由 LLM 时置位，M3 起写入 router_ms/prompt_hash
+        self.router_skipped = False
+        self.router_fallback = False
+        self.router_ms: int | None = None
+        self.prompt_hash: str | None = None
         self.memory_hit_count = 0
         self.rag_chunk_count = 0
         self.tool_call_count = 0
         self.tool_error_count = 0
         self.response_chars = 0
+        # ---- 用量计量（不受 enabled / 采样影响，见 record_prompt）----
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
         self.outcome: str | None = None
         self.handover_reason: str | None = None
         self.error_code: int | None = None
@@ -180,6 +196,23 @@ class TraceCollector:
             }
         )
 
+    # ------------------------------------------------------------------ 用量
+    def record_prompt(self, text: str | None) -> None:
+        """记录一段真正送进模型的提示词（多意图/路由各算一次）。
+
+        刻意不判断 self.enabled：TRACE_ENABLED=false 或采样丢弃时链路没了，
+        用量仍要落到 chat_usage_daily，否则报表会漏计。
+        """
+        self.prompt_tokens += estimate_tokens(text)
+
+    def record_completion(self, text: str | None) -> None:
+        """记录模型最终下发的正文（同样不受链路开关影响）。"""
+        self.completion_tokens += estimate_tokens(text)
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
     # -------------------------------------------------------------- 业务语义
     def add_unique(self, bucket: str, value: str | None) -> None:
         """往拍平维度里追加去重值（bucket 为 agent_names / tool_names 等列表属性）。"""
@@ -240,7 +273,14 @@ class TraceCollector:
             error=error,
         )
 
-    def record_outcome(self, outcome: str, *, reason: str | None = None, code: int | None = None, message: str | None = None) -> None:
+    def record_outcome(
+        self,
+        outcome: str,
+        *,
+        reason: str | None = None,
+        code: int | None = None,
+        message: str | None = None,
+    ) -> None:
         if not self.enabled:
             return
         self.outcome = outcome
@@ -270,9 +310,15 @@ class TraceCollector:
             "trace_id": self.trace_id,
             "session_id": self.session_id,
             "user_id": self.user_id,
+            "scene_code": self.scene_code or "default",
+            "visitor_id": self.visitor_id,
             "user_message_id": self.user_message_id,
             "assistant_message_id": self.assistant_message_id,
             "intent_count": self.intent_count,
+            "router_skipped": self.router_skipped,
+            "router_fallback": self.router_fallback,
+            "router_ms": self.router_ms,
+            "prompt_hash": self.prompt_hash,
             "agent_names": list(self.agent_names),
             "agent_sources": list(self.agent_sources),
             "llm_models": list(self.llm_models),

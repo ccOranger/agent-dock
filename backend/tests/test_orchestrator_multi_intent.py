@@ -6,6 +6,7 @@ import pytest
 from app.agents import orchestrator as orch_mod
 from app.agents.orchestrator import Orchestrator
 from app.core.config import settings
+from app.schemas.scene import SceneRuntime
 
 
 def _intent(name, conf=0.9, reason="r"):
@@ -41,7 +42,7 @@ class FakeCtx:
     def __init__(self):
         self.persisted: list[dict] = []
 
-    async def build(self, user_id, query, rag_namespaces, collector=None):
+    async def build(self, user_id, query, rag_namespaces, collector=None, runtime=None):
         return query
 
     async def persist_after_run(self, **kw):
@@ -53,7 +54,17 @@ def _make_orch(monkeypatch, intents, known=("knowledge_qa", "order_service", "co
     orch.router = FakeRouter(intents, fallback_agent)
     orch.ctx_engineer = FakeCtx()
 
-    async def fake_business_agent(business_agent, user_id, query, session_id="", history=None, collector=None, intent_index=0):
+    async def fake_business_agent(
+        business_agent,
+        user_id,
+        query,
+        session_id="",
+        history=None,
+        collector=None,
+        intent_index=0,
+        scene=None,
+        runtime=None,
+    ):
         yield {"type": "text", "data": {"content": f"<{business_agent.name}>"}}
 
     orch._run_business_agent = fake_business_agent
@@ -276,4 +287,13 @@ async def test_resolve_rag_namespaces_search_all_prepends_declared(monkeypatch):
     result = await Orchestrator._resolve_rag_namespaces(agent)
     # 自身默认库与显式多库前置，再补齐其余启用库（禁用库 cs_off 不入）
     assert result == ["cs_order", "cs_y", "cs_x"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_rag_namespaces_scene_override_wins():
+    """场景显式配了 rag.namespaces 就以场景为准：否则后台显示“本场景覆盖”
+    而实际检索范围没变（Agent 声明优先），属于“看着生效但没生效”"""
+    agent = _NsAgent(rag_namespace="cs_order", rag_namespaces=["cs_after_sales"], search_all=True)
+    runtime = SceneRuntime(rag_namespaces=("cs_it",))
+    assert await Orchestrator._resolve_rag_namespaces(agent, runtime) == ["cs_it"]
 

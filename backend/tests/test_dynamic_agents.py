@@ -5,10 +5,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents import registry
+from app.agents.business.default_agent import DefaultAssistantAgent
 from app.agents.business.dynamic_agent import DynamicBusinessAgent
-from app.agents.business.knowledge_agent import KnowledgeAgent
 from app.api.v1 import admin as adm
 from app.models.repositories import AgentRepo
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME
 
 
 def _dyn_meta(name="dyn1", **kw):
@@ -54,18 +55,14 @@ async def test_resolve_business_agent_code_and_dynamic_and_unknown(monkeypatch):
     async def fake_get(name):
         if name == "dyn1":
             return _dyn_meta(name="dyn1")
-        if name == "order_service":  # 代码 Agent 在库中被禁用
-            return SimpleNamespace(name="order_service", source="code", enabled=False)
+        if name == DEFAULT_ASSISTANT_NAME:  # 代码 Agent 在库中被禁用
+            return SimpleNamespace(name=DEFAULT_ASSISTANT_NAME, source="code", enabled=False)
         return None
 
     monkeypatch.setattr(AgentRepo, "get_by_name", fake_get)
 
-    # 代码 Agent：DB 无行或启用时返回代码类实例
-    code_agent = await registry.resolve_business_agent("knowledge_qa", user_id="u1")
-    assert isinstance(code_agent, KnowledgeAgent)
-
     # 代码 Agent 被禁用：即使代码注册表里有也不再命中
-    assert await registry.resolve_business_agent("order_service", user_id="u1") is None
+    assert await registry.resolve_business_agent(DEFAULT_ASSISTANT_NAME, user_id="u1") is None
 
     # 动态 Agent：get_by_name 返回 dynamic 行
     dyn_agent = await registry.resolve_business_agent("dyn1", user_id="u1")
@@ -74,6 +71,18 @@ async def test_resolve_business_agent_code_and_dynamic_and_unknown(monkeypatch):
 
     # 不存在：返回 None
     assert await registry.resolve_business_agent("nope", user_id="u1") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_code_agent_when_enabled(monkeypatch):
+    """DB 中无禁用镜像行时，代码 Agent 正常解析为代码类实例。"""
+
+    async def fake_get(name):
+        return None
+
+    monkeypatch.setattr(AgentRepo, "get_by_name", fake_get)
+    agent = await registry.resolve_business_agent(DEFAULT_ASSISTANT_NAME, user_id="u1")
+    assert isinstance(agent, DefaultAssistantAgent)
 
 
 @pytest.mark.asyncio
@@ -87,7 +96,7 @@ async def test_list_effective_agents_merges_code_and_dynamic(monkeypatch):
     monkeypatch.setattr(registry, "list_dynamic_agents", fake_list_dynamic)
     monkeypatch.setattr(AgentRepo, "list_all", fake_list_all)
     names = [a["name"] for a in await registry.list_effective_agents()]
-    assert "knowledge_qa" in names  # 代码 Agent 保留
+    assert DEFAULT_ASSISTANT_NAME in names  # 内核代码 Agent 保留
     assert "dyn1" in names  # 动态 Agent 合并
 
 
@@ -97,13 +106,12 @@ async def test_list_effective_agents_excludes_disabled_code(monkeypatch):
         return []
 
     async def fake_list_all():
-        return [SimpleNamespace(name="order_service", source="code", enabled=False)]
+        return [SimpleNamespace(name=DEFAULT_ASSISTANT_NAME, source="code", enabled=False)]
 
     monkeypatch.setattr(registry, "list_dynamic_agents", fake_list_dynamic)
     monkeypatch.setattr(AgentRepo, "list_all", fake_list_all)
     names = [a["name"] for a in await registry.list_effective_agents()]
-    assert "order_service" not in names  # 被禁用的代码 Agent 从路由候选中剔除
-    assert "knowledge_qa" in names
+    assert DEFAULT_ASSISTANT_NAME not in names  # 被禁用的代码 Agent 从路由候选中剔除
 
 
 @pytest.mark.asyncio
@@ -121,8 +129,13 @@ async def test_list_dynamic_agents_carries_routing_clues(monkeypatch):
 
 
 def test_code_agents_declare_routing_clues():
-    """三个代码 Agent 已声明路由线索（提示词不再硬编码具名优先规则，靠它们补足判别依据）。"""
+    """业务代码 Agent 必须声明路由线索（提示词不再硬编码具名优先规则）。
+
+    default_assistant 是默认场景的内核 Agent，固定直连、不参与路由，故不要求线索。
+    """
     for item in registry.list_agents():
+        if item["name"] == DEFAULT_ASSISTANT_NAME:
+            continue
         assert item["routing_keywords"], f"{item['name']} 缺 routing_keywords"
         assert item["routing_examples"], f"{item['name']} 缺 routing_examples"
 
@@ -138,7 +151,7 @@ def test_create_agent_rejects_code_name_conflict(admin_client):
     resp = admin_client.post(
         f"{adm.router.prefix}/agents",
         json={
-            "name": "knowledge_qa",
+            "name": DEFAULT_ASSISTANT_NAME,
             "description": "冲突",
             "system_prompt": "x",
             "mcp_tool_names": [],
@@ -189,7 +202,7 @@ def test_delete_code_agent_forbidden(admin_client, monkeypatch):
         return SimpleNamespace(name=name, source="code")
 
     monkeypatch.setattr(AgentRepo, "get_by_name", fake_get_by_name)
-    resp = admin_client.delete(f"{adm.router.prefix}/agents/order_service")
+    resp = admin_client.delete(f"{adm.router.prefix}/agents/{DEFAULT_ASSISTANT_NAME}")
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == 1001
 
@@ -202,22 +215,16 @@ def test_agents_list_merges_source(admin_client, monkeypatch):
     resp = admin_client.get(f"{adm.router.prefix}/agents")
     assert resp.status_code == 200
     data = {a["name"]: a for a in resp.json()["data"]}
-    assert data["knowledge_qa"]["source"] == "code"
+    assert data[DEFAULT_ASSISTANT_NAME]["source"] == "code"
     assert data["dyn1"]["source"] == "dynamic"
     assert data["dyn1"]["mcp_tools"] == ["mcp_refund"]
     # 路由线索随列表回显（后台编辑表单靠它回填）
     assert data["dyn1"]["routing_keywords"] == ["发票", "开票"]
     assert data["dyn1"]["routing_examples"] == ["帮我开张发票"]
-    assert data["knowledge_qa"]["routing_keywords"]
-    # 代码 Agent 也应带出系统提示词/注册工具/MCP（从代码静态解析，无需 DB）
-    order = data["order_service"]
-    assert order["system_prompt"]
-    assert "query_order" in order["custom_tool_names"]
-    assert "mcp_logistics" in order["mcp_tools"]
-    assert "memory" in order["registered_tools"]
-    # knowledge_qa 仅挂 memory/rag，无自定义工具
-    assert data["knowledge_qa"]["registered_tools"] == ["memory", "rag"]
-    assert data["knowledge_qa"]["custom_tool_names"] == []
+    # 内核 Agent 只挂 memory/rag，无自定义工具；默认场景固定直连，故无线索
+    assert data[DEFAULT_ASSISTANT_NAME]["registered_tools"] == ["memory", "rag"]
+    assert data[DEFAULT_ASSISTANT_NAME]["custom_tool_names"] == []
+    assert data[DEFAULT_ASSISTANT_NAME]["routing_keywords"] == []
     # 动态 Agent 也应有注册工具（无主库/自定义工具时仅 memory）
     assert data["dyn1"]["registered_tools"] == ["memory"]
 
@@ -227,7 +234,7 @@ def test_agent_detail_code_returns_fields(admin_client, monkeypatch):
         return None
 
     monkeypatch.setattr(AgentRepo, "get_by_name", fake_get_by_name)
-    resp = admin_client.get(f"{adm.router.prefix}/agents/knowledge_qa")
+    resp = admin_client.get(f"{adm.router.prefix}/agents/{DEFAULT_ASSISTANT_NAME}")
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["source"] == "code"
@@ -282,7 +289,7 @@ def test_agents_list_marks_orphan_code_stale(admin_client, monkeypatch):
     assert data["legacy_agent"]["source"] == "code"
     assert data["legacy_agent"]["stale"] is True
     # 在册代码 Agent 仍为未失效
-    assert data["order_service"]["stale"] is False
+    assert data[DEFAULT_ASSISTANT_NAME]["stale"] is False
 
 
 def test_agent_detail_orphan_code_stale(admin_client, monkeypatch):
@@ -321,8 +328,8 @@ def test_delete_orphan_code_agent_allowed(admin_client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_validate_agents_sync_orphan_does_not_raise(monkeypatch):
-    from app.core.bootstrap import validate_agents_sync
     from app.agents.registry import AGENT_REGISTRY
+    from app.core.bootstrap import validate_agents_sync
 
     # 库里有一条不在注册表的孤儿 code 行 + 一条在册 code 行
     registered = next(iter(AGENT_REGISTRY.keys()))

@@ -4,7 +4,7 @@
 
 用法：
   .\start_all.ps1              # 直接启动三个服务
-  .\start_all.ps1 -Install     # 先补齐依赖（后端 venv / 前端 node_modules）再启动
+  .\start_all.ps1 -Install     # 先补齐依赖（后端 venv / 工作区 npm 依赖）再启动
   .\start_all.ps1 -BackendPort 8001   # 换后端端口（前端 vite 代理固定指向 8000，一般不用改）
 
 说明：
@@ -63,14 +63,13 @@ if ($Install) {
         Write-Ok '后端 .venv 已存在，跳过创建'
     }
 
-    foreach ($dir in @($Frontend, $Admin)) {
-        if (-not (Test-Path (Join-Path $dir 'node_modules'))) {
-            Write-Warn "在 $dir 执行 npm install ..."
-            Push-Location $dir
-            try { npm install } finally { Pop-Location }
-        } else {
-            Write-Ok "$(Split-Path -Leaf $dir) 的 node_modules 已存在，跳过"
-        }
+    # npm workspaces：两个前端与 packages/shared 共用仓库根的一份 node_modules
+    if (-not (Test-Path (Join-Path $Root 'node_modules'))) {
+        Write-Warn '在仓库根执行 npm install（workspaces：两个前端 + packages/shared）...'
+        Push-Location $Root
+        try { npm install } finally { Pop-Location }
+    } else {
+        Write-Ok '仓库根 node_modules 已存在，跳过 npm install'
     }
 }
 else {
@@ -78,10 +77,8 @@ else {
     if (-not (Test-Path $VenvPy)) {
         Write-Warn "后端 .venv 缺失（$VenvPy）。首次运行请加 -Install： .\start_all.ps1 -Install"
     }
-    foreach ($dir in @($Frontend, $Admin)) {
-        if (-not (Test-Path (Join-Path $dir 'node_modules'))) {
-            Write-Warn "$dir 缺 node_modules。首次运行请加 -Install。"
-        }
+    if (-not (Test-Path (Join-Path $Root 'node_modules'))) {
+        Write-Warn '仓库根缺 node_modules（工作区依赖）。首次运行请加 -Install。'
     }
 }
 
@@ -95,10 +92,10 @@ New-ServiceWindow 'smart-cs backend' $Backend `
     "& '$VenvPy' -m uvicorn app.main:app --reload --host 0.0.0.0 --port $BackendPort --reload-dir app --reload-dir mcp_servers"
 
 Write-Step '启动客户前端 (Vite :5173)'
-New-ServiceWindow 'smart-cs frontend' $Frontend 'npm run dev'
+New-ServiceWindow 'smart-cs frontend' $Root 'npm run dev:chat'
 
 Write-Step '启动管理后台 (Vite :5174)'
-New-ServiceWindow 'smart-cs admin' $Admin 'npm run dev'
+New-ServiceWindow 'smart-cs admin' $Root 'npm run dev:admin'
 
 # ---------------- 提示 ----------------
 Write-Host ''

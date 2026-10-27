@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 文档与快速开始
+    url: https://github.com/ccOranger/smart-cs#readme
+    about: 安装、配置与常见问题先看这里
+  - name: 安全漏洞（私密报告）
+    url: https://github.com/ccOranger/smart-cs/security/advisories/new
+    about: 请勿在公开 issue 中披露安全漏洞

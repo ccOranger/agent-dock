@@ -26,6 +26,12 @@ MCP_TOOL_CACHE_TTL = 300
 _tool_cache: dict[str, tuple[float, "MCPTool"]] = {}
 _tool_cache_lock = threading.Lock()
 
+# 工具发现失败（超时/报错）的负缓存有效期（秒）：坏服务在 TTL 内直接跳过，
+# 避免每轮对话都重复创建发现线程 + MCP 子进程（泄漏随请求数线性累积）；
+# 配置变更时指纹变化，自动绕过负缓存重新尝试。
+MCP_FAILURE_CACHE_TTL = 60
+_failure_cache: dict[str, float] = {}
+
 # backend 根目录（本文件位于 backend/app/tools/mcp_loader.py）：stdio 服务脚本按此重定位
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -142,6 +148,25 @@ def _get_cached_tool(key: str) -> "MCPTool | None":
 def _cache_tool(key: str, tool: "MCPTool") -> None:
     with _tool_cache_lock:
         _tool_cache[key] = (time.monotonic(), tool)
+        _failure_cache.pop(key, None)
+
+
+def _recent_failure(key: str) -> bool:
+    """该配置指纹是否在负缓存有效期内失败过。"""
+    now = time.monotonic()
+    with _tool_cache_lock:
+        failed_at = _failure_cache.get(key)
+        if failed_at is None:
+            return False
+        if now - failed_at > MCP_FAILURE_CACHE_TTL:
+            _failure_cache.pop(key, None)
+            return False
+        return True
+
+
+def _mark_failure(key: str) -> None:
+    with _tool_cache_lock:
+        _failure_cache[key] = time.monotonic()
 
 
 def _register_one(registry: ToolRegistry, name: str, cfg: dict, timeout_seconds: int) -> list[str]:
@@ -167,6 +192,10 @@ def _register_one(registry: ToolRegistry, name: str, cfg: dict, timeout_seconds:
         added = sorted(set(registry.list_tools()) - before)
         logger.info(f"♻️ MCP 工具命中缓存: {name}，复用 {len(added)} 个工具")
         return added
+    if _recent_failure(key):
+        # 坏服务在负缓存有效期内直接跳过，不再新建发现线程/子进程
+        logger.info(f"⏭️ MCP 工具发现近期已失败，负缓存跳过: {name}")
+        return []
 
     def _work() -> None:
         try:
@@ -188,9 +217,11 @@ def _register_one(registry: ToolRegistry, name: str, cfg: dict, timeout_seconds:
 
     if worker.is_alive():
         logger.warning(f"⚠️ MCP 工具发现超时({timeout_seconds}s)，跳过: {name}")
+        _mark_failure(key)
         return []
     if "error" in outcome:
         logger.error(f"MCP 工具注册失败: {name}, err={outcome['error']}")
+        _mark_failure(key)
         return []
     tool = outcome.get("tool")
     if tool is not None:

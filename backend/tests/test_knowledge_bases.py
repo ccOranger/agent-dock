@@ -42,7 +42,11 @@ def admin_client(make_test_app):
 
 # ===== 命名空间 CRUD =====
 def test_list_bases_with_document_count(staff_client, monkeypatch):
-    bases = [SimpleNamespace(namespace="cs_order", display_name="订单", description=None, is_active=True)]
+    bases = [
+        SimpleNamespace(
+            namespace="cs_order", display_name="订单", description=None, is_active=True
+        )
+    ]
 
     async def fake_list_all():
         return bases
@@ -66,9 +70,11 @@ def test_create_base_success_and_conflict(admin_client, monkeypatch):
     async def fake_get(namespace):
         return SimpleNamespace(namespace=namespace) if namespace in existing else None
 
-    async def fake_create(namespace, display_name, description):
+    async def fake_create(namespace, display_name, description, created_by=None):
         existing.add(namespace)
-        return SimpleNamespace(namespace=namespace, display_name=display_name, is_active=True)
+        return SimpleNamespace(
+            namespace=namespace, display_name=display_name, is_active=True
+        )
 
     monkeypatch.setattr(kn.KnowledgeBaseRepo, "get", fake_get)
     monkeypatch.setattr(kn.KnowledgeBaseRepo, "create", fake_create)
@@ -104,7 +110,11 @@ def test_update_base_not_found_and_success(admin_client, monkeypatch):
         if namespace == "missing":
             return None
         # None 字段不应出现在赋值中（KnowledgeBaseRepo.update 跳过 None 语义由 API 层原样透传）
-        return SimpleNamespace(namespace=namespace, display_name=fields.get("display_name"), is_active=fields.get("is_active"))
+        return SimpleNamespace(
+            namespace=namespace,
+            display_name=fields.get("display_name"),
+            is_active=fields.get("is_active"),
+        )
 
     monkeypatch.setattr(kn.KnowledgeBaseRepo, "update", fake_update)
 
@@ -303,7 +313,7 @@ def test_chunk_filter_and_manual_source_path():
     keys2 = {c.key for c in f2.must}
     assert "source_path" in keys2
 
-    assert qh.manual_source_path("abc").endswith(f"abc.md")
+    assert qh.manual_source_path("abc").endswith("abc.md")
 
     # source_path 为空时拒绝删除，避免误伤整个命名空间
     assert qh.delete_document_chunks("cs_order", None) is False

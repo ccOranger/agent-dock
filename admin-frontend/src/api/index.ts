@@ -10,7 +10,12 @@ import type {
   DocumentItem,
   InquiryDetail,
   InquirySession,
+  Integration,
+  IntegrationCreatePayload,
+  IntegrationKeyIssueResult,
+  IntegrationUpdatePayload,
   KnowledgeBase,
+  LicenseStatus,
   LoginResult,
   MCPServer,
   MCPServerPayload,
@@ -21,10 +26,27 @@ import type {
   RequestTraceSummary,
   RouterAgentInfo,
   RouterPromptPreview,
+  RouterSceneDetail,
+  RouterScenePrompt,
+  RouterSceneStats,
+  RouterSceneSummary,
+  RouterSceneTestResult,
+  Scene,
+  SceneAgentOption,
+  SceneBoundAgent,
+  SceneCreatePayload,
+  SceneOption,
+  SceneUpdatePayload,
+  SceneWidgetPayload,
   SearchResult,
+  StaffCreatePayload,
+  StaffMember,
+  StaffUpdatePayload,
   TicketDetail,
   TicketSummary,
   TraceUsageItem,
+  UsageGroupBy,
+  UsageSummary,
   User,
 } from '@/types'
 
@@ -41,6 +63,7 @@ export interface InquiryFilters {
   user_id?: string
   status?: string
   last_route_to?: string
+  scene_code?: string
   date_from?: string
   date_to?: string
   page?: number
@@ -97,6 +120,7 @@ export const apiAddTicketNote = (ticketNo: string, content: string) =>
 export interface TraceFilters {
   session_id?: string
   user_id?: string
+  scene_code?: string
   agent_name?: string
   tool_name?: string
   mcp_server?: string
@@ -125,12 +149,31 @@ export type TraceUsageField = 'tool_names' | 'agent_names' | 'mcp_server_names'
 export const apiTraceUsage = (field: TraceUsageField = 'tool_names', days = 7) =>
   unwrap(http.get<never, { data: { data: TraceUsageItem[] } }>('/admin/traces/usage', { params: { field, days } }))
 
+// ===== Admin：用量报表（账单口径）=====
+// 注意：token 目前是估算值（后端 tokens_estimated 标记），不是供应商账单
+export interface UsageQuery {
+  from?: string
+  to?: string
+  group_by?: UsageGroupBy
+  scene_code?: string
+}
+
+export const apiUsageSummary = (params: UsageQuery = {}) =>
+  unwrap(http.get<never, { data: { data: UsageSummary } }>('/admin/usage/summary', { params }))
+
+/** 导出的始终是 (日 × 场景 × 接入方) 明细，不受页面维度影响 */
+export const apiExportUsage = (params: Omit<UsageQuery, 'group_by'> = {}) =>
+  downloadBlob('/admin/usage/export.csv', params as Record<string, unknown>)
+
 // ===== 知识库：命名空间 =====
 export const apiListBases = () =>
   unwrap(http.get<never, { data: { data: KnowledgeBase[] } }>('/knowledge/bases'))
 
-export const apiCreateBase = (body: { namespace: string; display_name: string; description?: string }) =>
-  unwrap(http.post<never, { data: { data: KnowledgeBase } }>('/knowledge/bases', body))
+export const apiCreateBase = (body: {
+  namespace: string
+  display_name: string
+  description?: string
+}) => unwrap(http.post<never, { data: { data: KnowledgeBase } }>('/knowledge/bases', body))
 
 export const apiUpdateBase = (
   namespace: string,
@@ -214,12 +257,119 @@ export const apiUpdateAgent = (name: string, body: Partial<DynamicAgentPayload>)
 
 export const apiDeleteAgent = (name: string) => http.delete(`/admin/agents/${name}`)
 
+// ===== Admin：场景 =====
+export const apiListScenes = () =>
+  unwrap(http.get<never, { data: { data: Scene[] } }>('/admin/scenes'))
+
+/** 聊天入口/下拉用：只返回启用中的场景 */
+export const apiSceneOptions = () =>
+  unwrap(http.get<never, { data: { data: SceneOption[] } }>('/admin/scenes/options'))
+
+export const apiGetScene = (id: string) =>
+  unwrap(http.get<never, { data: { data: Scene } }>(`/admin/scenes/${id}`))
+
+export const apiCreateScene = (body: SceneCreatePayload) =>
+  unwrap(http.post<never, { data: { data: Scene } }>('/admin/scenes', body))
+
+export const apiUpdateScene = (id: string, body: SceneUpdatePayload) =>
+  unwrap(http.patch<never, { data: { data: Scene } }>(`/admin/scenes/${id}`, body))
+
+export const apiDeleteScene = (id: string) => http.delete(`/admin/scenes/${id}`)
+
+// ===== Admin：人员与配额 =====
+// 已用数量由后端按 created_by 分组一次取回（禁止逐人 count）；remaining=null 表示不限
+export const apiListStaff = () =>
+  unwrap(http.get<never, { data: { data: StaffMember[] } }>('/admin/staff'))
+
+export const apiCreateStaff = (body: StaffCreatePayload) =>
+  unwrap(http.post<never, { data: { data: StaffMember } }>('/admin/staff', body))
+
+/** quota 传了就是整对象替换；自己不能改自己的 quota 与角色/启用状态 */
+export const apiUpdateStaff = (id: string, body: StaffUpdatePayload) =>
+  unwrap(http.patch<never, { data: { data: StaffMember } }>(`/admin/staff/${id}`, body))
+
+export const apiResetStaffPassword = (id: string, password: string) =>
+  unwrap(http.post<never, { data: { data: { reset: boolean } } }>(`/admin/staff/${id}/password`, {
+    password,
+  }))
+
+/** 全量替换绑定；顺序即路由候选顺序 */
+export const apiSetSceneAgents = (id: string, agentIds: string[]) =>
+  unwrap(http.put<never, { data: { data: SceneBoundAgent[] } }>(`/admin/scenes/${id}/agents`, {
+    agent_ids: agentIds,
+  }))
+
+/** 绑定弹窗：可绑定 Agent（全局 + 本场景专属）及当前绑定状态 */
+export const apiSceneAgentOptions = (id: string) =>
+  unwrap(http.get<never, { data: { data: SceneAgentOption[] } }>(`/admin/scenes/${id}/agents`))
+
+/** 嵌入与公开接入：允许来源、匿名开关；开启匿名时后端自动生成 publish_key */
+export const apiUpdateSceneWidget = (id: string, body: SceneWidgetPayload) =>
+  unwrap(http.put<never, { data: { data: Scene } }>(`/admin/scenes/${id}/widget`, body))
+
+// ===== Admin：接入方（服务端调用身份）=====
+// Key 挂在接入方而不是场景上：场景是业务维度，接入方是调用方维度。
+export const apiListIntegrations = () =>
+  unwrap(http.get<never, { data: { data: Integration[] } }>('/admin/integrations'))
+
+export const apiGetIntegration = (id: string) =>
+  unwrap(http.get<never, { data: { data: Integration } }>(`/admin/integrations/${id}`))
+
+export const apiCreateIntegration = (body: IntegrationCreatePayload) =>
+  unwrap(http.post<never, { data: { data: Integration } }>('/admin/integrations', body))
+
+export const apiUpdateIntegration = (id: string, body: IntegrationUpdatePayload) =>
+  unwrap(http.put<never, { data: { data: Integration } }>(`/admin/integrations/${id}`, body))
+
+export const apiDeleteIntegration = (id: string) => http.delete(`/admin/integrations/${id}`)
+
+/** 签发服务端 Key：明文只在本次响应出现一次，库里只存 sha256 */
+export const apiIssueIntegrationKey = (id: string) =>
+  unwrap(
+    http.post<never, { data: { data: IntegrationKeyIssueResult } }>(
+      `/admin/integrations/${id}/keys`,
+    ),
+  )
+
+export const apiRevokeIntegrationKey = (id: string, keyId: string) =>
+  http.delete(`/admin/integrations/${id}/keys/${keyId}`)
+
 // ===== Admin：路由分发器（只读，无任何写接口）=====
 export const apiGetRouterInfo = () =>
   unwrap(http.get<never, { data: { data: RouterAgentInfo } }>('/admin/router'))
 
 export const apiGetRouterPrompt = () =>
   unwrap(http.get<never, { data: { data: RouterPromptPreview } }>('/admin/router/prompt'))
+
+// ===== Admin：场景路由档案（M3，派生视图）=====
+/** 全局模板、占位符与 env 默认值 */
+export const apiGetRouterTemplate = () =>
+  unwrap(http.get<never, { data: { data: RouterAgentInfo } }>('/admin/router/template'))
+
+/** 场景路由摘要列表：只给结论与警告，不渲染提示词 */
+export const apiListRouterScenes = () =>
+  unwrap(http.get<never, { data: { data: RouterSceneSummary[] } }>('/admin/router/scenes'))
+
+export const apiGetRouterScene = (code: string) =>
+  unwrap(http.get<never, { data: { data: RouterSceneDetail } }>(`/admin/router/scenes/${code}`))
+
+export const apiGetRouterScenePrompt = (code: string) =>
+  unwrap(http.get<never, { data: { data: RouterScenePrompt } }>(`/admin/router/scenes/${code}/prompt`))
+
+/** 试运行：llm 模式会消耗一次路由模型调用；不写会话/链路 */
+export const apiTestRouterScene = (code: string, message: string) =>
+  unwrap(
+    http.post<never, { data: { data: RouterSceneTestResult } }>(`/admin/router/scenes/${code}/test`, {
+      message,
+    }),
+  )
+
+export const apiGetRouterSceneStats = (code: string, hours = 24) =>
+  unwrap(
+    http.get<never, { data: { data: RouterSceneStats } }>(`/admin/router/scenes/${code}/stats`, {
+      params: { hours },
+    }),
+  )
 
 // ===== Admin：MCP 服务 =====
 export const apiListMcpServers = () =>
@@ -257,23 +407,49 @@ export const apiToggleCustomTool = (name: string, enabled: boolean) =>
 export const apiDeleteCustomTool = (name: string) => http.delete(`/admin/custom-tools/${name}`)
 
 // ===== Admin：高频固定话术 =====
-export const apiListCannedScripts = () =>
-  unwrap(http.get<never, { data: { data: CannedScript[] } }>('/admin/canned-scripts'))
+/** 不传 sceneCode 返回全量；传了只返回该场景生效的全局行 + 场景覆盖行 */
+export const apiListCannedScripts = (sceneCode?: string) =>
+  unwrap(
+    http.get<never, { data: { data: CannedScript[] } }>('/admin/canned-scripts', {
+      params: sceneCode ? { scene_code: sceneCode } : {},
+    }),
+  )
 
 export const apiCreateCannedScript = (body: CannedScriptPayload) =>
   unwrap(http.post<never, { data: { data: CannedScript } }>('/admin/canned-scripts', body))
 
-export const apiUpdateCannedScript = (key: string, body: Partial<CannedScriptPayload>) =>
-  unwrap(http.put<never, { data: { data: CannedScript } }>(`/admin/canned-scripts/${key}`, body))
+export const apiUpdateCannedScript = (
+  key: string,
+  body: Partial<CannedScriptPayload>,
+  sceneCode?: string | null,
+) =>
+  unwrap(
+    http.put<never, { data: { data: CannedScript } }>(`/admin/canned-scripts/${key}`, body, {
+      params: sceneCode ? { scene_code: sceneCode } : {},
+    }),
+  )
 
-export const apiToggleCannedScript = (key: string, enabled: boolean) =>
-  http.patch(`/admin/canned-scripts/${key}/toggle`, { enabled })
+export const apiToggleCannedScript = (key: string, enabled: boolean, sceneCode?: string | null) =>
+  http.patch(
+    `/admin/canned-scripts/${key}/toggle`,
+    { enabled },
+    { params: sceneCode ? { scene_code: sceneCode } : {} },
+  )
 
-export const apiDeleteCannedScript = (key: string) => http.delete(`/admin/canned-scripts/${key}`)
+export const apiDeleteCannedScript = (key: string, sceneCode?: string | null) =>
+  http.delete(`/admin/canned-scripts/${key}`, {
+    params: sceneCode ? { scene_code: sceneCode } : {},
+  })
 
 // 命中测试：用真实问法验证规则，不写库、不产生会话消息
-export const apiCannedScriptMatch = (query: string) =>
-  unwrap(http.post<never, { data: { data: CannedMatchResult } }>('/admin/canned-scripts/match', { query }))
+// 传 sceneCode 时按运行时的「全局 + 场景覆盖」合并规则测试
+export const apiCannedScriptMatch = (query: string, sceneCode?: string | null) =>
+  unwrap(
+    http.post<never, { data: { data: CannedMatchResult } }>('/admin/canned-scripts/match', {
+      query,
+      ...(sceneCode ? { scene_code: sceneCode } : {}),
+    }),
+  )
 
 // ===== Admin：Memory =====
 export const apiMyMemories = (type?: string) =>
@@ -281,3 +457,12 @@ export const apiMyMemories = (type?: string) =>
 
 export const apiUserMemories = (userId: string, type?: string) =>
   unwrap(http.get<never, { data: { data: MemoryItem[] } }>(`/memory/users/${userId}`, { params: { type } }))
+
+// ===== Admin：授权与版本 =====
+/** 当前授权状态（版本、功能位、到期天数、降级原因），只读 */
+export const apiLicenseStatus = () =>
+  unwrap(http.get<never, { data: { data: LicenseStatus } }>('/admin/license'))
+
+/** 换授权文件后无需重启：重新读取并校验（失败同样只降级，不报错） */
+export const apiReloadLicense = () =>
+  unwrap(http.post<never, { data: { data: LicenseStatus } }>('/admin/license/reload'))

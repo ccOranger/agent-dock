@@ -1,17 +1,7 @@
-export interface User {
-  id: string
-  username: string
-  role: 'customer' | 'agent' | 'admin'
-  display_name?: string | null
-}
+// 基础类型由 @cs/shared 维护，这里集中转出，业务代码继续从 '@/types' 导入
+import type { ApiResponse, LoginResult, MemoryItem, User } from '@shared'
 
-export interface LoginResult {
-  access_token: string
-  refresh_token: string
-  token_type: string
-  expires_in: number
-  user: User
-}
+export type { ApiResponse, LoginResult, MemoryItem, User }
 
 export interface Message {
   id: string
@@ -83,16 +73,6 @@ export interface AgentInfo {
   display_name?: string
 }
 
-export interface MemoryItem {
-  id: string
-  memory_uid: string
-  type: 'working' | 'episodic' | 'semantic' | 'perceptual'
-  content: string
-  importance: number
-  access_count: number
-  created_at: string
-}
-
 export interface DocumentItem {
   id: string
   title: string
@@ -101,10 +81,4 @@ export interface DocumentItem {
   chunk_count: number
   content_type?: string | null
   created_at: string
-}
-
-export interface ApiResponse<T> {
-  code: number
-  message: string
-  data: T
 }

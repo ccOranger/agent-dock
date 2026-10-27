@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>第三方宿主页（嵌入演示）</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+        background: #eef2f7;
+        color: #1f2329;
+      }
+      .wrap {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 48px 24px 120px;
+      }
+      .card {
+        background: #fff;
+        border-radius: 14px;
+        padding: 28px;
+        box-shadow: 0 8px 30px rgba(31, 35, 41, 0.08);
+      }
+      code {
+        background: #f2f4f8;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 16px;
+        border-radius: 10px;
+        overflow-x: auto;
+      }
+      .tip {
+        color: #6b7280;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>模拟第三方业务站点</h1>
+        <p class="tip">
+          本页只通过一行 script 引入客服组件，没有任何构建依赖。打开右下角气泡即可验证：
+          宿主页样式不影响组件、组件不污染宿主全局（除 <code>window.AgentDockWidget</code>）。
+        </p>
+        <pre>&lt;script src="/widget.js" data-scene="customer_service"
+          data-ext='{"platform":"web","channel":"demo"}'&gt;&lt;/script&gt;</pre>
+        <p class="tip">
+          <code>data-ext</code> 只用于埋点统计（整体落 <code>chat_events.ext</code>），
+          不参与身份与隔离；单租户部署无需传 <code>data-integration</code>。
+        </p>
+        <p class="tip">
+          页面右下角会出现气泡；主题色、标题与位置来自后台场景的「嵌入配置」。
+          未发布（未开放匿名）的场景会在气泡内提示无法开始对话。
+        </p>
+      </div>
+    </div>
+
+    <script src="/widget.js" data-scene="customer_service"
+          data-ext='{"platform":"web","channel":"demo"}'></script>
+  </body>
+</html>
