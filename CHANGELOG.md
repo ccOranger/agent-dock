@@ -10,6 +10,14 @@
 
 ## [Unreleased]
 
+_暂无。_
+
+## [0.1.0] - 2026-10-27
+
+首个对外版本。定位：**可私有化部署的对话式 Agent 运营平台** —— 多意图路由、知识库、工具调用、跨轮记忆与全链路追踪都做成平台能力，客服/售后只是首个内置业务。
+
+面向"能自己跑 Docker 的技术型团队"：克隆仓库 → 填 `.env` → `docker compose up -d` → 30 分钟内完成首次对话。
+
 ### 新增：版本化增量迁移（W1）
 
 - **存量库可升级**：新增 `scripts/migrations/NNNN_slug.sql` + `schema_migrations` 记录表，存量库通过 `python -m app.migrate` 顺序升级，不再依赖 `rebuild_and_seed.py` 全量重建。空库仍由 `init_db.sql` 一次建到最新结构（不存 `0001_baseline.sql` 副本，避免双份 DDL 漂移）。
@@ -141,21 +149,7 @@
   → 新增 `app/api/params.py`：同一个 ID 框既认 36 位会话 UUID 也认 16 位 `trace_id`，
   非法形态返回 400 `code=1001`；列表接口另开放显式 `trace_id` 参数。
 
-面向后续版本的候选项（只记录，不影响当前发布）：
-
-- RBAC 与审计增强、SSO（企业版方向）；
-- 后台 IA 去客服化：`canned_scripts` → 通用 `response_templates`，`app_users` 合并、Ticket 领域拆分。
-
-已完成：版本化数据库迁移（W1）；用量计量与报表（W2）；License 与版本分层（W3）；
-评测与回归（`backend/tests/fixtures/eval/*.json` + `scripts/eval.py` + `eval_runs`，见上方 W4）。
-
-## [0.1.0] - 2026-10-20
-
-首个对外版本。定位：**可私有化部署的对话式 Agent 运营平台** —— 多意图路由、知识库、工具调用、跨轮记忆与全链路追踪都做成平台能力，客服/售后只是首个场景包。
-
-面向"能自己跑 Docker 的技术型团队"：克隆仓库 → 填 `.env` → `docker compose up -d` → 30 分钟内完成首次对话。
-
-### 新增
+### 新增（基线能力）
 
 **平台内核**
 
@@ -169,13 +163,12 @@
 - 工具调用：代码自定义工具 + MCP（stdio / SSE / streamable HTTP），异步执行并记录结果与失败降级（U05、U09、U10）。
 - 固定话术：高频确定性问题（身份、能力、探听类）在路由与大模型之前逐字命中，毫秒级响应、后台可改可停用（U16）。
 - 双端身份：后台人员与客户分表、分登录入口、Token 隔离，客户可自助注册；401 单飞刷新后重放原请求（U07）。
-- 工单：独立 `tickets` 表结构化增改查，支持跨轮补录与升级流转，可按场景包打 `metadata` 标记（U06、M4）。
+- 工单：独立 `tickets` 表结构化增改查，支持跨轮补录与升级流转，可按场景打 `metadata` 标记（U06、M4）。
 
-**场景包机制（v0.1 的关键差异化能力）**
+**领域资产登记（场景包机制已于本次发布前移除）**
 
-- `backend/app/packs/<pack>/manifest.yaml` 声明包内 Agent / 工具 / 知识库命名空间与 `features`；内核不 import 包内模块，由 `packs/loader.py` 反向注册，断包只记日志降级（M1）。
-- 内置两个包：`customer_service`（3 Agent、9 工具、3 命名空间）与 `it_helpdesk`（3 Agent、4 工具、3 命名空间，含资产查询与 IT 工单）（U17）。
-- 包级启停：`GET/PATCH /api/v1/admin/packs` + 运营台「场景包」页，复用 `agents.enabled`；停用客服包后 IT 包仍可对话与建单。运营台导航按 `features` 显隐。
+- 早期用 `backend/app/packs/<pack>/manifest.yaml` 声明包内 Agent / 工具 / 知识库命名空间并按 `features` 显隐导航（M1、U17）；该机制已整体移除，Agent、提示词与工具迁回 `app/agents/` 与 `app/tools/custom/`，由 `registry.py` / `custom_catalog.py` 显式登记，能力与工具名保持不变。
+- 当前划分：代码 Agent 与自定义工具是普通代码资产，业务差异通过「业务场景」在后台配置（Agent 池、知识库、话术、运行参数），不再需要打包与重启。
 
 **部署与运维**
 
@@ -191,15 +184,15 @@
 - 前端单仓多包（npm workspaces）：`@cs/shared` 提供唯一的 HTTP 客户端（401 单飞刷新）、auth store、SSE 解析与基础类型；两个应用各自薄封装。
 - CI：GitHub Actions 后端 ruff + pytest、前端两端 `npm ci && npm run build`。
 - 社区物料：`LICENSE`（Apache-2.0）、`NOTICE`、`SECURITY.md`、`CONTRIBUTING.md`、issue/PR 模板、`.gitattributes`。
-- 文档：`docs/quickstart.md`、`configuration.md`、`deployment.md`、`faq.md`、`runbook.md`、`packs.md`、`api.md`、`demo-script.md`、`positioning.md`、技术文章《多意图路由与提示词去具名化》。
+- 文档：`docs/quickstart.md`、`configuration.md`、`deployment.md`、`faq.md`、`runbook.md`、`evaluation.md`、`api.md`、`demo-script.md`、`positioning.md`、技术文章《多意图路由与提示词去具名化》。
 
-### 变更
+### 变更（基线）
 
 - 对外品牌统一为 **AgentDock**；仓库名、Compose 项目名与 Python 包名保留 `smart-cs`，避免已有数据卷失联。
-- 客服领域资产从 `agents/`、`tools/custom/` 归位到 `packs/customer_service/`，内核与领域代码边界明确（M1）。
+- 客服领域资产曾在 M1 归位到 `packs/customer_service/`，本次发布前随场景包机制移除迁回 `agents/`、`tools/custom/`。
 - 版本口径由内部 `1.3.0` 统一降为对外 `0.1.0`（`package.json`、`pyproject.toml`、FastAPI `version`、三个前端包与锁文件）。
 
-### 修复（摘取影响使用的关键项）
+### 修复（基线，摘取影响使用的关键项）
 
 - 业务 Agent 每轮新建导致跨轮失忆、工单无法补录 → 注入 history 并统一到工单表（U06）。
 - 同步阻塞的 MCP 工具发现在事件循环上冻结整个 FastAPI 服务 → 超时隔离与线程执行（U05、U09）。
@@ -212,11 +205,11 @@
 ### 已知限制
 
 - **单实例单租户**：不支持水平扩容与租户隔离，`tenant_id` 仅预留字段。
-- **无版本化迁移**：schema 变更靠幂等 `init_db.sql`，跨版本回滚需先用备份在预发环境演练。
+- **迁移需人工触发**：升级时执行 `python -m app.migrate`（或置 `MIGRATE_ON_START=true`），不提供自动滚动升级；回滚前请先用备份在预发环境演练。
 - **无内置 mock 模型模式**：对话与向量必须连 OpenAI 兼容端点；内网需自备本地模型服务（详见离线部署章节）。`EMBED_MODEL_TYPE` 由框架支持 `dashscope`（配 `EMBED_BASE_URL` 时走 OpenAI 兼容 REST）/ `local` / `tfidf`，其中 `local` 依赖 sentence-transformers（当前镜像未包含）。
 - semantic 记忆需 Neo4j，默认未启用。
 - MCP 的 `npx` 型示例需外网；stdio 型服务要求容器内存在对应运行时。
-- 运营台截图与演示 GIF 尚未随包发布（原截图清单所在文档已随场景包机制移除）。
+- 演示数据的订单/物流时间为 2024 年（与示例订单号 `SO2024xxxx` 对应），模型可能提示“时间较旧”；接入真实工具后不存在此问题。截图与 GIF 见 [docs/assets/screenshots/](docs/assets/screenshots/) 与 [演示脚本](docs/demo-script.md)。
 - 前端构建有 chunk 体积告警；后台部分列表存在 N+1 查询（已列入发布后清单）。
 
 ### 升级方式
@@ -227,10 +220,18 @@ v0.1.0 是首个对外版本，无历史版本兼容义务。从内部构建升�
 bash scripts/backup.sh                 # 先备份（生产叠加需指定 COMPOSE_FILE）
 git pull && git checkout v0.1.0
 docker compose -f docker-compose.yml up -d --build
-docker compose run --rm backend python ../scripts/init_db.py   # 幂等，补新增对象
+docker compose run --rm backend python -m app.migrate   # schema 6 → 8，顺序升级
 ```
 
+空库无需迁移：`init_db.sql` 一次建到最新结构（`SCHEMA_VERSION=8`）。
+
 破坏性变更会在本文件对应版本以 **⚠️** 标注；v0.1.x 期间接口与表结构仍可能调整，请在升级前阅读本节。
+
+### 后续版本方向
+
+- RBAC 与审计查询/导出、SSO（企业版功能位方向）；
+- 后台 IA 去客服化：`canned_scripts` → 通用 `response_templates`，`app_users` 合并、Ticket 领域拆分；
+- 模型供应商后台化、`/metrics` 与诊断包、交付 SOP 与验收单。
 
 ### 反馈与安全
 
