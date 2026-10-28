@@ -887,6 +887,8 @@ export interface StaffMember {
   id: string
   username: string
   role: StaffRole
+  /** 多角色：所挂角色 key 集合（主角色列 role 由此派生） */
+  roles?: string[]
   display_name?: string | null
   is_active: boolean
   /** 只包含已配置的键；空对象 = 全部不限 */
@@ -900,6 +902,8 @@ export interface StaffCreatePayload {
   username: string
   password: string
   role: StaffRole
+  /** 传入则整体覆盖角色集合；不传按 role 单角色起步 */
+  roles?: string[]
   display_name?: string | null
   quota?: StaffQuota | null
 }
@@ -908,6 +912,8 @@ export interface StaffCreatePayload {
 export interface StaffUpdatePayload {
   display_name?: string | null
   role?: StaffRole
+  /** 传了即整体替换角色集合 */
+  roles?: string[]
   is_active?: boolean
   quota?: StaffQuota | null
 }
@@ -924,4 +930,38 @@ export const CANNED_CATEGORY_LABELS: Record<CannedScriptCategory, string> = {
   capability: '能力介绍',
   probing: '探听拒答',
   business: '业务话术',
+}
+
+// ===== RBAC：角色与菜单权限 =====
+/** 访问等级：read（只读）⊂ write（可改，含只读） */
+export type MenuAccess = 'read' | 'write'
+
+/** 可授权菜单模块（后端 core/rbac 下发，与菜单叶子 key 对齐） */
+export interface MenuModule {
+  key: string
+  name: string
+  group: string
+}
+
+/** 一行角色：授权矩阵 {menuKey: access} + 在册人数 */
+export interface Role {
+  id: string
+  key: string
+  name: string
+  description?: string | null
+  is_system: boolean
+  permissions: Record<string, MenuAccess>
+  user_count: number
+}
+
+export interface RoleCreatePayload {
+  key: string
+  name: string
+  description?: string | null
+  permissions?: Record<string, MenuAccess>
+}
+
+export interface RoleUpdatePayload {
+  name?: string
+  description?: string | null
 }

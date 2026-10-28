@@ -20,7 +20,7 @@ from app.agents.canned_scripts import (
     match_canned_script,
     normalize_query,
 )
-from app.api.deps import require_admin, require_staff
+from app.api.deps import require_perm, require_staff
 from app.core.exceptions import Conflict, NotFound, ParamError
 from app.models.repositories import (
     AuditRepo,
@@ -138,7 +138,7 @@ async def list_canned_scripts(
 
 
 @router.post("", response_model=ApiResponse[dict])
-async def create_canned_script(body: CannedScriptCreate, user=Depends(require_admin)):
+async def create_canned_script(body: CannedScriptCreate, user=Depends(require_perm("canned-scripts", "write"))):
     scene_id = await _resolve_scene_id(body.scene_code)
     if await CannedScriptRepo.get_by_key(body.key, scene_id) is not None:
         where = f"（场景 {body.scene_code}）" if body.scene_code else "（全局）"
@@ -175,7 +175,7 @@ async def update_canned_script(
     key: str,
     body: CannedScriptUpdate,
     scene_code: str | None = Query(None, description="为空时定位全局行"),
-    user=Depends(require_admin),
+    user=Depends(require_perm("canned-scripts", "write")),
 ):
     scene_id = await _resolve_scene_id(scene_code)
     row = await CannedScriptRepo.get_by_key(key, scene_id)
@@ -226,7 +226,7 @@ async def toggle_canned_script(
     key: str,
     body: CannedScriptToggle,
     scene_code: str | None = Query(None, description="为空时定位全局行"),
-    user=Depends(require_admin),
+    user=Depends(require_perm("canned-scripts", "write")),
 ):
     scene_id = await _resolve_scene_id(scene_code)
     row = await CannedScriptRepo.set_enabled(key, body.enabled, scene_id)
@@ -245,7 +245,7 @@ async def toggle_canned_script(
 async def delete_canned_script(
     key: str,
     scene_code: str | None = Query(None, description="为空时定位全局行"),
-    user=Depends(require_admin),
+    user=Depends(require_perm("canned-scripts", "write")),
 ):
     scene_id = await _resolve_scene_id(scene_code)
     row = await CannedScriptRepo.get_by_key(key, scene_id)

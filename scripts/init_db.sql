@@ -76,6 +76,49 @@ CREATE TABLE staff_users (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_users_role ON staff_users(role);
 
+-- ========== RBAC：角色 / 人员-角色 / 角色-菜单授权 ==========
+-- 菜单结构仍在前端（与路由绑定），库里只存"角色↔模块key↔读写"授权映射。
+CREATE TABLE roles (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key             VARCHAR(32) UNIQUE NOT NULL,
+    name            VARCHAR(64) NOT NULL,
+    description     VARCHAR(255),
+    -- 内置角色（admin/agent）不可删除、key 不可改
+    is_system       BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE user_roles (
+    user_id         UUID NOT NULL REFERENCES staff_users(id) ON DELETE CASCADE,
+    role_id         UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role_id);
+
+-- 一个角色一行存整张 {menu_key: 'read'|'write'} map；role_id 唯一，读写整体替换
+CREATE TABLE role_permissions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    role_id         UUID NOT NULL UNIQUE REFERENCES roles(id) ON DELETE CASCADE,
+    permissions     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 内置角色（固定 UUID 便于迁移 seed 与授权映射引用）
+INSERT INTO roles (id, key, name, description, is_system) VALUES
+    ('00000000-0000-0000-0000-0000000000a1', 'admin', '管理员',
+     '超级管理员，默认拥有全部模块的读写权限', TRUE),
+    ('00000000-0000-0000-0000-0000000000a2', 'agent', '客服坐席',
+     '一线客服：接管/咨询/工单读写，知识与链路按需查看', TRUE)
+ON CONFLICT (key) DO NOTHING;
+
+-- admin 为超级角色：后端旁路放行，无需落权限行；agent 默认授权贴合历史 require_staff 可见范围
+INSERT INTO role_permissions (role_id, permissions) VALUES
+    ('00000000-0000-0000-0000-0000000000a2',
+     '{"takeover":"write","inquiries":"write","tickets":"write","traces":"read","knowledge":"read","memory":"write"}'::jsonb)
+ON CONFLICT (role_id) DO NOTHING;
+
 -- ========== 客户账号（可自助注册） ==========
 CREATE TABLE customer_users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -526,5 +569,5 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- 只在缺失时写入：存量库的版本由迁移推进，重复执行本脚本不得把版本降回去
-INSERT INTO schema_meta (key, value) VALUES ('version', '9')
+INSERT INTO schema_meta (key, value) VALUES ('version', '10')
 ON CONFLICT (key) DO NOTHING;

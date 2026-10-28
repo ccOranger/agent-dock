@@ -4,8 +4,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.exceptions import Forbidden, TokenExpired, Unauthorized
 from app.core.license import FEATURE_CATALOG, has_feature
+from app.core.rbac import ACCESS_WRITE, access_satisfied, all_write_permissions
 from app.core.security import decode_token
-from app.models.repositories import CustomerRepo, StaffRepo
+from app.models.repositories import CustomerRepo, RoleRepo, StaffRepo
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -90,6 +91,34 @@ def require_roles(*roles: str):
 
 require_staff = require_roles("agent", "admin")
 require_admin = require_roles("admin")
+
+
+async def effective_permissions(user) -> dict[str, str]:
+    """登录用户的有效菜单权限：admin 超管→全量 write；否则取所挂角色授权并集。"""
+    if getattr(user, "role", None) == "admin":
+        return all_write_permissions()
+    return await RoleRepo.resolve_permissions(user.id)
+
+
+def require_perm(menu_key: str, access: str = ACCESS_WRITE):
+    """可配置模块鉴权依赖工厂：粗粒度 staff 守卫 + 按菜单模块读/写授权。
+
+    - 非后台人员（含 customer token）一律 403；
+    - admin 为超级角色旁路放行（与历史 require_admin 行为一致，纯增量能力）；
+    - 其余人员需持有该模块且等级 ≥ 要求（write ⊇ read）。
+    """
+
+    async def _dep(user=Depends(current_user)):
+        if user.role not in STAFF_ROLES:
+            raise Forbidden()
+        if user.role == "admin":
+            return user
+        perms = await RoleRepo.resolve_permissions(user.id)
+        if not access_satisfied(perms.get(menu_key), access):
+            raise Forbidden(f"无权访问该模块（需 {menu_key} 的 {access} 权限）")
+        return user
+
+    return _dep
 
 
 def require_feature(feature: str):

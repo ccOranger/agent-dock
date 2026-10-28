@@ -469,17 +469,22 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: #f4f4f5;
 }
+/* 坐席工作台视角：客户在左、我方（人工/机器人）在右 */
 .msg.customer {
-  align-self: flex-end;
+  align-self: flex-start;
   background: #ecf5ff;
 }
 .msg.staff {
-  align-self: flex-start;
+  align-self: flex-end;
   background: #f0f9eb;
 }
 .msg.bot {
-  align-self: flex-start;
+  align-self: flex-end;
   background: #f4f4f5;
+}
+.msg.staff .msg-meta,
+.msg.bot .msg-meta {
+  justify-content: flex-end;
 }
 .msg-meta {
   display: flex;

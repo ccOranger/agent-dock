@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse
 
-from app.api.deps import require_admin, require_staff
+from app.api.deps import require_perm, require_staff
 from app.core.exceptions import Conflict, NotFound, ParamError
 from app.models.repositories import DocumentRepo, KnowledgeBaseRepo
 from app.schemas.api import (
@@ -36,7 +36,7 @@ async def upload_document(
     file: UploadFile = File(...),
     namespace: str = Form("cs_default"),
     title: str = Form(None),
-    user=Depends(require_admin),
+    user=Depends(require_perm("knowledge", "write")),
 ):
     if file.content_type not in ALLOWED_TYPES:
         raise ParamError(f"不支持的文件类型: {file.content_type}")
@@ -122,7 +122,7 @@ async def download_document_raw(doc_id: uuid.UUID, user=Depends(require_staff)):
 
 
 @router.delete("/documents/{doc_id}", response_model=ApiResponse)
-async def delete_document(doc_id: uuid.UUID, user=Depends(require_admin)):
+async def delete_document(doc_id: uuid.UUID, user=Depends(require_perm("knowledge", "write"))):
     doc = await DocumentRepo.get(doc_id)
     if doc is None:
         raise NotFound("文档不存在")
@@ -131,7 +131,7 @@ async def delete_document(doc_id: uuid.UUID, user=Depends(require_admin)):
 
 
 @router.post("/documents/{doc_id}/reindex", response_model=ApiResponse)
-async def reindex_document(doc_id: uuid.UUID, user=Depends(require_admin)):
+async def reindex_document(doc_id: uuid.UUID, user=Depends(require_perm("knowledge", "write"))):
     doc = await DocumentRepo.get(doc_id)
     if doc is None:
         raise NotFound("文档不存在")
@@ -141,7 +141,7 @@ async def reindex_document(doc_id: uuid.UUID, user=Depends(require_admin)):
 
 # ===== 手工 FAQ 文本条目 =====
 @router.post("/entries", response_model=ApiResponse)
-async def create_entry(body: KnowledgeEntryCreate, user=Depends(require_admin)):
+async def create_entry(body: KnowledgeEntryCreate, user=Depends(require_perm("knowledge", "write"))):
     if await KnowledgeBaseRepo.get(body.namespace) is None:
         raise NotFound("知识库命名空间不存在")
     doc = await DocumentService().create_entry(
@@ -154,7 +154,7 @@ async def create_entry(body: KnowledgeEntryCreate, user=Depends(require_admin)):
 
 
 @router.put("/entries/{doc_id}", response_model=ApiResponse)
-async def update_entry(doc_id: uuid.UUID, body: KnowledgeEntryUpdate, user=Depends(require_admin)):
+async def update_entry(doc_id: uuid.UUID, body: KnowledgeEntryUpdate, user=Depends(require_perm("knowledge", "write"))):
     doc = await DocumentRepo.get(doc_id)
     if doc is None:
         raise NotFound("条目不存在")
@@ -186,7 +186,7 @@ async def list_bases(user=Depends(require_staff)):
 
 
 @router.post("/bases", response_model=ApiResponse)
-async def create_base(body: KnowledgeBaseCreate, user=Depends(require_admin)):
+async def create_base(body: KnowledgeBaseCreate, user=Depends(require_perm("knowledge", "write"))):
     if await KnowledgeBaseRepo.get(body.namespace) is not None:
         raise Conflict("命名空间已存在")
     async with create_guard(user, KIND_KNOWLEDGE_BASE):
@@ -206,7 +206,7 @@ async def create_base(body: KnowledgeBaseCreate, user=Depends(require_admin)):
 
 
 @router.patch("/bases/{namespace}", response_model=ApiResponse)
-async def update_base(namespace: str, body: KnowledgeBaseUpdate, user=Depends(require_admin)):
+async def update_base(namespace: str, body: KnowledgeBaseUpdate, user=Depends(require_perm("knowledge", "write"))):
     row = await KnowledgeBaseRepo.update(
         namespace,
         display_name=body.display_name,
@@ -221,7 +221,7 @@ async def update_base(namespace: str, body: KnowledgeBaseUpdate, user=Depends(re
 
 
 @router.delete("/bases/{namespace}", response_model=ApiResponse)
-async def delete_base(namespace: str, user=Depends(require_admin)):
+async def delete_base(namespace: str, user=Depends(require_perm("knowledge", "write"))):
     if await KnowledgeBaseRepo.get(namespace) is None:
         raise NotFound("知识库不存在")
     count = await DocumentRepo.count_by_namespace(namespace)

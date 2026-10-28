@@ -11,7 +11,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import require_admin, require_staff
+from app.api.deps import require_perm, require_staff
 from app.core.cors import invalidate_origin_cache
 from app.core.exceptions import Conflict, NotFound, ParamError
 from app.models.repositories import (
@@ -85,7 +85,7 @@ async def _validate_bound_agents(scene_id, agent_ids: list[str]) -> list[str]:
 
 
 @router.get("", response_model=ApiResponse[list])
-async def list_scenes(user=Depends(require_admin)):
+async def list_scenes(user=Depends(require_perm("scenes", "read"))):
     """场景列表 + 今日请求量与日额度（一次聚合，不逐场景查 chat_events）。"""
     rows = await SceneRepo.list_with_agent_counts()
     today = await ChatEventRepo.count_by_scene_today()
@@ -115,7 +115,7 @@ async def scene_options(user=Depends(require_staff)):
 
 
 @router.post("", response_model=ApiResponse[dict])
-async def create_scene(body: SceneCreate, user=Depends(require_admin)):
+async def create_scene(body: SceneCreate, user=Depends(require_perm("scenes", "write"))):
     if body.code == DEFAULT_SCENE_CODE:
         raise Conflict("default 是保留场景标识")
     if await SceneRepo.get_by_code(body.code) is not None:
@@ -168,7 +168,7 @@ async def create_scene(body: SceneCreate, user=Depends(require_admin)):
 
 
 @router.get("/{scene_id}", response_model=ApiResponse[dict])
-async def get_scene(scene_id: str, user=Depends(require_admin)):
+async def get_scene(scene_id: str, user=Depends(require_perm("scenes", "read"))):
     scene = await _get_scene_or_404(scene_id)
     agents = await SceneRepo.list_bound_agents(scene.id)
     data = SceneRepo.to_dict(scene, len(agents))
@@ -181,7 +181,7 @@ async def get_scene(scene_id: str, user=Depends(require_admin)):
 
 
 @router.patch("/{scene_id}", response_model=ApiResponse[dict])
-async def update_scene(scene_id: str, body: SceneUpdate, user=Depends(require_admin)):
+async def update_scene(scene_id: str, body: SceneUpdate, user=Depends(require_perm("scenes", "write"))):
     scene = await _get_scene_or_404(scene_id)
     fields = body.model_dump(exclude_unset=True)
     agent_ids = fields.pop("agent_ids", None)
@@ -217,7 +217,7 @@ async def update_scene(scene_id: str, body: SceneUpdate, user=Depends(require_ad
 
 @router.put("/{scene_id}/agents", response_model=ApiResponse[list])
 async def set_scene_agents(
-    scene_id: str, body: SceneAgentsUpdate, user=Depends(require_admin)
+    scene_id: str, body: SceneAgentsUpdate, user=Depends(require_perm("scenes", "write"))
 ):
     scene = await _get_scene_or_404(scene_id)
     if scene.is_default:
@@ -232,7 +232,7 @@ async def set_scene_agents(
 
 
 @router.get("/{scene_id}/agents", response_model=ApiResponse[list])
-async def list_scene_agent_options(scene_id: str, user=Depends(require_admin)):
+async def list_scene_agent_options(scene_id: str, user=Depends(require_perm("scenes", "read"))):
     """绑定弹窗：可绑定 Agent + 当前绑定状态。"""
     scene = await _get_scene_or_404(scene_id)
     return ApiResponse(data=await SceneRepo.list_agents_for_admin(scene.id))
@@ -240,7 +240,7 @@ async def list_scene_agent_options(scene_id: str, user=Depends(require_admin)):
 
 @router.put("/{scene_id}/widget", response_model=ApiResponse[dict])
 async def update_scene_widget(
-    scene_id: str, body: SceneWidgetUpdate, user=Depends(require_admin)
+    scene_id: str, body: SceneWidgetUpdate, user=Depends(require_perm("scenes", "write"))
 ):
     """保存嵌入配置、允许来源与发布开关。
 
@@ -278,7 +278,7 @@ async def update_scene_widget(
 
 
 @router.delete("/{scene_id}", response_model=ApiResponse[dict])
-async def delete_scene(scene_id: str, user=Depends(require_admin)):
+async def delete_scene(scene_id: str, user=Depends(require_perm("scenes", "write"))):
     scene = await _get_scene_or_404(scene_id)
     if scene.is_default:
         raise ParamError("默认场景不允许删除")

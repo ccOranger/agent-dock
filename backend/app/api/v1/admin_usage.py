@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import require_admin
+from app.api.deps import require_perm
 from app.core.config import settings
 from app.core.exceptions import ParamError
 from app.models.repositories import UsageRepo
@@ -57,7 +57,7 @@ async def usage_summary(
     date_to: str | None = Query(None, alias="to"),
     group_by: str = Query("day"),
     scene_code: str | None = None,
-    user=Depends(require_admin),
+    user=Depends(require_perm("usage", "read")),
 ):
     """用量汇总：rows 按维度分组，totals 为同口径合计（二者必然自洽）。"""
     start, end = _range(date_from, date_to)
@@ -84,7 +84,7 @@ async def export_usage(
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
     scene_code: str | None = None,
-    user=Depends(require_admin),
+    user=Depends(require_perm("usage", "read")),
 ):
     """导出 (日 × 场景 × 接入方) 明细 CSV（UTF-8 BOM，Excel 直接打开无乱码）。"""
     start, end = _range(date_from, date_to)

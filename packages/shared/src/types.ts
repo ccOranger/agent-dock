@@ -5,6 +5,10 @@ export interface User {
   username: string
   role: 'customer' | 'agent' | 'admin'
   display_name?: string | null
+  /** RBAC：人员所属角色 key 列表（customer 通常为空） */
+  roles?: string[]
+  /** RBAC：有效菜单权限 {menuKey: 'read' | 'write'}；admin 为全量 write */
+  permissions?: Record<string, 'read' | 'write'>
 }
 
 export interface LoginResult<U = User> {

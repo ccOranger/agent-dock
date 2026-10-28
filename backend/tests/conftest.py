@@ -76,6 +76,23 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _stub_rbac_resolve(monkeypatch):
+    """单测不连真库：默认把「按人解析有效菜单权限」置为空 dict。
+
+    - admin 在 require_perm 里走超管旁路，根本不会调用它，行为不变；
+    - 非 admin 人员未显式打桩时即「无授权 → 403」，与 RBAC 语义一致，
+      避免去连真实数据库；
+    - 需要放行的用例在测试体内再次 monkeypatch.setattr 覆盖即可（后设先胜）。
+    """
+    from app.models.repositories import RoleRepo
+
+    async def _no_grants(user_id):
+        return {}
+
+    monkeypatch.setattr(RoleRepo, "resolve_permissions", _no_grants)
+
+
 @pytest.fixture
 def make_test_app():
     """构造挂载指定路由的独立测试应用，并按角色覆盖 current_user 依赖（不触发真实 DB/启动事件）"""

@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import require_admin
 from app.core.exceptions import Conflict, NotFound, ParamError
 from app.core.security import hash_password
-from app.models.repositories import AuditRepo, StaffRepo
+from app.models.repositories import AuditRepo, RoleRepo, StaffRepo
 from app.schemas.api import StaffCreate, StaffPasswordReset, StaffUpdate
 from app.schemas.common import ApiResponse
 from app.services.quota_service import (
@@ -42,8 +42,8 @@ def _uuid_or_400(value: str, field: str = "staff_id") -> str:
         raise ParamError(f"{field} 不是合法 UUID: {value}") from exc
 
 
-def _to_dict(user, usage: dict[str, int]) -> dict:
-    """一行人员 + 配额 + 已用 + 剩余（remaining=null 表示不限）。"""
+def _to_dict(user, usage: dict[str, int], roles: list[str] | None = None) -> dict:
+    """一行人员 + 角色 + 配额 + 已用 + 剩余（remaining=null 表示不限）。"""
     limits = effective_limits(user)
     quota = {LIMIT_KEYS[kind]: limits[kind] for kind in LIMIT_KEYS if limits[kind] is not None}
     used = {USAGE_KEYS[kind]: int(usage.get(kind, 0)) for kind in LIMIT_KEYS}
@@ -57,6 +57,7 @@ def _to_dict(user, usage: dict[str, int]) -> dict:
         "id": str(user.id),
         "username": user.username,
         "role": user.role,
+        "roles": roles or [user.role],
         "display_name": user.display_name,
         "is_active": bool(user.is_active),
         "quota": quota,
@@ -74,7 +75,8 @@ async def list_staff(user=Depends(require_admin)):
     data = []
     for row in users:
         per_kind = {kind: usage[kind].get(str(row.id), 0) for kind in LIMIT_KEYS}
-        data.append(_to_dict(row, per_kind))
+        roles = await RoleRepo.get_user_role_keys(row.id) or [row.role]
+        data.append(_to_dict(row, per_kind, roles=roles))
     return ApiResponse(data=data)
 
 
@@ -83,17 +85,20 @@ async def create_staff(body: StaffCreate, user=Depends(require_admin)):
     if await StaffRepo.get_by_username(body.username) is not None:
         raise Conflict(f"用户名已存在: {body.username}")
     quota = normalize_quota(body.quota)
+    # 主角色列与历史 require_staff/require_admin 兼容：多角色下取集合里是否含 admin
+    primary = "admin" if (body.roles and "admin" in body.roles) else body.role
     row = await StaffRepo.create(
         username=body.username,
         password_hash=hash_password(body.password),
-        role=body.role,
+        role=primary,
         display_name=body.display_name,
         quota=quota,
     )
+    role_keys = await RoleRepo.assign_user_roles(row.id, body.roles or [primary])
     await AuditRepo.write(
         action="admin.staff.create", user_id=str(user.id), target_type="staff", target_id=str(row.id)
     )
-    return ApiResponse(data=_to_dict(row, {}))
+    return ApiResponse(data=_to_dict(row, {}, roles=role_keys))
 
 
 @router.patch("/{staff_id}", response_model=ApiResponse[dict])
@@ -108,10 +113,18 @@ async def update_staff(staff_id: str, body: StaffUpdate, user=Depends(require_ad
     if "display_name" in body.model_fields_set:
         # 显式传 null / 空串 = 清空展示名：不能用 is not None 判定，否则永远清不掉
         fields["display_name"] = (body.display_name or "").strip() or None
-    if body.role is not None:
+    if body.roles is not None:
+        # 角色集合整体替换：不允许多人自改自锁（与历史“不能改自己角色”一致）
+        if is_self:
+            raise ParamError("不能修改自己的角色集合")
+        applied = await RoleRepo.assign_user_roles(target_id, body.roles)
+        fields["role"] = "admin" if "admin" in applied else "agent"
+    elif body.role is not None:
         if is_self and body.role != row.role:
             raise ParamError("不能修改自己的角色")
         fields["role"] = body.role
+        # 单角色入参：保持 user_roles 与主角色列同步
+        await RoleRepo.assign_user_roles(target_id, [body.role])
     if body.is_active is not None:
         if is_self and not body.is_active:
             raise ParamError("不能停用自己的账号")
@@ -122,6 +135,7 @@ async def update_staff(staff_id: str, body: StaffUpdate, user=Depends(require_ad
         fields["quota"] = normalize_quota(body.quota)
 
     updated = await StaffRepo.update(target_id, **fields) if fields else row
+    roles_out = await RoleRepo.get_user_role_keys(target_id) or [updated.role]
     await AuditRepo.write(
         action="admin.staff.update",
         user_id=str(user.id),
@@ -129,7 +143,7 @@ async def update_staff(staff_id: str, body: StaffUpdate, user=Depends(require_ad
         target_id=target_id,
         payload=fields,
     )
-    return ApiResponse(data=_to_dict(updated, await staff_usage(target_id)))
+    return ApiResponse(data=_to_dict(updated, await staff_usage(target_id), roles=roles_out))
 
 
 @router.post("/{staff_id}/password", response_model=ApiResponse)

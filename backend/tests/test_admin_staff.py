@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import current_user
 from app.api.v1 import admin_staff as staff_api
-from app.models.repositories import AuditRepo, StaffRepo
+from app.models.repositories import AuditRepo, RoleRepo, StaffRepo
 
 SELF_ID = str(uuid.uuid4())
 OTHER_ID = str(uuid.uuid4())
@@ -67,6 +67,19 @@ def _mute_audit(monkeypatch):
     return written
 
 
+def _stub_role(monkeypatch):
+    """隔离 RBAC 仓储：list/create/update 会读写 user_roles，单测里用桩替代。"""
+
+    async def fake_keys(user_id):
+        return ["agent"]
+
+    async def fake_assign(user_id, role_keys):
+        return sorted(role_keys)
+
+    monkeypatch.setattr(RoleRepo, "get_user_role_keys", fake_keys)
+    monkeypatch.setattr(RoleRepo, "assign_user_roles", fake_assign)
+
+
 def _stub_usage_by_owner(monkeypatch, mapping=None):
     """按 kind 返回 {owner_id: 已用}；同时记录调用次数以证明没有 N+1。"""
     calls: list[str] = []
@@ -92,6 +105,7 @@ def test_agent_role_is_rejected(make_test_app):
 
 # ===== 列表 =====
 def test_list_merges_usage_in_one_query_per_kind(make_test_app, monkeypatch):
+    _stub_role(monkeypatch)
     users = [_row(username="service01"), _row(username="service02", user_id=SELF_ID)]
     _stub_usage_by_owner(
         monkeypatch,
@@ -114,6 +128,7 @@ def test_list_merges_usage_in_one_query_per_kind(make_test_app, monkeypatch):
 
 
 def test_list_computes_remaining_and_null_when_unlimited(make_test_app, monkeypatch):
+    _stub_role(monkeypatch)
     users = [
         _row(quota={"max_scenes": 3, "max_agents": 0}),
         _row(username="service02", user_id=SELF_ID, quota={}),
@@ -134,6 +149,7 @@ def test_list_computes_remaining_and_null_when_unlimited(make_test_app, monkeypa
 
 def test_list_clamps_remaining_at_zero(make_test_app, monkeypatch):
     """历史超额（先调低配额再降级）不能显示成负数"""
+    _stub_role(monkeypatch)
     users = [_row(quota={"max_scenes": 1})]
     _stub_usage_by_owner(monkeypatch, {"scene": {OTHER_ID: 4}})
 
@@ -180,6 +196,7 @@ def test_create_rejects_unknown_quota_key(make_test_app, monkeypatch):
 
 
 def test_create_persists_normalized_quota_and_audits(make_test_app, monkeypatch):
+    _stub_role(monkeypatch)
     async def fake_get_by_username(username):
         return None
 
@@ -250,6 +267,7 @@ def test_cannot_change_own_quota(make_test_app, monkeypatch):
 
 
 def test_update_other_accepts_and_returns_usage(make_test_app, monkeypatch):
+    _stub_role(monkeypatch)
     async def fake_get_by_id(staff_id):
         return _row()
 
@@ -281,6 +299,7 @@ def test_update_other_accepts_and_returns_usage(make_test_app, monkeypatch):
 
 def test_update_clears_display_name(make_test_app, monkeypatch):
     """显式传 null 要把展示名清空：用 is not None 判定会让“清空”变成 200 但没改。"""
+    _stub_role(monkeypatch)
 
     async def fake_get_by_id(staff_id):
         return _row()

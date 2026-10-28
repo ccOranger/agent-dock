@@ -7,6 +7,7 @@ from app.api.v1 import (
     admin_inquiries,
     admin_integrations,
     admin_license,
+    admin_rbac,
     admin_router,
     admin_scenes,
     admin_staff,
@@ -32,6 +33,7 @@ api_router.include_router(knowledge.router)
 api_router.include_router(admin.router)
 api_router.include_router(admin_scenes.router)
 api_router.include_router(admin_staff.router)
+api_router.include_router(admin_rbac.router)
 api_router.include_router(admin_integrations.router)
 api_router.include_router(admin_router.router)
 api_router.include_router(admin_inquiries.router)

@@ -21,9 +21,14 @@ import type {
   MCPServerPayload,
   MCPServerToolsResult,
   MemoryItem,
+  MenuAccess,
+  MenuModule,
   Paginated,
   RequestTraceDetail,
   RequestTraceSummary,
+  Role,
+  RoleCreatePayload,
+  RoleUpdatePayload,
   RouterAgentInfo,
   RouterPromptPreview,
   RouterSceneDetail,
@@ -513,3 +518,27 @@ export const apiLicenseStatus = () =>
 /** 换授权文件后无需重启：重新读取并校验（失败同样只降级，不报错） */
 export const apiReloadLicense = () =>
   unwrap(http.post<never, { data: { data: LicenseStatus } }>('/admin/license/reload'))
+
+// ===== Admin：RBAC 角色与菜单权限 =====
+/** 可授权菜单模块清单（渲染读写矩阵的数据源，与前端菜单叶子 key 对齐） */
+export const apiListMenuModules = () =>
+  unwrap(http.get<never, { data: { data: MenuModule[] } }>('/admin/rbac/menus'))
+
+export const apiListRoles = () =>
+  unwrap(http.get<never, { data: { data: Role[] } }>('/admin/rbac/roles'))
+
+export const apiCreateRole = (body: RoleCreatePayload) =>
+  unwrap(http.post<never, { data: { data: Role } }>('/admin/rbac/roles', body))
+
+export const apiUpdateRole = (id: string, body: RoleUpdatePayload) =>
+  unwrap(http.patch<never, { data: { data: Role } }>(`/admin/rbac/roles/${id}`, body))
+
+export const apiDeleteRole = (id: string) => http.delete(`/admin/rbac/roles/${id}`)
+
+/** 整体替换角色授权矩阵：{menuKey: 'read'|'write'}；非法 key/等级后端过滤 */
+export const apiSetRolePermissions = (id: string, permissions: Record<string, MenuAccess>) =>
+  unwrap(
+    http.put<never, { data: { data: Record<string, MenuAccess> } }>(`/admin/rbac/roles/${id}/permissions`, {
+      permissions,
+    }),
+  )

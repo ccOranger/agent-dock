@@ -45,6 +45,9 @@ class UserInfo(BaseModel):
     username: str
     role: str
     display_name: str | None = None
+    # RBAC：登录人员所属角色 key 列表与有效菜单权限（{menu_key: 'read'|'write'}）
+    roles: list[str] = []
+    permissions: dict[str, str] = {}
 
     @classmethod
     def from_orm_user(cls, u) -> "UserInfo":
@@ -369,6 +372,8 @@ class StaffCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     password: str = Field(min_length=8, max_length=128)
     role: Literal["admin", "agent"] = "agent"
+    # 多角色：传入则整体覆盖角色集合；不传则按 role 单角色起步
+    roles: list[str] | None = Field(default=None, max_length=16)
     display_name: str | None = Field(default=None, max_length=64)
     # 键缺失/ null = 不限，0 = 禁止创建，正数 = 上限
     quota: dict[str, int | None] | None = None
@@ -379,9 +384,40 @@ class StaffUpdate(BaseModel):
 
     display_name: str | None = Field(default=None, max_length=64)
     role: Literal["admin", "agent"] | None = None
+    # 传了即整体替换角色集合（primary role 列随之同步）
+    roles: list[str] | None = Field(default=None, max_length=16)
     is_active: bool | None = None
     quota: dict[str, int | None] | None = None
 
 
 class StaffPasswordReset(BaseModel):
     password: str = Field(min_length=8, max_length=128)
+
+
+# ===== 管理后台：角色与菜单权限（RBAC）=====
+class RoleOut(BaseModel):
+    id: str
+    key: str
+    name: str
+    description: str | None = None
+    is_system: bool
+    permissions: dict[str, str] = {}
+    user_count: int = 0
+
+
+class RoleCreate(BaseModel):
+    key: str = Field(min_length=2, max_length=32, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    name: str = Field(min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=255)
+    permissions: dict[str, Literal["read", "write"]] | None = None
+
+
+class RoleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=255)
+
+
+class PermissionGrant(BaseModel):
+    """整体替换角色授权矩阵：{menu_key: 'read'|'write'}；非法 key 在接口层过滤。"""
+
+    permissions: dict[str, Literal["read", "write"]]

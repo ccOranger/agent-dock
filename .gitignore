@@ -7,6 +7,7 @@ venv/
 .pytest_cache/
 # Windows 下 tmp_path 权限受限，测试用 --basetemp=.pytest_tmp
 .pytest_tmp/
+.pytest_bt/
 .mypy_cache/
 .ruff_cache/
 dist/

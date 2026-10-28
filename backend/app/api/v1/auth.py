@@ -1,7 +1,7 @@
 """鉴权接口：人员与客户分表后提供各自的登录入口，并支持客户自助注册"""
 from fastapi import APIRouter, Depends, Request
 
-from app.api.deps import current_user
+from app.api.deps import current_user, effective_permissions
 from app.core.config import settings
 from app.core.exceptions import (
     AccountNotRegistered,
@@ -21,7 +21,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.models.repositories import AuditRepo, CustomerRepo, StaffRepo
+from app.models.repositories import AuditRepo, CustomerRepo, RoleRepo, StaffRepo
 from app.schemas.api import LoginRequest, LoginResult, RefreshRequest, RegisterRequest, UserInfo
 from app.schemas.common import ApiResponse
 from app.utils.request import client_ip as _client_ip
@@ -29,13 +29,22 @@ from app.utils.request import client_ip as _client_ip
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _issue(user) -> LoginResult:
+async def _issue(user) -> LoginResult:
     return LoginResult(
         access_token=create_access_token(str(user.id), user.role),
         refresh_token=create_refresh_token(str(user.id), user.role),
         expires_in=settings.access_token_ttl,
-        user=UserInfo.from_orm_user(user),
+        user=await build_user_info(user),
     )
+
+
+async def build_user_info(user) -> UserInfo:
+    """拼上 RBAC：后台人员额外携带角色 key 列表与有效菜单权限（供前端过滤与配置）。"""
+    info = UserInfo.from_orm_user(user)
+    if user.role in ("agent", "admin"):
+        info.roles = await RoleRepo.get_user_role_keys(user.id) or [user.role]
+        info.permissions = await effective_permissions(user)
+    return info
 
 
 @router.post("/staff/login", response_model=ApiResponse[LoginResult])
@@ -53,7 +62,7 @@ async def staff_login(body: LoginRequest, request: Request):
     if not user.is_active:
         raise Unauthorized("账号已停用")
     await AuditRepo.write(action="login", user_id=user.id, ip=ip)
-    return ApiResponse(data=_issue(user))
+    return ApiResponse(data=await _issue(user))
 
 
 @router.post("/customer/login", response_model=ApiResponse[LoginResult])
@@ -74,7 +83,7 @@ async def customer_login(body: LoginRequest, request: Request):
     if not user.is_active:
         raise Unauthorized("账号已停用")
     await AuditRepo.write(action="login", user_id=user.id, ip=ip)
-    return ApiResponse(data=_issue(user))
+    return ApiResponse(data=await _issue(user))
 
 
 @router.post("/customer/register", response_model=ApiResponse[LoginResult])
@@ -89,7 +98,7 @@ async def customer_register(body: RegisterRequest, request: Request):
         display_name=body.username,
     )
     await AuditRepo.write(action="customer_register", user_id=user.id, ip=request.client.host)
-    return ApiResponse(data=_issue(user))
+    return ApiResponse(data=await _issue(user))
 
 
 @router.post("/refresh", response_model=ApiResponse[dict])
@@ -119,4 +128,4 @@ async def refresh(body: RefreshRequest):
 
 @router.get("/me", response_model=ApiResponse[UserInfo])
 async def me(user=Depends(current_user)):
-    return ApiResponse(data=UserInfo.from_orm_user(user))
+    return ApiResponse(data=await build_user_info(user))

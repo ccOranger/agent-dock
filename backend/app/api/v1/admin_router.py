@@ -23,7 +23,7 @@ from app.agents.scene_router import (
     profile_summary,
     profile_to_dict,
 )
-from app.api.deps import require_admin
+from app.api.deps import require_perm
 from app.core.exceptions import ParamError, SceneNotConfigured, SceneNotFound
 from app.models.repositories import CannedScriptRepo, SceneRepo, TraceRepo
 from app.schemas.common import ApiResponse
@@ -67,25 +67,25 @@ class RouterTestRequest(BaseModel):
 
 
 @router.get("", response_model=ApiResponse[dict])
-async def router_info(user=Depends(require_admin)):
+async def router_info(user=Depends(require_perm("router", "read"))):
     """兼容旧路径：路由分发器全局档案（等同 /admin/router/template）。"""
     return ApiResponse(data=describe_router_agent())
 
 
 @router.get("/template", response_model=ApiResponse[dict])
-async def router_template(user=Depends(require_admin)):
+async def router_template(user=Depends(require_perm("router", "read"))):
     """全局模板、占位符、常量与 env 默认值（不区分场景）。"""
     return ApiResponse(data=describe_router_agent())
 
 
 @router.get("/prompt", response_model=ApiResponse[dict])
-async def router_effective_prompt(user=Depends(require_admin)):
+async def router_effective_prompt(user=Depends(require_perm("router", "read"))):
     """兼容旧路径：全局视图的生效提示词（候选=全部生效 Agent，不限定场景）。"""
     return ApiResponse(data=await render_router_prompt())
 
 
 @router.get("/scenes", response_model=ApiResponse[list])
-async def router_scenes(user=Depends(require_admin)):
+async def router_scenes(user=Depends(require_perm("router", "read"))):
     """场景路由摘要列表：只给结论与警告，不渲染提示词正文。"""
     summaries = []
     # 一次取全表：场景多时避免“每个场景一次话术查询”的 N+1
@@ -100,7 +100,7 @@ async def router_scenes(user=Depends(require_admin)):
 
 
 @router.get("/scenes/{code}", response_model=ApiResponse[dict])
-async def router_scene_detail(code: str, user=Depends(require_admin)):
+async def router_scene_detail(code: str, user=Depends(require_perm("router", "read"))):
     """单个场景的生效配置 + 候选明细 + 健康警告（提示词正文走 /prompt）。"""
     context = await load_scene_context(code, require_active=False)
     scene_keys = _scene_script_keys(await CannedScriptRepo.list_all())
@@ -113,7 +113,7 @@ async def router_scene_detail(code: str, user=Depends(require_admin)):
 
 
 @router.get("/scenes/{code}/prompt", response_model=ApiResponse[dict])
-async def router_scene_prompt(code: str, user=Depends(require_admin)):
+async def router_scene_prompt(code: str, user=Depends(require_perm("router", "read"))):
     """该场景真正会发给路由模型的那段系统提示词（无对话上下文基准版）。"""
     context = await load_scene_context(code, require_active=False)
     profile = build_scene_router_profile(context)
@@ -133,7 +133,7 @@ async def router_scene_prompt(code: str, user=Depends(require_admin)):
 
 
 @router.post("/scenes/{code}/test", response_model=ApiResponse[dict])
-async def router_scene_test(code: str, body: RouterTestRequest, user=Depends(require_admin)):
+async def router_scene_test(code: str, body: RouterTestRequest, user=Depends(require_perm("router", "read"))):
     """按本场景档案跑一次真实路由判定。
 
     - 直连场景不调用模型（返回 router_skipped=true）；
@@ -191,7 +191,7 @@ async def router_scene_test(code: str, body: RouterTestRequest, user=Depends(req
 
 
 @router.get("/scenes/{code}/stats", response_model=ApiResponse[dict])
-async def router_scene_stats(code: str, hours: int = 24, user=Depends(require_admin)):
+async def router_scene_stats(code: str, hours: int = 24, user=Depends(require_perm("router", "read"))):
     """近 N 小时的路由质量：路由量、直连率、兜底率、转人工率与平均耗时。"""
     scene = await SceneRepo.get_by_code(code)
     if scene is None:

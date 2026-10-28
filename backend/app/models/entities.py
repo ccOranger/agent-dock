@@ -168,6 +168,48 @@ class StaffUser(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class Role(Base, TimestampMixin):
+    """角色：一组菜单模块读写授权的集合。内置 admin（超级）与 agent（坐席）不可删。"""
+
+    __tablename__ = "roles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    key: Mapped[str] = mapped_column(String(32), unique=True)
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str | None] = mapped_column(String(255))
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class UserRole(Base):
+    """人员 ↔ 角色（多对多）；主键取 staff_users.role 以保粗粒度守卫，额外角色在此授权。"""
+
+    __tablename__ = "user_roles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("staff_users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class RolePermission(Base):
+    """角色 ↔ 菜单模块读/写授权。一个角色一行，permissions 为 {menu_key: 'read'|'write'} 的 map。
+
+    menu_key 与前端菜单叶子、后端 require_perm 严格对齐；access 取值在应用层
+    按 rbac.ACCESS_LEVELS 校验（写入前过滤非法 key）。
+    """
+
+    __tablename__ = "role_permissions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"), unique=True
+    )
+    # 一个角色一行存整张授权 map（role_id 唯一）：读写整体替换，避免多行合并
+    permissions: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
 class CustomerUser(Base, TimestampMixin):
     """客户账号，可自助注册，用于聊天会话与记忆归属。"""
 

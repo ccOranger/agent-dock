@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import SessionLocal
+from app.core.rbac import access_satisfied
 from app.core.security import hash_api_key
 from app.models.entities import (
     UNASSIGNED_INTEGRATION_ID,
@@ -27,12 +28,15 @@ from app.models.entities import (
     Memory,
     Message,
     RequestTrace,
+    Role,
+    RolePermission,
     Scene,
     SceneAgent,
     Session,
     StaffUser,
     Ticket,
     ToolMeta,
+    UserRole,
     Visitor,
 )
 
@@ -101,9 +105,152 @@ class StaffRepo:
         async with SessionLocal() as db:
             user = StaffUser(username=username, password_hash=password_hash, role=role, **kw)
             db.add(user)
+            await db.flush()
+            # 主角色同步到 user_roles：保证直接用仓储建的账号（seed/测试）也有角色映射
+            role_row = (
+                await db.execute(select(Role).where(Role.key == role))
+            ).scalar_one_or_none()
+            if role_row is not None:
+                db.add(UserRole(user_id=user.id, role_id=role_row.id))
             await db.commit()
             await db.refresh(user)
             return user
+
+
+class RoleRepo:
+    """RBAC 仓储：角色 CRUD、角色-菜单读写授权、人员-角色映射与有效权限解析。"""
+
+    @staticmethod
+    async def list_roles() -> list[Role]:
+        async with SessionLocal() as db:
+            rows = (await db.execute(select(Role).order_by(Role.is_system.desc(), Role.key))).scalars().all()
+            return list(rows)
+
+    @staticmethod
+    async def get_role(role_id: uuid.UUID | str) -> Role | None:
+        async with SessionLocal() as db:
+            return await db.get(Role, uuid.UUID(str(role_id)))
+
+    @staticmethod
+    async def get_role_by_key(key: str) -> Role | None:
+        async with SessionLocal() as db:
+            return (
+                await db.execute(select(Role).where(Role.key == key))
+            ).scalar_one_or_none()
+
+    @staticmethod
+    async def create_role(key: str, name: str, description: str | None = None) -> Role:
+        async with SessionLocal() as db:
+            role = Role(key=key, name=name, description=description, is_system=False)
+            db.add(role)
+            await db.commit()
+            await db.refresh(role)
+            return role
+
+    @staticmethod
+    async def update_role(role_id: uuid.UUID | str, *, name: str | None, description: str | None) -> Role | None:
+        """只改展示字段；key 不随编辑变（内置角色 key 是前后端契约，不可改）。"""
+        async with SessionLocal() as db:
+            role = await db.get(Role, uuid.UUID(str(role_id)))
+            if role is None:
+                return None
+            if name is not None:
+                role.name = name
+            if description is not None:
+                role.description = description
+            await db.commit()
+            await db.refresh(role)
+            return role
+
+    @staticmethod
+    async def delete_role(role_id: uuid.UUID | str) -> bool:
+        """物理删除角色（调用方须先拦 is_system）；CASCADE 连带删授权与人员映射。"""
+        async with SessionLocal() as db:
+            role = await db.get(Role, uuid.UUID(str(role_id)))
+            if role is None or role.is_system:
+                return False
+            await db.delete(role)
+            await db.commit()
+            return True
+
+    # ---- 角色 ↔ 菜单读写授权（一行 JSONB map，整体替换）----
+    @staticmethod
+    async def get_permissions(role_id: uuid.UUID | str) -> dict[str, str]:
+        async with SessionLocal() as db:
+            row = (
+                await db.execute(
+                    select(RolePermission.permissions).where(
+                        RolePermission.role_id == uuid.UUID(str(role_id))
+                    )
+                )
+            ).scalar_one_or_none()
+            return dict(row or {})
+
+    @staticmethod
+    async def set_permissions(role_id: uuid.UUID | str, permissions: dict[str, str]) -> dict[str, str]:
+        async with SessionLocal() as db:
+            await db.execute(
+                pg_insert(RolePermission)
+                .values(role_id=uuid.UUID(str(role_id)), permissions=permissions)
+                .on_conflict_do_update(
+                    index_elements=[RolePermission.role_id],
+                    set_={"permissions": permissions, "updated_at": func.now()},
+                )
+            )
+            await db.commit()
+            return permissions
+
+    @staticmethod
+    async def user_counts() -> dict[str, int]:
+        """各角色在册人数（按 role_id 分组一次取回，供角色列表展示）。"""
+        async with SessionLocal() as db:
+            rows = await db.execute(
+                select(UserRole.role_id, func.count()).group_by(UserRole.role_id)
+            )
+            return {str(role_id): int(n) for role_id, n in rows.all()}
+
+    # ---- 人员 ↔ 角色（多对多）与有效权限 ----
+    @staticmethod
+    async def get_user_role_keys(user_id: uuid.UUID | str) -> list[str]:
+        async with SessionLocal() as db:
+            rows = await db.execute(
+                select(Role.key)
+                .join(UserRole, UserRole.role_id == Role.id)
+                .where(UserRole.user_id == uuid.UUID(str(user_id)))
+                .order_by(Role.key)
+            )
+            return [r[0] for r in rows.all()]
+
+    @staticmethod
+    async def assign_user_roles(user_id: uuid.UUID | str, role_keys: list[str]) -> list[str]:
+        """整体替换某人的角色集合；忽略不存在的 key，返回实际生效的 key。"""
+        uid = uuid.UUID(str(user_id))
+        async with SessionLocal() as db:
+            roles = (
+                await db.execute(select(Role).where(Role.key.in_(role_keys)))
+            ).scalars().all()
+            role_ids = {r.id for r in roles}
+            await db.execute(delete(UserRole).where(UserRole.user_id == uid))
+            for rid in role_ids:
+                db.add(UserRole(user_id=uid, role_id=rid))
+            await db.commit()
+            return sorted(r.key for r in roles)
+
+    @staticmethod
+    async def resolve_permissions(user_id: uuid.UUID | str) -> dict[str, str]:
+        """人员有效权限 = 其所挂全部角色授权的并集（write 覆盖 read）。"""
+        async with SessionLocal() as db:
+            rows = await db.execute(
+                select(RolePermission.permissions)
+                .join(UserRole, UserRole.role_id == RolePermission.role_id)
+                .where(UserRole.user_id == uuid.UUID(str(user_id)))
+            )
+            merged: dict[str, str] = {}
+            for (perms,) in rows.all():
+                for key, level in (perms or {}).items():
+                    if key not in merged or access_satisfied(level, merged[key]):
+                        merged[key] = level
+            return merged
 
 
 class CustomerRepo:

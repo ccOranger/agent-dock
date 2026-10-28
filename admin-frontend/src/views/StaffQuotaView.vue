@@ -32,10 +32,16 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="角色" width="100">
+      <el-table-column label="角色" min-width="160">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.role === 'admin' ? 'warning' : 'info'">
-            {{ row.role === 'admin' ? '管理员' : '客服' }}
+          <el-tag
+            v-for="k in row.roles && row.roles.length ? row.roles : [row.role]"
+            :key="k"
+            size="small"
+            class="role-tag"
+            :type="k === 'admin' ? 'warning' : 'info'"
+          >
+            {{ roleName(k) }}
           </el-tag>
         </template>
       </el-table-column>
@@ -81,11 +87,20 @@
         <el-input v-model="form.display_name" maxlength="64" placeholder="可选，列表与工单里显示的名字" />
       </el-form-item>
       <el-form-item label="角色">
-        <el-radio-group v-model="form.role" :disabled="isSelfEditing">
-          <el-radio value="agent">客服</el-radio>
-          <el-radio value="admin">管理员</el-radio>
-        </el-radio-group>
-        <div v-if="isSelfEditing" class="rule-tip">不能修改自己的角色，避免把自己降级后无人可管</div>
+        <el-select
+          v-model="form.roles"
+          multiple
+          :disabled="isSelfEditing"
+          placeholder="选择该人员的角色集合（可多选）"
+          style="width: 100%"
+        >
+          <el-option v-for="r in roleOptions" :key="r.key" :label="r.name" :value="r.key" />
+        </el-select>
+        <div class="rule-tip">
+          一人可挂多个角色，菜单/读写权限取并集；含「管理员」即超级权限。{{
+            isSelfEditing ? '不能修改自己的角色集合，避免把自己锁死。' : ''
+          }}
+        </div>
       </el-form-item>
 
       <el-divider content-position="left">创建配额</el-divider>
@@ -133,7 +148,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { apiCreateStaff, apiListStaff, apiResetStaffPassword, apiUpdateStaff } from '@/api'
+import { apiCreateStaff, apiListRoles, apiListStaff, apiResetStaffPassword, apiUpdateStaff } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { STAFF_QUOTA_LABELS } from '@/types'
 import type { StaffCreatePayload, StaffMember, StaffQuota, StaffUpdatePayload } from '@/types'
@@ -146,6 +161,9 @@ const dialogVisible = ref(false)
 const editing = ref(false)
 const submitting = ref(false)
 const editRow = ref<StaffMember | null>(null)
+
+// 角色下拉选项：来自 RBAC，含内置 admin/agent 与自定义角色
+const roleOptions = ref<{ key: string; name: string }[]>([])
 
 const passwordVisible = ref(false)
 const passwordSaving = ref(false)
@@ -165,7 +183,7 @@ interface StaffForm {
   username: string
   password: string
   display_name: string
-  role: 'admin' | 'agent'
+  roles: string[]
   quota: Record<keyof StaffQuota, number | null>
 }
 
@@ -173,9 +191,13 @@ const form = reactive<StaffForm>({
   username: '',
   password: '',
   display_name: '',
-  role: 'agent',
+  roles: ['agent'],
   quota: { max_scenes: null, max_agents: null, max_knowledge_bases: null },
 })
+
+function roleName(key: string) {
+  return roleOptions.value.find((r) => r.key === key)?.name || key
+}
 
 // 自己不能改配额/角色/启停：与后端保护规则同源，前端先禁用减少无效提交
 const isSelfEditing = computed(() => editing.value && editRow.value?.id === auth.user?.id)
@@ -208,11 +230,24 @@ async function load() {
   }
 }
 
+async function loadRoles() {
+  try {
+    const roles = await apiListRoles()
+    roleOptions.value = roles.map((r) => ({ key: r.key, name: r.name }))
+  } catch {
+    /* 角色选项加载失败不阻断人员页：退回内置两个 key */
+    roleOptions.value = [
+      { key: 'agent', name: '客服坐席' },
+      { key: 'admin', name: '管理员' },
+    ]
+  }
+}
+
 function resetForm() {
   form.username = ''
   form.password = ''
   form.display_name = ''
-  form.role = 'agent'
+  form.roles = ['agent']
   form.quota = { max_scenes: null, max_agents: null, max_knowledge_bases: null }
 }
 
@@ -229,7 +264,7 @@ function openEdit(row: StaffMember) {
   form.username = row.username
   form.password = ''
   form.display_name = row.display_name || ''
-  form.role = row.role
+  form.roles = row.roles && row.roles.length ? [...row.roles] : [row.role]
   form.quota = {
     max_scenes: row.quota?.max_scenes ?? null,
     max_agents: row.quota?.max_agents ?? null,
@@ -261,19 +296,20 @@ async function submit() {
   }
   submitting.value = true
   try {
+    const primary = form.roles.includes('admin') ? 'admin' : 'agent'
     if (editing.value && editRow.value) {
       const payload: StaffUpdatePayload = {
         display_name: form.display_name.trim() || null,
-        role: form.role,
-        // 自己改自己时后端会 400，这里干脆不传，避免误伤展示名等其他字段
-        ...(isSelfEditing.value ? {} : { quota: quotaPayload() }),
+        // 自己改自己时后端会 400，角色与配额干脆不传
+        ...(isSelfEditing.value ? {} : { roles: form.roles, quota: quotaPayload() }),
       }
       await apiUpdateStaff(editRow.value.id, payload)
     } else {
       const payload: StaffCreatePayload = {
         username: form.username.trim(),
         password: form.password,
-        role: form.role,
+        role: primary,
+        roles: form.roles.length ? form.roles : [primary],
         display_name: form.display_name.trim() || null,
         quota: quotaPayload(),
       }
@@ -323,7 +359,10 @@ async function submitPassword() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadRoles()
+})
 </script>
 
 <style scoped>
@@ -343,6 +382,9 @@ onMounted(load)
 }
 .staff-name .name {
   font-weight: 600;
+}
+.role-tag {
+  margin: 2px 4px 2px 0;
 }
 .code-line {
   margin-top: 2px;

@@ -6,7 +6,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import Response
 
 from app.agents.registry import AGENT_REGISTRY, list_agents
-from app.api.deps import require_admin, require_staff
+from app.api.deps import require_perm, require_staff
 from app.core.exceptions import Conflict, NotFound, ParamError
 from app.models.repositories import AgentRepo, AuditRepo, KnowledgeBaseRepo, ToolRepo
 from app.schemas.api import (
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 # ===== Agent 列表 / 详情 / 开关 =====
 @router.get("/agents", response_model=ApiResponse[list])
-async def agents(user=Depends(require_admin)):
+async def agents(user=Depends(require_perm("agents", "read"))):
     """代码注册表 + DB 动态 Agent 合并返回（代码 Agent 的 MCP 绑定只读）"""
     db_rows = {r.name: r for r in await AgentRepo.list_all()}
     code_items = list_agents()
@@ -95,7 +95,7 @@ async def agents(user=Depends(require_admin)):
 
 
 @router.get("/agents/{name}", response_model=ApiResponse[dict])
-async def agent_detail(name: str, user=Depends(require_admin)):
+async def agent_detail(name: str, user=Depends(require_perm("agents", "read"))):
     meta = await AgentRepo.get_by_name(name)
     scene_id = str(meta.scene_id) if meta is not None and getattr(meta, "scene_id", None) else None
     if meta is not None and meta.source == "dynamic":
@@ -154,7 +154,7 @@ async def agent_detail(name: str, user=Depends(require_admin)):
 
 
 @router.post("/agents", response_model=ApiResponse[dict])
-async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
+async def create_agent(body: DynamicAgentCreate, user=Depends(require_perm("agents", "write"))):
     """创建动态 Agent（不允许与代码 Agent 或已有 Agent 重名）"""
     if body.name in AGENT_REGISTRY:
         raise Conflict(f"名称与代码 Agent 冲突: {body.name}")
@@ -189,7 +189,7 @@ async def create_agent(body: DynamicAgentCreate, user=Depends(require_admin)):
 
 
 @router.put("/agents/{name}", response_model=ApiResponse[dict])
-async def update_agent(name: str, body: DynamicAgentUpdate, user=Depends(require_admin)):
+async def update_agent(name: str, body: DynamicAgentUpdate, user=Depends(require_perm("agents", "write"))):
     meta = await AgentRepo.get_by_name(name)
     if meta is None or meta.source != "dynamic":
         raise ParamError("仅动态 Agent（source=dynamic）可编辑")
@@ -215,7 +215,7 @@ async def update_agent(name: str, body: DynamicAgentUpdate, user=Depends(require
 
 
 @router.delete("/agents/{name}", response_model=ApiResponse)
-async def delete_agent(name: str, user=Depends(require_admin)):
+async def delete_agent(name: str, user=Depends(require_perm("agents", "write"))):
     meta = await AgentRepo.get_by_name(name)
     if meta is None:
         raise NotFound("Agent 不存在")
@@ -231,7 +231,7 @@ async def delete_agent(name: str, user=Depends(require_admin)):
 
 
 @router.patch("/agents/{name}/toggle", response_model=ApiResponse)
-async def toggle_agent(name: str, body: AgentToggleRequest, user=Depends(require_admin)):
+async def toggle_agent(name: str, body: AgentToggleRequest, user=Depends(require_perm("agents", "write"))):
     meta = await AgentRepo.get_by_name(name)
     if meta is None:
         raise NotFound("Agent 未登记")
@@ -275,7 +275,7 @@ async def list_mcp_servers(user=Depends(require_staff)):
 
 
 @router.post("/mcp-servers", response_model=ApiResponse[dict])
-async def create_mcp_server(body: MCPServerCreate, user=Depends(require_admin)):
+async def create_mcp_server(body: MCPServerCreate, user=Depends(require_perm("mcp-servers", "write"))):
     if await ToolRepo.get_by_name(body.name) is not None:
         raise Conflict(f"MCP 服务已存在: {body.name}")
     config = _build_mcp_config(body)
@@ -285,7 +285,7 @@ async def create_mcp_server(body: MCPServerCreate, user=Depends(require_admin)):
 
 
 @router.put("/mcp-servers/{server_id}", response_model=ApiResponse[dict])
-async def update_mcp_server(server_id: str, body: MCPServerUpdate, user=Depends(require_admin)):
+async def update_mcp_server(server_id: str, body: MCPServerUpdate, user=Depends(require_perm("mcp-servers", "write"))):
     row = await ToolRepo.get(server_id)
     if row is None or row.type != "mcp":
         raise NotFound("MCP 服务不存在")
@@ -303,7 +303,7 @@ async def update_mcp_server(server_id: str, body: MCPServerUpdate, user=Depends(
 
 
 @router.delete("/mcp-servers/{server_id}", response_model=ApiResponse)
-async def delete_mcp_server(server_id: str, user=Depends(require_admin)):
+async def delete_mcp_server(server_id: str, user=Depends(require_perm("mcp-servers", "write"))):
     row = await ToolRepo.get(server_id)
     if row is None or row.type != "mcp":
         raise NotFound("MCP 服务不存在")
@@ -317,7 +317,7 @@ async def delete_mcp_server(server_id: str, user=Depends(require_admin)):
 
 
 @router.post("/mcp-servers/test", response_model=ApiResponse[dict])
-async def test_mcp_server(body: MCPServerCreate, user=Depends(require_admin)):
+async def test_mcp_server(body: MCPServerCreate, user=Depends(require_perm("mcp-servers", "write"))):
     """连通性测试：尝试连接并列出远端提供的工具（不落库，纯探测）。"""
     from app.tools.mcp_loader import _build_mcp_server_source
 
@@ -395,7 +395,7 @@ async def list_custom_tools(user=Depends(require_staff)):
 
 
 @router.post("/custom-tools", response_model=ApiResponse[dict])
-async def register_custom_tool(body: CustomToolRegister, user=Depends(require_admin)):
+async def register_custom_tool(body: CustomToolRegister, user=Depends(require_perm("custom-tools", "write"))):
     """把代码目录中的某个工具登记到 tools 表（type=custom）。"""
     if not custom_catalog.exists(body.name):
         raise ParamError(f"工具不在代码目录中: {body.name}")
@@ -415,7 +415,7 @@ async def register_custom_tool(body: CustomToolRegister, user=Depends(require_ad
 
 
 @router.patch("/custom-tools/{name}/toggle", response_model=ApiResponse)
-async def toggle_custom_tool(name: str, body: CustomToolToggle, user=Depends(require_admin)):
+async def toggle_custom_tool(name: str, body: CustomToolToggle, user=Depends(require_perm("custom-tools", "write"))):
     row = await _get_custom_row(name)
     if row is None:
         raise NotFound("自定义工具未登记")
@@ -427,7 +427,7 @@ async def toggle_custom_tool(name: str, body: CustomToolToggle, user=Depends(req
 
 
 @router.delete("/custom-tools/{name}", response_model=ApiResponse)
-async def delete_custom_tool(name: str, user=Depends(require_admin)):
+async def delete_custom_tool(name: str, user=Depends(require_perm("custom-tools", "write"))):
     row = await _get_custom_row(name)
     if row is None:
         raise NotFound("自定义工具未登记")
@@ -454,7 +454,7 @@ async def tools(user=Depends(require_staff)):
 
 
 @router.get("/metrics")
-async def metrics(user=Depends(require_admin)):
+async def metrics(user=Depends(require_perm("dashboard", "read"))):
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
