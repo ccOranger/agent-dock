@@ -10,8 +10,19 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **数据分析（成效指标）**：后台新增「数据分析」菜单（模块 key `analytics`，归属观测）与 `GET /api/v1/admin/analytics/outcomes`，按时间范围 + 场景展示两组共六个比率与每日请求量：
+  - **全量三率**（转人工 / 问题解决 / 错误）与**每日请求量**（`daily`：请求/转人工/错误）来自 `chat_usage_daily`，无采样偏差、可对账；
+  - **链路三率**（工具调用成功 / 兜底降级 / RAG 命中）来自 `request_traces`，接口 `meta.sampled` 标记采样口径，采样率 < 1 时前端常驻提示「仅作参考」。
+  - 空数据返回 `value=null`（页面显示“—”），不伪装成 0%；问题解决率口径注明“≈机器人自主应答率，非满意度”。
+  - **无表结构变更、无迁移**：`analytics` 仅登记到 `app/core/rbac.py`（授权是 JSONB map，key 无 DB 约束），坐席默认不授予，需管理员在角色矩阵打开。
+- **前端新增两个依赖**：`@element-plus/icons-vue` 由传递依赖改为显式声明（页头、分组、指标卡徽标直接用图标）；`echarts` 只服务「数据分析」的每日请求量折线图，按需注册 `LineChart` + `Grid/Tooltip/DataZoom` + `CanvasRenderer`，且只被懒加载的 `/analytics` 路由引用，不进入首屏 chunk。
+
 ### 变更
 
+- **下线「用量报表」页**：请求数与每日统计并入「数据分析」（每日请求量趋势折线图，单日明细看 tooltip），`/usage` 页面、`UsageView.vue`、`/admin/usage/summary`、`/admin/usage/export.csv` 与 `UsageRepo.export_rows` 一并删除；`usage` 菜单 key 从 `app/core/rbac.py` 移除（角色里残留的 `usage` 授权不报错、不生效，下次保存角色时按白名单清掉）。
+- **token 不再对外展示**：`hello_agents` 不回传供应商 usage，token 只能估算，不适合作为账单/报表口径；`chat_events.total_tokens` 与 `chat_usage_daily.tokens` 仍照常记录（以后接入真实 usage 可复用），接口响应不再包含 token 字段。
 - `TRACE_STORE_PAYLOAD` 默认值由 `true` 改为 `false`：开源默认不再把工具入参/返回（含客户数据）写进 `request_traces`，需要排障的部署显式置 `true` 即可恢复。存量 `.env` 里已显式写值的部署不受影响。
 - 新增 `API_DOCS_ENABLED`（默认 `true`）：置 `false` 时 `/docs`、`/redoc`、`/openapi.json` 同时关闭（只关 `/docs` 仍能从 `/openapi.json` 拿到全量描述）。`docker-compose.prod.yml` 默认置 `false`。
 - 对外品牌收口：FastAPI 文档标题改为 `AgentDock API（仓库代号 smart-cs）`，`backend/pyproject.toml` 描述同步，不再对外显示旧名。

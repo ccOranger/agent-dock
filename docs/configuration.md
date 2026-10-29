@@ -188,20 +188,21 @@ JWT_SECRET=<≥32 字节随机串>
 | `TRACE_SAMPLE_RATE` | `1.0` | 正常应答采样率；转人工与异常轮始终全量记录 |
 | `TRACE_RETENTION_DAYS` | `30` | 保留天数，供 `scripts/cleanup_traces.py` 使用 |
 
-### 3.14 用量计量
+### 3.14 用量计量（采集侧，token 不对外展示）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `TOKEN_ESTIMATE_FACTOR` | `1.0` | Token 估算的整体校准系数（下限 0.01）。对账时按供应商账单微调，不改变功能行为 |
-| `USAGE_QUERY_MAX_DAYS` | `366` | `/admin/usage/*` 单次查询的跨天上限，超限返回 400 |
+| `TOKEN_ESTIMATE_FACTOR` | `1.0` | Token 估算的整体校准系数（下限 0.01）。仅影响库内估算值，不改变功能行为；后台不展示 token |
+| `USAGE_QUERY_MAX_DAYS` | `366` | 数据分析（`/admin/analytics/outcomes`）单次查询的跨天上限，超限返回 400 |
 
 口径说明：
 
 - 用量与链路开关 **解耦**：`TRACE_ENABLED=false` 或 `TRACE_SAMPLE_RATE<1` 时 `request_traces` 可能没有记录，
-  但 `chat_events.total_tokens` 与 `chat_usage_daily` 照写，否则报表会漏计。
-- `hello_agents` 的 `HelloAgentsLLM` 未开 `stream_options.include_usage`，拿不到供应商 usage，
-  因此 token 目前全部为**估算值**（`tokens_estimated=true`）：装了 `tiktoken` 就按 `cl100k_base` 分词，
-  没装则按「CJK 1 字 ≈ 1 token、其余 4 字符 ≈ 1 token」加权。
+  但 `chat_events.total_tokens` 与 `chat_usage_daily` 照写，否则统计数据会漏计。
+- 后台只展示请求数、转人工、错误与六个成效比率；**token 不对外输出**（接口字段白名单）。
+  库里仍保留：`hello_agents` 的 `HelloAgentsLLM` 未开 `stream_options.include_usage`，拿不到供应商 usage，
+  token 只能估算（`tokens_estimated=true`）——装了 `tiktoken` 就按 `cl100k_base` 分词，
+  没装则按「CJK 1 字 ≈ 1 token、其余 4 字符 ≈ 1 token」加权。以后接入真实 usage 可直接复用这两列。
 - `tiktoken` 是**可选依赖**（`backend/requirements-optional.txt`），Docker 镜像默认不装：
   首次使用需下载 BPE 词表，离线/内网部署会失败，且估算只影响账目精度、不影响功能。
 - `requests` 的口径是「走完整对话链路的轮次」，与 `request_traces` 一致；被鉴权/限流拒绝的请求只留在 `chat_events`。
@@ -249,7 +250,7 @@ signature = base64.b64encode(private_key.sign(message)).decode()
 
 - **只降级不阻断**：文件缺失 / JSON 解析失败 / 签名不符 / 指纹不符 / 已过期，一律退回 `community`，
   启动日志与后台顶部红条给出原因；**不阻断启动、不影响对话**。社区版保留完整对话、多知识库 RAG、
-  工具 / MCP、跨轮记忆、全链路追踪、用量报表、场景管理、嵌入挂件、基础评测 CLI 与 Markdown 报告。
+  工具 / MCP、跨轮记忆、全链路追踪、数据分析、场景管理、嵌入挂件、基础评测 CLI 与 Markdown 报告。
 - **功能位只有 5 个**：`rbac`、`audit`、`white_label`、`eval_pro`、`sso`，且都不动对话内核；
   企业功能的实现代码在私有仓库，开源仓库只有 `has_feature()` / `require_feature()` 挂载点。
   授权文件里出现不认识的功能位会被忽略并在后台标为“不认识”。

@@ -1,6 +1,7 @@
 import { downloadBlob, http, unwrap } from './http'
 import type {
   AgentInfo,
+  AnalyticsOutcomes,
   CannedMatchResult,
   CannedScript,
   CannedScriptPayload,
@@ -52,8 +53,6 @@ import type {
   TicketDetail,
   TicketSummary,
   TraceUsageItem,
-  UsageGroupBy,
-  UsageSummary,
   User,
 } from '@/types'
 
@@ -201,21 +200,10 @@ export type TraceUsageField = 'tool_names' | 'agent_names' | 'mcp_server_names'
 export const apiTraceUsage = (field: TraceUsageField = 'tool_names', days = 7) =>
   unwrap(http.get<never, { data: { data: TraceUsageItem[] } }>('/admin/traces/usage', { params: { field, days } }))
 
-// ===== Admin：用量报表（账单口径）=====
-// 注意：token 目前是估算值（后端 tokens_estimated 标记），不是供应商账单
-export interface UsageQuery {
-  from?: string
-  to?: string
-  group_by?: UsageGroupBy
-  scene_code?: string
-}
-
-export const apiUsageSummary = (params: UsageQuery = {}) =>
-  unwrap(http.get<never, { data: { data: UsageSummary } }>('/admin/usage/summary', { params }))
-
-/** 导出的始终是 (日 × 场景 × 接入方) 明细，不受页面维度影响 */
-export const apiExportUsage = (params: Omit<UsageQuery, 'group_by'> = {}) =>
-  downloadBlob('/admin/usage/export.csv', params as Record<string, unknown>)
+// ===== Admin：数据分析（成效指标 + 每日请求量）=====
+// 全量口径来自日聚合，链路三率来自 request_traces（看 meta.sampled）；token 估算值不对外展示
+export const apiAnalyticsOutcomes = (params: { from?: string; to?: string; scene_code?: string } = {}) =>
+  unwrap(http.get<never, { data: { data: AnalyticsOutcomes } }>('/admin/analytics/outcomes', { params }))
 
 // ===== 知识库：命名空间 =====
 export const apiListBases = () =>

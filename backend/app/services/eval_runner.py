@@ -595,7 +595,7 @@ def render_report(summary: EvalRunSummary) -> str:
         lines.append(f"| {label} | {shown} | {_frac(point)} | {point.unobserved} |")
     lines.append("")
     lines.append(
-        f"- 本轮实际消耗 token 合计 {m.total_tokens}（口径同用量报表，为估算值）；"
+        f"- 本轮实际消耗 token 合计 {m.total_tokens}（估算值，仅供纵横对比，后台不展示）；"
         "首字延迟由客户端计时，含网络往返，与后台链路的 `ttft_ms` 不同源。"
     )
     lines.append("")

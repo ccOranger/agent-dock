@@ -34,12 +34,12 @@ AgentDock 把这些做成平台能力，而不是某个业务里的临时代码�
 | **跨轮记忆** | working / episodic / perceptual 三层开箱可用；semantic 需 Neo4j；工单可跨轮补录 | `MEMORY_*` / `MEMORY_TYPES` |
 | **上下文工程** | 按系统提示、历史、记忆、知识分配 token 预算，超限按优先级裁剪 | `CONTEXT_*` |
 | **全链路追踪** | 每轮对话的路由、LLM、工具、RAG、记忆调用都有 spans 与耗时；可采样、可设保留期 | `TRACE_*` |
-| **用量计量** | 每轮 token 与日聚合（按日 × 场景 × 接入方）与链路采样解耦，后台报表 + CSV 导出可当账目依据 | `TOKEN_ESTIMATE_FACTOR` / `USAGE_QUERY_MAX_DAYS` |
+| **用量与成效** | 请求/转人工/错误按日 × 场景聚合（与链路采样解耦，长期保留），日趋势与六个成效比率统一在「数据分析」页；token 仅库内估算留存，不对外展示 | `USAGE_QUERY_MAX_DAYS` |
 | **版本分层** | 离线 Ed25519 授权文件（不联网）；任何校验失败只降级不阻断，社区版保留完整对话能力 | `LICENSE_FILE` / `LICENSE_PUBLIC_KEY` / `DEPLOYMENT_ID` |
 | **评测与回归** | 用例集进 Git，走真实 HTTP 链路跑意图/工具/RAG/兜底/转人工/P95/token 七类指标，与基线逐项 diff，退化即退出码 2 | `scripts/eval.py`、[评测与回归](docs/evaluation.md) |
 | **固定话术** | 高频确定性问题在路由与大模型之前逐字命中，后台可测命中、可停用 | 运营台「固定话术」 |
 | **双端身份** | 后台人员与客户分表、分登录入口、Token 隔离；客户可自助注册 | `/auth/staff/*`、`/auth/customer/*` |
-| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘、用量报表、授权与版本 | `http://<host>:8080/admin/` |
+| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘、数据分析、授权与版本 | `http://<host>:8080/admin/` |
 
 ## 架构
 

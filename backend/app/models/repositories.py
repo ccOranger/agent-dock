@@ -2597,6 +2597,37 @@ class TraceRepo:
         }
 
     @staticmethod
+    async def outcome_summary(
+        *, date_from: datetime, date_to: datetime, scene_code: str | None = None
+    ) -> dict:
+        """区间内的链路结局聚合（采样口径）：工具调用/失败、兜底、RAG 命中与链路总数。
+
+        - 只统计已完成并写入链路的请求：中途断连的轮次不落库，分母因此是“真正走完的请求”；
+        - date_from/date_to 由调用方按「本地日」给出 aware datetime，与 chat_usage_daily
+          的本地日聚合同一边界，保证全量三率与链路三率在同一个时间窗内；
+        - 本方法只负责一次查询把计数据回来，比率与分子分母由接口层组装。
+        """
+        conds = [RequestTrace.created_at >= date_from, RequestTrace.created_at <= date_to]
+        if scene_code:
+            conds.append(RequestTrace.scene_code == scene_code)
+        stmt = select(
+            func.count().label("traces"),
+            func.coalesce(func.sum(RequestTrace.tool_call_count), 0).label("tool_calls"),
+            func.coalesce(func.sum(RequestTrace.tool_error_count), 0).label("tool_errors"),
+            func.count().filter(RequestTrace.router_fallback.is_(True)).label("fallbacks"),
+            func.count().filter(RequestTrace.rag_chunk_count > 0).label("rag_hits"),
+        ).where(*conds)
+        async with SessionLocal() as db:
+            row = (await db.execute(stmt)).one()
+        return {
+            "traces": int(row.traces or 0),
+            "tool_calls": int(row.tool_calls or 0),
+            "tool_errors": int(row.tool_errors or 0),
+            "fallbacks": int(row.fallbacks or 0),
+            "rag_hits": int(row.rag_hits or 0),
+        }
+
+    @staticmethod
     async def delete_older_than(days: int) -> int:
         """保留期清理（由 scripts/ 定期调用）。"""
         cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
@@ -2760,7 +2791,10 @@ _USAGE_METRICS = ("requests", "tokens", "estimated_requests", "handoffs", "error
 
 
 class UsageRepo:
-    """用量报表：只读 chat_usage_daily（账单依据，长期保留）。"""
+    """用量与成效的数据源：只读 chat_usage_daily（全量、长期保留，清理 chat_events 后仍可统计）。
+
+    ``tokens`` 仍是估算值；对外展示由接口层做字段白名单，不直接透传本方法结果。
+    """
 
     @staticmethod
     def _filters(date_from: date, date_to: date, scene_code: str | None) -> list:
@@ -2837,46 +2871,3 @@ class UsageRepo:
                     }
                 )
         return {"rows": items, "totals": totals}
-
-    @staticmethod
-    async def export_rows(
-        *, date_from: date, date_to: date, scene_code: str | None = None
-    ) -> list[dict]:
-        """导出用明细：(日 × 场景 × 接入方) 逐行，供对账/开票。"""
-        conds = UsageRepo._filters(date_from, date_to, scene_code)
-        sums = [getattr(ChatUsageDaily, m) for m in _USAGE_METRICS]
-        stmt = (
-            select(
-                ChatUsageDaily.day,
-                ChatUsageDaily.scene_code,
-                ChatUsageDaily.integration_id,
-                Integration.name.label("integration_name"),
-                *sums,
-            )
-            .select_from(ChatUsageDaily)
-            .outerjoin(Integration, Integration.id == ChatUsageDaily.integration_id)
-            .where(*conds)
-            .order_by(
-                ChatUsageDaily.day.asc(),
-                ChatUsageDaily.scene_code.asc(),
-                ChatUsageDaily.integration_id.asc(),
-            )
-        )
-        async with SessionLocal() as db:
-            rows = (await db.execute(stmt)).all()
-        return [
-            {
-                "day": row.day.isoformat(),
-                "scene_code": row.scene_code,
-                "integration_id": str(row.integration_id),
-                "integration_name": None
-                if row.integration_id == UNASSIGNED_INTEGRATION_ID
-                else row.integration_name,
-                "requests": int(row.requests or 0),
-                "tokens": int(row.tokens or 0),
-                "estimated_requests": int(row.estimated_requests or 0),
-                "handoffs": int(row.handoffs or 0),
-                "errors": int(row.errors or 0),
-            }
-            for row in rows
-        ]

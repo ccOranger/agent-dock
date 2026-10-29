@@ -102,7 +102,7 @@ const MENU: MenuEntry[] = [
     children: [
       { path: '/traces', title: '链路追踪', perm: 'traces' },
       { path: '/dashboard', title: '仪表盘', perm: 'dashboard' },
-      { path: '/usage', title: '用量报表', perm: 'usage' },
+      { path: '/analytics', title: '数据分析', perm: 'analytics' },
     ],
   },
   {

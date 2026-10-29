@@ -1,10 +1,12 @@
-"""用量计量与报表测试：估算口径、与链路开关解耦、写入 SQL 形态、接口参数与 RBAC、CSV 编码"""
-from datetime import date, datetime, timedelta
+"""用量采集测试：估算口径、与链路开关解耦、写入 SQL 形态。
+
+后台展示已并入「数据分析」页（见 test_admin_analytics.py），这里只锁采集侧行为：
+token 估算、关掉链路仍计数、chat_events 回填 + chat_usage_daily 累加。
+"""
+from datetime import date
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.api.v1 import admin_usage as au
 from app.core.config import settings
 from app.core.tracing import TraceCollector
 from app.models import repositories as repo_mod
@@ -134,113 +136,3 @@ async def test_record_usage_skips_event_update_without_trace_id(monkeypatch) -> 
     # 没有被限流/埋点失败兜底时仍需记账，但不必发一条必然 0 行的 UPDATE
     assert len(fake.executed) == 1
     assert "INSERT INTO chat_usage_daily" in _sql(fake.executed[0])
-
-
-# --------------------------------------------------------------- 接口
-@pytest.fixture
-def client(make_test_app):
-    app = make_test_app([au.router], prefix="")
-    return TestClient(make_test_app.as_role(app, "admin"))
-
-
-SAMPLE_ROWS = [
-    {
-        "day": "2026-10-01",
-        "scene_code": "cs_default",
-        "integration_id": ZERO_UUID,
-        "integration_name": None,
-        "requests": 3,
-        "tokens": 900,
-        "estimated_requests": 3,
-        "handoffs": 1,
-        "errors": 0,
-    }
-]
-
-
-def _patch_summary(monkeypatch, captured: dict) -> None:
-    async def fake_summary(**kw):
-        captured.update(kw)
-        return {
-            "rows": [{"day": "2026-10-01", **{k: 1 for k in ("requests", "tokens")}}],
-            "totals": {"requests": 1, "tokens": 120, "estimated_requests": 1},
-        }
-
-    monkeypatch.setattr(au.UsageRepo, "summary", fake_summary)
-
-
-def test_summary_passes_range_and_dimension(client, monkeypatch) -> None:
-    captured: dict = {}
-    _patch_summary(monkeypatch, captured)
-
-    resp = client.get(
-        "/admin/usage/summary",
-        params={"from": "2026-10-01", "to": "2026-10-02", "group_by": "scene", "scene_code": "cs_default"},
-    )
-
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["from"] == "2026-10-01" and data["to"] == "2026-10-02"
-    assert data["group_by"] == "scene" and data["scene_code"] == "cs_default"
-    # 当前口径是估算值，接口必须显式告诉调用方，避免被当成供应商账单
-    assert data["tokens_estimated"] is True
-    assert captured["date_from"] == date(2026, 10, 1)
-    assert captured["date_to"] == date(2026, 10, 2)
-    assert captured["group_by"] == "scene"
-
-
-def test_summary_defaults_to_last_30_days(client, monkeypatch) -> None:
-    captured: dict = {}
-    _patch_summary(monkeypatch, captured)
-
-    resp = client.get("/admin/usage/summary")
-    assert resp.status_code == 200
-    today = datetime.now().astimezone().date()
-    assert captured["date_to"] == today
-    assert captured["date_from"] == today - timedelta(days=29)
-    assert captured["group_by"] == "day"
-
-
-def test_summary_rejects_unknown_dimension(client, monkeypatch) -> None:
-    _patch_summary(monkeypatch, {})
-    resp = client.get("/admin/usage/summary", params={"group_by": "week"})
-    assert resp.status_code == 400
-    assert resp.json()["detail"]["code"] == 1001
-
-
-def test_summary_rejects_range_over_limit(client, monkeypatch) -> None:
-    _patch_summary(monkeypatch, {})
-    resp = client.get("/admin/usage/summary", params={"from": "2000-01-01", "to": "2026-01-01"})
-    assert resp.status_code == 400
-    assert str(settings.usage_query_max_days) in resp.json()["detail"]["message"]
-
-
-def test_summary_rejects_reversed_range(client, monkeypatch) -> None:
-    _patch_summary(monkeypatch, {})
-    resp = client.get("/admin/usage/summary", params={"from": "2026-10-02", "to": "2026-10-01"})
-    assert resp.status_code == 400
-
-
-def test_export_csv_is_bom_encoded(client, monkeypatch) -> None:
-    async def fake_rows(**kw):
-        assert kw["date_from"] == date(2026, 10, 1)
-        return SAMPLE_ROWS
-
-    monkeypatch.setattr(au.UsageRepo, "export_rows", fake_rows)
-
-    resp = client.get("/admin/usage/export.csv", params={"from": "2026-10-01", "to": "2026-10-01"})
-    # Excel 只认 BOM 才不乱码
-    assert resp.content.startswith(b"\xef\xbb\xbf")
-    text = resp.content.decode("utf-8-sig")
-    assert "日期" in text and "Token（估算）" in text
-    assert "未归属" in text and "900" in text
-    assert 'filename="usage_' in resp.headers["content-disposition"]
-
-
-def test_usage_endpoints_require_admin(make_test_app) -> None:
-    app = make_test_app([au.router], prefix="")
-    as_agent = TestClient(make_test_app.as_role(app, "agent"))
-    for path in ("/admin/usage/summary", "/admin/usage/export.csv"):
-        resp = as_agent.get(path)
-        assert resp.status_code == 403, path
-        assert resp.json()["detail"]["code"] == 2003

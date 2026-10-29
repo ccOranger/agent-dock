@@ -66,7 +66,7 @@ docker compose down -v && docker compose up -d --build   # 全新数据卷，种
 | `03-admin-scenes.png` | `/admin/scenes` | `customer_service` 已启用、3 个 Agent 按序绑定 | 一个 `/chat/stream` 靠 `scene_code` 分场景；场景是配置出来的，不是写死的 |
 | `04-admin-knowledge.png` | `/admin/knowledge` | 3 个演示文档 `ready`，跑过一次检索测试 | 多命名空间 + 分块浏览 + 检索测试命中片段 |
 | `05-admin-agents.png` | `/admin/agents` | 打开 `order_service` 编辑态 | 路由关键词/典型问法、绑定工具、按 Agent 指定模型 |
-| `06-admin-usage.png` | `/admin/usage` | 至少 1 天、≥6 轮对话 | token 按「日 × 场景 × 接入方」聚合、趋势柱与 CSV 导出 |
+| `06-admin-analytics.png`（待补） | `/admin/analytics` | 至少 7 天、每天 ≥6 轮对话，采样率 1 或 0.2 | 全量三率与链路三率分组、采样角标、每日请求量趋势折线图；原 `06-admin-usage.png`（`/admin/usage`）已随页面下线废弃 |
 | `07-widget-embed.png` | `/embed-demo.html` | 场景接入已开「开放匿名」 | 一行 script 嵌入第三方页面，气泡 + iframe 样式隔离 |
 | `08-admin-license.png`（可选） | `/admin/license` | 未放授权文件（默认社区版） | 降级不阻断：只 5 个功能位关闭，对话与评测完整保留 |
 

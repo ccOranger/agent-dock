@@ -384,33 +384,49 @@ GET    /api/v1/admin/traces/{trace_ref}      # 单条详情（含 spans 时间�
 > 与 `clue_basis`（`keyword_hit` / `keyword_miss` 配了关键词但未出现 / `no_keywords` 未配关键词），
 > 见 [U15](updates/15-route-intent-evidence.md)。数据只存 `spans` JSONB，无额外列。
 
-## Admin · Usage（用量报表，require_admin）
+## Admin · Analytics（数据分析，需 `analytics` 的 `read`）
+
+原「用量报表」已并入本页：请求数、转人工、错误与日维度统计统一从这里出；`/admin/usage/*` 与后台
+`/usage` 页面已移除（[U25](updates/25-analytics-outcomes.md)）。
 
 ```
-GET    /api/v1/admin/usage/summary     # 汇总（?from=YYYY-MM-DD&to=&group_by=day|scene|integration&scene_code=）
-GET    /api/v1/admin/usage/export.csv  # 导出 (日 × 场景 × 接入方) 明细 CSV（UTF-8 BOM）
+GET /api/v1/admin/analytics/outcomes   # 六个成效比率 + 每日请求量（?from=YYYY-MM-DD&to=&scene_code=）
 ```
 
-响应结构（`summary`）：
+响应结构：
 
 ```json
 {
   "code": 0,
   "data": {
-    "from": "2026-10-01", "to": "2026-10-30", "group_by": "day", "scene_code": null,
-    "rows": [{ "day": "2026-10-01", "requests": 42, "tokens": 53120,
-               "estimated_requests": 42, "handoffs": 3, "errors": 1 }],
-    "totals": { "requests": 42, "tokens": 53120, "estimated_requests": 42, "handoffs": 3, "errors": 1 },
-    "tokens_estimated": true
+    "from": "2026-10-22", "to": "2026-10-28", "scene_code": null,
+    "handover_rate":   { "value": 0.0714, "numerator": 3, "denominator": 42 },
+    "resolution_rate":  { "value": 0.9048, "numerator": 38, "denominator": 42 },
+    "error_rate":      { "value": 0.0238, "numerator": 1, "denominator": 42 },
+    "tool_success_rate":{ "value": 0.9412, "numerator": 16, "denominator": 17 },
+    "fallback_rate":   { "value": 0.05, "numerator": 1, "denominator": 20 },
+    "rag_hit_rate":    { "value": 0.6, "numerator": 12, "denominator": 20 },
+    "daily": [
+      { "day": "2026-10-22", "requests": 8, "handoffs": 1, "errors": 0 },
+      { "day": "2026-10-23", "requests": 6, "handoffs": 0, "errors": 1 }
+    ],
+    "meta": {
+      "full_source": "chat_usage_daily", "trace_source": "request_traces",
+      "trace_sample_rate": 1.0, "sampled": false, "requests": 42, "traces_covered": 20
+    }
   }
 }
 ```
 
-- `group_by=scene` 的行键为 `scene_code`；`group_by=integration` 的行键为 `integration_id` + `integration_name` + `unassigned`
-  （零 UUID 表示匿名或未携带凭证，名称显示为 null，由前端渲染「未归属」）。
-- 默认区间为最近 30 天（含今天）；`from > to`、维度非法、跨度超过 `USAGE_QUERY_MAX_DAYS`(366) 均返回 400（业务码 1001）。
-- `tokens_estimated=true` 表示 token 为估算值（当前恒为 true，见 [configuration.md](configuration.md) 3.14）。
-- 数据源是 `chat_usage_daily`（账单依据，长期保留），不读会被保留期清理的 `chat_events` / `request_traces`。
+- **全量三率 + 每日请求量**（`handover_rate` / `resolution_rate` / `error_rate` / `daily`）来自 `chat_usage_daily`，
+  无采样偏差；`daily` 按天升序，字段白名单只有 `day/requests/handoffs/errors`，**不输出 token**（估算值，不能被当账单）；
+  只返回有请求记录的日期，不补零行；页面的折线图按区间补 0（日聚合无行 = 当天 0 次请求）以保证时间轴连续。
+- **链路三率**（`tool_success_rate` / `fallback_rate` / `rag_hit_rate`）来自 `request_traces`，分母是「走完链路并落库的请求」；
+  `TRACE_SAMPLE_RATE < 1` 时 `meta.sampled=true`，工具成功率会被低估，前端挂「采样口径」提示，仅作参考。
+- 解决率口径 = `(requests - handoffs - errors) / requests`，是「机器人自主应答率」，不代表用户满意度。
+- 分母为 0 时对应 `value` 为 `null`（分子分母如实返回 0），前端显示「—」，不把「没有数据」当成 0%。
+- 默认区间为最近 7 天（含今天）；日期格式非法、`from > to`、跨度超 `USAGE_QUERY_MAX_DAYS` 均 400（业务码 1001）。
+- 无 `analytics` 读授权返回 403（业务码 2003）；**幻觉率本期不提供**（无 ground-truth，后续走离线评测）。
 
 ## Admin · License（授权与版本，require_admin）
 

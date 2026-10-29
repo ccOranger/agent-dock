@@ -1,7 +1,8 @@
 # U22 用量计量与报表（chat_events / chat_usage_daily）
 
 > 状态：已落地（`SCHEMA_VERSION` 6 → 7，增量 `scripts/migrations/0007_usage_daily.sql`）
-> 关联：产品化计划 [P0-2](../productization-plan.md)、[配置说明 3.14](../configuration.md)、[API · Admin · Usage](../api.md)
+> 状态修订：采集与日聚合仍在（现为「数据分析」页的数据源），**后台用量报表页与 `/admin/usage/*` 已于 [U25](25-analytics-outcomes.md) 下线**，token 不再对外展示；本文只作历史记录
+> 关联：产品化计划 [P0-2](../productization-plan.md)、[配置说明 3.14](../configuration.md)、[API · Admin · Analytics](../api.md)
 
 ## 1. 背景与问题
 

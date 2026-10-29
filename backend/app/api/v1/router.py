@@ -3,6 +3,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     admin,
+    admin_analytics,
     admin_canned_scripts,
     admin_inquiries,
     admin_integrations,
@@ -14,7 +15,6 @@ from app.api.v1 import (
     admin_takeover,
     admin_tickets,
     admin_traces,
-    admin_usage,
     auth,
     chat,
     knowledge,
@@ -40,6 +40,6 @@ api_router.include_router(admin_inquiries.router)
 api_router.include_router(admin_takeover.router)
 api_router.include_router(admin_tickets.router)
 api_router.include_router(admin_traces.router)
-api_router.include_router(admin_usage.router)
+api_router.include_router(admin_analytics.router)
 api_router.include_router(admin_license.router)
 api_router.include_router(admin_canned_scripts.router)

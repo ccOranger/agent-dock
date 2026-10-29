@@ -32,7 +32,7 @@ MENU_MODULES: list[dict[str, str]] = [
     {"key": "tickets", "name": "工单管理", "group": "运营"},
     {"key": "traces", "name": "链路追踪", "group": "观测"},
     {"key": "dashboard", "name": "仪表盘", "group": "观测"},
-    {"key": "usage", "name": "用量报表", "group": "观测"},
+    {"key": "analytics", "name": "数据分析", "group": "观测"},
     {"key": "knowledge", "name": "知识库维护", "group": "内容"},
     {"key": "canned-scripts", "name": "固定话术", "group": "内容"},
     {"key": "memory", "name": "记忆管理", "group": "内容"},
@@ -69,6 +69,7 @@ DEFAULT_AGENT_GRANTS: dict[str, str] = {
     "inquiries": ACCESS_WRITE,
     "tickets": ACCESS_WRITE,
     "traces": ACCESS_READ,
+    # analytics（成效指标）与 dashboard 一致：属管理视角，坐席默认不授权，需管理员显式授予
     "knowledge": ACCESS_READ,
     "memory": ACCESS_WRITE,
 }

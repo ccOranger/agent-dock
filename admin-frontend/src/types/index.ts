@@ -158,45 +158,45 @@ export interface TraceUsageItem {
   count: number
 }
 
-// ===== 用量报表（账单口径，源表 chat_usage_daily）=====
-export interface UsageMetrics {
+// ===== 数据分析（成效指标 + 每日请求量）=====
+/** 比率三件套：分母为 0 时 value 为 null（界面显示"—"，不伪装成 0%） */
+export interface AnalyticsRate {
+  value: number | null
+  numerator: number
+  denominator: number
+}
+
+/** 每日请求统计：只到请求/转人工/错误，token 是估算值不对外展示 */
+export interface AnalyticsDailyRow {
+  day: string
   requests: number
-  tokens: number
-  /** tokens 为估算值的请求数；接入供应商真实 usage 后才会小于 requests */
-  estimated_requests: number
   handoffs: number
   errors: number
 }
 
-export interface UsageDayRow extends UsageMetrics {
-  day: string
-}
-
-export interface UsageSceneRow extends UsageMetrics {
-  scene_code: string
-}
-
-export interface UsageIntegrationRow extends UsageMetrics {
-  integration_id: string
-  integration_name: string | null
-  /** 零 UUID 归属：匿名或未携带接入方凭证的请求 */
-  unassigned: boolean
-}
-
-export type UsageRow = UsageDayRow | UsageSceneRow | UsageIntegrationRow
-
-export interface UsageSummary {
+/** 全量三率来自日聚合（无采样偏差）；链路三率来自 request_traces（受采样影响） */
+export interface AnalyticsOutcomes {
   from: string
   to: string
-  group_by: UsageGroupBy
   scene_code?: string | null
-  rows: UsageRow[]
-  totals: UsageMetrics
-  /** 当前 token 口径是否为估算（hello_agents 不回传 usage，故恒为 true） */
-  tokens_estimated: boolean
+  handover_rate: AnalyticsRate
+  resolution_rate: AnalyticsRate
+  error_rate: AnalyticsRate
+  tool_success_rate: AnalyticsRate
+  fallback_rate: AnalyticsRate
+  rag_hit_rate: AnalyticsRate
+  /** 按天升序的请求量统计（原用量报表的日维度） */
+  daily: AnalyticsDailyRow[]
+  meta: {
+    full_source: string
+    trace_source: string
+    /** TRACE_SAMPLE_RATE：< 1 时链路三率只能当参考 */
+    trace_sample_rate: number
+    sampled: boolean
+    requests: number
+    traces_covered: number
+  }
 }
-
-export type UsageGroupBy = 'day' | 'scene' | 'integration'
 
 // ===== 授权 / 版本分层 =====
 export interface LicenseFeatureMeta {

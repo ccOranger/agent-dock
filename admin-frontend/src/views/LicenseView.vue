@@ -94,7 +94,7 @@
         </el-descriptions>
         <div class="actions">
           <el-button :loading="store.loading" @click="onReload">重新加载</el-button>
-          <span class="muted">换授权 / 续期后无需重启；社区版对话、知识库、工具、追踪、用量报表均不受影响</span>
+          <span class="muted">换授权 / 续期后无需重启；社区版对话、知识库、工具、追踪、数据分析均不受影响</span>
         </div>
       </el-card>
     </el-card>
