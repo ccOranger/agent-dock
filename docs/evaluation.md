@@ -2,8 +2,7 @@
 
 > 回答客户第一问「效果行不行」与交付最痛的一问「改了提示词/换了模型，有没有变差」。
 > 关联：[产品化计划 3.4](productization-plan.md)、[U24](updates/24-eval-regression.md)、[配置说明](configuration.md)、[运维手册](runbook.md)
-> 社区版功能：用例集、CLI 执行器、Markdown 报告、`eval_runs` 运行记录全部在社区版；
-> 后台「评测与回归」看板属企业版功能位 `eval_pro`（只管管理与定时回归，不限制评测能力）。
+> 全部能力（用例集、CLI 执行器、Markdown 报告、`eval_runs` 运行记录）都在本仓库，不再有版本分层。
 
 ## 1. 它由四样东西组成
 
@@ -258,7 +257,7 @@ cd backend
 
 ## 8. 已知边界
 
-- **不做后台评测页与定时回归**：`eval_pro` 属企业版（私有仓库），社区版只有 CLI + Markdown 报告 + `eval_runs`。
+- **不做后台评测页与定时回归**：目前只有 CLI + Markdown 报告 + `eval_runs`。
 - **模型输出天然带随机性**：同一用例两次措辞可能不同，所以措辞类只允许 `keywords_any` 这类宽松判定，不要用 `keywords_all` 卡死一句话。
 - **`RAG_MIN_SCORE` 是双刃剑**：调低会抬高命中率、同时增加注入上下文的噪音；评测报告不接受「为了指标调阈值」这种处置。
 - **token 是估算值**：与供应商账单有系统性偏差，`TOKEN_ESTIMATE_FACTOR` 只能整体校准（见 W2）。

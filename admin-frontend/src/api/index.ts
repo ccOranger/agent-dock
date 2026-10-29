@@ -16,7 +16,6 @@ import type {
   IntegrationKeyIssueResult,
   IntegrationUpdatePayload,
   KnowledgeBase,
-  LicenseStatus,
   LoginResult,
   MCPServer,
   MCPServerPayload,
@@ -497,15 +496,6 @@ export const apiMyMemories = (type?: string) =>
 
 export const apiUserMemories = (userId: string, type?: string) =>
   unwrap(http.get<never, { data: { data: MemoryItem[] } }>(`/memory/users/${userId}`, { params: { type } }))
-
-// ===== Admin：授权与版本 =====
-/** 当前授权状态（版本、功能位、到期天数、降级原因），只读 */
-export const apiLicenseStatus = () =>
-  unwrap(http.get<never, { data: { data: LicenseStatus } }>('/admin/license'))
-
-/** 换授权文件后无需重启：重新读取并校验（失败同样只降级，不报错） */
-export const apiReloadLicense = () =>
-  unwrap(http.post<never, { data: { data: LicenseStatus } }>('/admin/license/reload'))
 
 // ===== Admin：RBAC 角色与菜单权限 =====
 /** 可授权菜单模块清单（渲染读写矩阵的数据源，与前端菜单叶子 key 对齐） */

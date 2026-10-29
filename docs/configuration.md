@@ -207,59 +207,7 @@ JWT_SECRET=<≥32 字节随机串>
   首次使用需下载 BPE 词表，离线/内网部署会失败，且估算只影响账目精度、不影响功能。
 - `requests` 的口径是「走完整对话链路的轮次」，与 `request_traces` 一致；被鉴权/限流拒绝的请求只留在 `chat_events`。
 
-### 3.15 License 与版本分层
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `LICENSE_FILE` | `./license.json` | 授权文件路径。**文件不存在属正常状态**：静默按 `community` 运行，对话与社区功能完全不受影响 |
-| `LICENSE_PUBLIC_KEY` | 空 | 签发方 Ed25519 公钥：Base64 裸 32 字节或 PEM。为空时无法校验签名，一律降为 `community` |
-| `DEPLOYMENT_ID` | 空 | 部署指纹，与授权文件里的 `deployment_id` 必须一致。留空 = 未绑定，跳过指纹校验（仅建议开发/演示） |
-
-生成部署指纹（一次即可，写进 `.env` 长期保留）：
-
-```powershell
-python -c "import uuid;print(uuid.uuid4().hex)"
-```
-
-**授权文件格式**（JSON，`signature` 为 Ed25519 对“去掉 `signature` 的负载”签名）：
-
-```json
-{
-  "v": 1,
-  "customer": "某某科技有限公司",
-  "edition": "enterprise",
-  "features": ["rbac", "audit", "white_label", "eval_pro", "sso"],
-  "issued_at": "2026-11-01T00:00:00Z",
-  "expires_at": "2027-11-01T00:00:00Z",
-  "deployment_id": "dep_7f3a...",
-  "contract_ref": "HT-2026-0117",
-  "mode": "on_prem",
-  "signature": "base64(ed25519(...))"
-}
-```
-
-签名口径（签发脚本必须一致，否则“文件看着没问题但签名不符”）：
-
-```python
-body = {k: v for k, v in document.items() if k != "signature"}
-message = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-signature = base64.b64encode(private_key.sign(message)).decode()
-```
-
-行为约定：
-
-- **只降级不阻断**：文件缺失 / JSON 解析失败 / 签名不符 / 指纹不符 / 已过期，一律退回 `community`，
-  启动日志与后台顶部红条给出原因；**不阻断启动、不影响对话**。社区版保留完整对话、多知识库 RAG、
-  工具 / MCP、跨轮记忆、全链路追踪、数据分析、场景管理、嵌入挂件、基础评测 CLI 与 Markdown 报告。
-- **功能位只有 5 个**：`rbac`、`audit`、`white_label`、`eval_pro`、`sso`，且都不动对话内核；
-  企业功能的实现代码在私有仓库，开源仓库只有 `has_feature()` / `require_feature()` 挂载点。
-  授权文件里出现不认识的功能位会被忽略并在后台标为“不认识”。
-- **不设场景/接入方数量上限**：上限统一由 `staff_users.quota` 管理，避免两套机制冲突；
-  `contract_ref` 仅作对账备注，`mode`（`on_prem` / `hosted`）当前只记录、不做逻辑分支。
-- **换授权不需重启**：替换文件后调 `POST /api/v1/admin/license/reload`，或在后台「授权与版本」页点“重新加载”。
-- 到期前 30 天启动日志 WARN + 后台黄色横幅；到期后企业功能位全部关闭，续期后重新加载即恢复。
-
-### 3.16 评测与回归
+### 3.15 评测与回归
 
 **不新增环境变量**。评测的口径由仓库里的用例集（`backend/tests/fixtures/eval/<scene>.json`）与执行器参数决定，
 用法、指标定义与退出码见 [评测与回归](evaluation.md)。服务端只新增 `eval_runs` 一张表（v8 引入；当前 `SCHEMA_VERSION=10`）。
@@ -286,7 +234,7 @@ signature = base64.b64encode(private_key.sign(message)).decode()
 
 产出物目录 `reports/` 已在 `.gitignore`（报告随交付单归档，指标与明细以 `eval_runs` 为准）。
 
-### 3.17 Docker Compose 与生产叠加
+### 3.16 Docker Compose 与生产叠加
 
 | 变量 | 默认 | 说明 |
 |---|---|---|

@@ -465,45 +465,9 @@ GET    /api/v1/admin/rbac/roles/{role_id}/permissions   # 读取 {menu_key: read
 PUT    /api/v1/admin/rbac/roles/{role_id}/permissions   # 整体替换矩阵（body: permissions）
 ```
 
-- 权限只有两级：`read`（菜单可见 + 可查询）与 `write`（含 read）；非法 key / 等级在接口层被丢弃，不报错；
-- 角色里残留已下线菜单（如 `usage`）不影响运行，下次保存矩阵时按白名单清掉；
+- 权限只有两级：`read`（菜单可见 + 可查询）与 `write`（含 read）；非法 key 在接口层被丢弃，不报错（等级非 `read|write` 由 schema 拦为 422）；
+- 角色里残留已下线菜单（如 `usage` / `license`）不影响运行，下次保存矩阵时按白名单清掉；
 - 写操作落审计（`admin.rbac.role_create` / `role_delete` / `role_grant`）。
-
-## Admin · License（授权与版本，require_admin）
-
-```
-GET  /api/v1/admin/license         # 当前授权状态（版本、功能位、到期天数、降级原因）
-POST /api/v1/admin/license/reload  # 重新读取并校验授权文件（换文件/续期后无需重启）
-```
-
-响应结构：
-
-```json
-{
-  "code": 0,
-  "data": {
-    "edition": "enterprise", "edition_label": "企业版",
-    "customer": "某某科技有限公司", "contract_ref": "HT-2026-0117",
-    "features": ["audit", "rbac"], "active_features": ["audit", "rbac"],
-    "unknown_features": [],
-    "issued_at": "2026-11-01T00:00:00Z", "expires_at": "2027-11-01T00:00:00Z",
-    "days_left": 365, "valid": true, "expired": false,
-    "deployment_id": "dep_7f3a...", "deployment_bound": true, "mode": "on_prem",
-    "source": "./license.json", "configured": true, "reason": "",
-    "feature_catalog": { "rbac": { "label": "精细化权限", "desc": "..." } },
-    "community_scope": ["完整对话与多意图路由", "..."],
-    "expiring_soon": false, "expiring_soon_days": 30
-  }
-}
-```
-
-- `features` 是授权文件声明的功能位（过期后仍保留，便于展示“曾授权”）；`active_features` 是**当前实际生效**的，
-  降级时为 `[]`，企业功能接口应断言它（后端用 `Depends(require_feature("audit"))`，社区版返回 403 业务码 2003）。
-- `configured=false` 表示没找到授权文件（社区版正常状态，不告警）；`configured=true` 但 `valid=false` 才是
-  “放了授权但没生效”，后台顶部会常驻红条 + 原因（签名不符 / 指纹不符 / 过期 / 未配公钥）。
-- 两个接口都是 `admin`；校验从不抛错、不阻断启动，任何异常都降级为 `community`。
-- 授权文件格式、签名口径与 `LICENSE_FILE` / `LICENSE_PUBLIC_KEY` / `DEPLOYMENT_ID` 见
-  [configuration.md](configuration.md) 3.15。
 
 ## Admin · Tools / Metrics
 

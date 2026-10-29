@@ -3,7 +3,7 @@
 > 状态：已落地（`SCHEMA_VERSION` 由 `9` 升到 `10`，`scripts/migrations/0010_rbac.sql`）
 > 范围：菜单模块级的「角色 → 可见菜单 → read/write」授权；**不含**场景/知识库/工单的资源级授权
 > 关联：[Spec §12.2 权限矩阵](../spec.md#122-rbac-权限矩阵)、[API · Admin · RBAC](../api.md)、
-> [U07 人员/客户分表](07-staff-customer-auth-split.md)、[U21 人员配额](21-scene-identity-runtime-quota.md)、[U23 License](23-license-edition.md)
+> [U07 人员/客户分表](07-staff-customer-auth-split.md)、[U21 人员配额](21-scene-identity-runtime-quota.md)、[U23 License（已移除）](23-license-edition.md)
 
 ## 1. 背景与问题
 
@@ -20,7 +20,7 @@ License 的 `rbac` 企业功能位。
 
 ## 2. 设计要点
 
-1. **单一事实源在代码，不在数据库**：`app/core/rbac.py` 的 `MENU_MODULES` 登记 17 个模块的
+1. **单一事实源在代码，不在数据库**：`app/core/rbac.py` 的 `MENU_MODULES` 登记 16 个模块的
    `key / name / group`。前端菜单叶子、后端 `require_perm` 用它，角色配置页的矩阵也由它渲染；
    库里只存「角色 → `{menu_key: read|write}`」的映射。
 2. **零 DDL 扩展新模块**：`role_permissions.permissions` 是 JSONB，key 没有外键约束；新增菜单只需
@@ -60,7 +60,7 @@ License 的 `rbac` 企业功能位。
 
 | 文件 | 职责 |
 |---|---|
-| `backend/app/core/rbac.py` | `MENU_MODULES`（17 个模块 + 分组）、`MENU_KEYS`、`ACCESS_LEVELS`、`access_satisfied()`、`SYSTEM_ROLES`、`DEFAULT_AGENT_GRANTS`、`all_write_permissions()` |
+| `backend/app/core/rbac.py` | `MENU_MODULES`（16 个模块 + 分组）、`MENU_KEYS`、`ACCESS_LEVELS`、`access_satisfied()`、`SYSTEM_ROLES`、`DEFAULT_AGENT_GRANTS`、`all_write_permissions()` |
 | `backend/app/api/deps.py` | `effective_permissions(user)`（admin 全量 write / 其余取并集）、`require_perm(menu_key, access="write")`（非后台人员 403、admin 旁路、其余按矩阵判定） |
 | `backend/app/models/entities.py` | `Role` / `UserRole` / `RolePermission` 三个 ORM，与 0010 对齐 |
 | `backend/app/models/repositories.py` | `RoleRepo`：角色 CRUD、`get/set_permissions`（upsert）、`user_counts()`、`resolve_permissions()`（并集）、`get_user_role_keys()` / `assign_user_roles()`（整体替换） |
@@ -118,10 +118,9 @@ PUT    /api/v1/admin/rbac/roles/{role_id}/permissions   # body: {permissions:{..
 
 ## 8. 边界与后续
 
-- **不是资源级授权**：不能表达「只给 A 场景的接管」「只读 B 知识库」。这类需求对应 License 的
-  `rbac` 功能位（[U23](23-license-edition.md)），开源版未实现，`require_feature("rbac")` 也还没有端点使用。
+- **不是资源级授权**：不能表达「只给 A 场景的接管」「只读 B 知识库」。这类需求尚未实现
+  （原 License `rbac` 功能位随 [U23 机制移除](23-license-edition.md) 一并取消，现在没有版本分层/功能位概念）。
 - **不做动作级细分**：`write` 是模块内的全动作；「能改不能删」这类诉求需要再加等级或动作位。
 - **角色变更不即时推送**：前端权限来自 `/auth/me`，多人协作场景下需刷新；暂不做 SSE 推送或定时刷新。
 - **只覆盖后台人员**：客户侧接口的边界仍是 `current_customer`（只能看自己的会话/记忆），与菜单无关。
-- **未做**：角色模板/导入导出、权限变更历史查询页（审计只落 `audit_logs`）、按角色限制数据范围、
-  SSO（企业功能位 `sso`）。
+- **未做**：角色模板/导入导出、权限变更历史查询页（审计只落 `audit_logs`）、按角色限制数据范围、SSO。

@@ -35,7 +35,7 @@
 - [x] `NOTICE`（第三方声明位，当前只写本项目版权）。
 - [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）：当前 requirements 与前端依赖均为 MIT/BSD/Apache 类，但**没有正式扫描记录**。
 - [x] 产品名：对外 **AgentDock**；仓库名与代码代号保留 `smart-cs`（Compose 项目名、包名不变，避免已有数据卷失联）。
-- [x] 对外文案无真实客户名、内部系统名、真实域名：`docs/api.md`、`docs/configuration.md`、`docs/updates/23-license-edition.md` 里的客户名均为"某某科技有限公司"占位；截图抽查（嵌入挂件、授权与版本页）无客户信息、无合同号、无真实域名。
+- [x] 对外文案无真实客户名、内部系统名、真实域名：`docs/api.md`、`docs/configuration.md`、`docs/updates/23-license-edition.md` 里的客户名均为"某某科技有限公司"占位；截图抽查（嵌入挂件、数据分析页）无客户信息、无合同号、无真实域名。
   - [ ] 剩余 6 张截图与 GIF 逐张复核（目前只抽查了 2 张）。
 - [x] `SECURITY.md`：漏洞报告方式、支持版本、响应时限（尽力而为）。
 - [x] API 文档标题统一为 AgentDock（`main.py` 的 FastAPI `title`、`pyproject.toml` 的 `description` 不再出现旧名）。
@@ -118,7 +118,7 @@
 ## 9. 发布物料
 
 - [x] 演示 GIF：四帧 13 秒（发问 + 工具回填 → 多意图 + 自动建单 → 跨轮补单 → 转人工），分镜见 [demo-script.md](demo-script.md)。
-- [x] 8 张截图：链路详情、业务场景、知识库、Agent 编辑、**数据分析**（待补；原用量报表截图 `06-admin-usage.png` 已随页面下线）、嵌入挂件、授权与版本。
+- [x] 8 张截图：链路详情、业务场景、知识库、Agent 编辑、**数据分析**（待补；原用量报表截图 `06-admin-usage.png` 已随页面下线）、嵌入挂件、角色与权限。
 - [ ] 技术文章三篇（当前 1/3）：
   1. [x] 多意图路由与提示词去具名化 —— [articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)
   2. [ ] 记忆生命周期与跨轮上下文

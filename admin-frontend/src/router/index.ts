@@ -23,7 +23,6 @@ const children: RouteRecordRaw[] = [
   { path: 'integrations', component: () => import('@/views/IntegrationsView.vue'), meta: { title: '接入方管理', roles: ['admin'] } },
   { path: 'staff', component: () => import('@/views/StaffQuotaView.vue'), meta: { title: '人员与配额', perm: 'staff' } },
   { path: 'roles', component: () => import('@/views/RoleView.vue'), meta: { title: '角色与权限', perm: 'roles' } },
-  { path: 'license', component: () => import('@/views/LicenseView.vue'), meta: { title: '授权与版本', perm: 'license' } },
 ]
 
 const routes: RouteRecordRaw[] = [

@@ -39,7 +39,7 @@
 | U20 | 单租户降级与自定义埋点（chat_events） | §4、§12 | [↗](updates/20-single-tenant-degradation.md) |
 | U21 | 场景身份话术、场景运行参数与登录人配额 | §4、§12、§13 | [↗](updates/21-scene-identity-runtime-quota.md) |
 | U22 | 用量计量（采集侧仍在，后台页已下线） | §4、§14 | [↗](updates/22-usage-metering.md) |
-| U23 | License 与版本分层（Ed25519、5 个功能位） | §12、§14 | [↗](updates/23-license-edition.md) |
+| U23 | License 与版本分层（**已移除**） | §12 | [↗](updates/23-license-edition.md) |
 | U24 | 评测与回归（`eval_runs`、基线 diff） | §15、§16 | [↗](updates/24-eval-regression.md) |
 | U25 | 数据分析（成效指标 + 每日请求量，并入原用量报表） | §4、§14 | [↗](updates/25-analytics-outcomes.md) |
 | U26 | 后台 RBAC（角色 × 菜单读写矩阵） | §4、§12 | [↗](updates/26-rbac-menu-matrix.md) |
@@ -325,7 +325,7 @@ smart-cs/
 │   │   ├── setup.py                      # 一次性初始化（建管理员 + 模型连通性自检）
 │   │   ├── migrate.py                    # python -m app.migrate 入口（实现在 core/migrate.py）
 │   │   ├── api/
-│   │   │   ├── deps.py                   # current_user / require_staff / require_perm / require_admin / require_feature
+│   │   │   ├── deps.py                   # current_user / require_staff / require_perm / require_admin
 │   │   │   ├── params.py                 # 分页等公共查询参数
 │   │   │   └── v1/
 │   │   │       ├── router.py             # 汇总挂载
@@ -347,7 +347,6 @@ smart-cs/
 │   │   │       ├── admin_integrations.py # 接入方与 Key
 │   │   │       ├── admin_staff.py        # 人员与创建配额
 │   │   │       ├── admin_rbac.py         # 角色与菜单读写矩阵
-│   │   │       └── admin_license.py      # 授权状态与重新加载
 │   │   ├── core/
 │   │   │   ├── config.py
 │   │   │   ├── security.py
@@ -360,7 +359,6 @@ smart-cs/
 │   │   │   ├── tracing.py                # request_traces 采集（旁路）
 │   │   │   ├── ratelimit.py              # Redis 多桶限流
 │   │   │   ├── rbac.py                   # 菜单模块单一事实源 + require_perm
-│   │   │   ├── license.py                # Ed25519 授权校验与功能位
 │   │   │   ├── cors.py
 │   │   │   ├── selfcheck.py              # 启动自检（模型/依赖/配置）
 │   │   │   ├── context_engineer.py
@@ -436,7 +434,7 @@ smart-cs/
 │   │                             # InquiriesView/TicketsView/TracesView/KnowledgeBaseView/ScenesView/
 │   │                             # AgentList/RouterInfoView/McpServersView/CustomToolsView/
 │   │                             # CannedScriptsView/MemoryView/IntegrationsView/StaffQuotaView/
-│   │                             # RoleView/LicenseView/LoginView
+│   │                             # RoleView/LoginView
 │   ├── package.json
 │   └── vite.config.ts
 ├── packages/
@@ -2163,7 +2161,6 @@ export function streamChat(
 | `/integrations` | IntegrationsView | `meta.roles=['admin']`（未纳入 RBAC） |
 | `/staff` | StaffQuotaView | `staff` |
 | `/roles` | RoleView | `roles` |
-| `/license` | LicenseView | `license` |
 
 **客户对话端**（`frontend`，5173）：
 
@@ -2261,8 +2258,8 @@ Token `sub`=用户ID、`role`∈`{customer,agent,admin}`；`/auth/refresh` 按 `
 可授权清单的单一事实源是 `app/core/rbac.py` 的 `MENU_MODULES`（`0010_rbac.sql` 建表，零 DDL 扩展新模块）。
 专题文档：[U26 后台 RBAC](updates/26-rbac-menu-matrix.md)。
 
-- **模块粒度**：17 个菜单模块（takeover / inquiries / tickets / traces / dashboard / analytics / knowledge /
-canned-scripts / memory / scenes / agents / router / mcp-servers / custom-tools / staff / roles / license），
+- **模块粒度**：16 个菜单模块（takeover / inquiries / tickets / traces / dashboard / analytics / knowledge /
+canned-scripts / memory / scenes / agents / router / mcp-servers / custom-tools / staff / roles），
 每个只有 `read`（菜单可见 + 可查询）与 `write`（含 read）两级；
 - **内置角色**：`admin` 为超级角色（前后端一律旁路、不可删）；`agent` 为默认坐席角色，默认授予
 takeover / inquiries / tickets / memory 写与 traces / knowledge 读，**dashboard / analytics 不默认授予**；
@@ -2271,7 +2268,7 @@ takeover / inquiries / tickets / memory 写与 traces / knowledge 读，**dashbo
 - **接口**：`GET /admin/rbac/menus|roles`、`POST /admin/rbac/roles`、`DELETE /admin/rbac/roles/{id}`、
 `GET|PUT /admin/rbac/roles/{id}/permissions`（写操作仅 admin）；
 - **未纳入**：接入方管理（`/integrations`）仍按 `meta.roles=['admin']` 粗粒度；
-场景 / 知识库 / 工单级的**资源级**授权属企业功能位 `rbac`，尚未实现。
+场景 / 知识库 / 工单级的**资源级**授权尚未实现（原 License `rbac` 功能位已随 U23 移除）。
 
 资源层访问对照（不含菜单可见性，数据层限制在仓储与接口内实现）：
 
@@ -2662,8 +2659,6 @@ GET    /api/v1/admin/analytics/outcomes
 GET    /api/v1/admin/rbac/menus
 GET    /api/v1/admin/rbac/roles
 PUT    /api/v1/admin/rbac/roles/{role_id}/permissions
-GET    /api/v1/admin/license
-POST   /api/v1/admin/license/reload
 
 GET    /health
 GET    /metrics
@@ -2704,7 +2699,6 @@ GET    /metrics
 | `RagFactory` | `tools/rag_factory.py` | RAGTool 工厂 |
 | `MCPLoader` | `tools/mcp_loader.py` | MCP 工具加载 |
 | `TraceCollector` | `core/tracing.py` | 链路采集（旁路写 `request_traces`） |
-| `license` | `core/license.py` | Ed25519 授权校验与功能位（`has_feature` / `require_feature`） |
 | `rbac` | `core/rbac.py` | `MENU_MODULES` 单一事实源 + `require_perm` |
 | `migrate` | `core/migrate.py` | 版本化迁移执行器（`--check` / `--dry-run` / `--backup`） |
 | `ChatService` | `services/chat_service.py` | SSE 输出与用量记账 |
@@ -2712,7 +2706,7 @@ GET    /metrics
 
 ### 17.5 开发任务看板
 
-> 本节是 v1.x 的初始任务拆分，已全部随迭代落地并多轮重构（业务 Agent 动态化、多意图路由、链路追踪、用量/数据分析、License、评测、RBAC）；
+> 本节是 v1.x 的初始任务拆分，已全部随迭代落地并多轮重构（业务 Agent 动态化、多意图路由、链路追踪、用量/数据分析、RBAC、评测）；其中 License 与版本分层曾落地后于 2026-10-29 移除（[U23](updates/23-license-edition.md)）；
 > 保留此节仅作历史记录，不再维护勾选状态。
 
 **Epic 1：HelloAgents 集成基础**

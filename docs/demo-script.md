@@ -68,7 +68,7 @@ docker compose down -v && docker compose up -d --build   # 全新数据卷，种
 | `05-admin-agents.png` | `/admin/agents` | 打开 `order_service` 编辑态 | 路由关键词/典型问法、绑定工具、按 Agent 指定模型 |
 | `06-admin-analytics.png`（待补） | `/admin/analytics` | 至少 7 天、每天 ≥6 轮对话，采样率 1 或 0.2 | 全量三率与链路三率分组、采样角标、每日请求量趋势折线图；原 `06-admin-usage.png`（`/admin/usage`）已随页面下线废弃 |
 | `07-widget-embed.png` | `/embed-demo.html` | 场景接入已开「开放匿名」 | 一行 script 嵌入第三方页面，气泡 + iframe 样式隔离 |
-| `08-admin-license.png`（可选） | `/admin/license` | 未放授权文件（默认社区版） | 降级不阻断：只 5 个功能位关闭，对话与评测完整保留 |
+| `08-admin-roles.png`（可选） | `/admin/roles` | 至少建 1 个自定义角色并授权 | 角色 × 菜单读写矩阵：内置角色不可删、在册人数、按分组的只读/读写单选 |
 
 README 只用 **1 / 2 / 3** 三张（首屏 1 张大图 + 2 张并排），其余放发布物料，不堆首屏。
 
@@ -76,7 +76,6 @@ README 只用 **1 / 2 / 3** 三张（首屏 1 张大图 + 2 张并排），其�
 
 - 任何页面出现 `sk-` 开头的 Key、真实域名、真实邮箱/手机号 → 换演示数据或裁掉，**不允许打马赛克后仍可复原**。
 - 后台右上角账号固定用 `admin`，别露公司内部用户名。
-- 授权页显示「社区版 / 未配置授权」是正常状态，截图里正好用来说明降级不阻断。
 
 ## 4. 录制与压缩参数
 

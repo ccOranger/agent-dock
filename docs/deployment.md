@@ -236,39 +236,7 @@ $COMPOSE start backend web caddy
 - 链路数据按轮增长，务必设置 `TRACE_RETENTION_DAYS` 并定期执行 `python scripts/cleanup_traces.py`（可挂 cron）；
 - 单实例 SSE 连接上限约 500，超出会在指标中体现。
 
-## 9. 企业授权文件（可选）
-
-未放置授权文件时按社区版运行，无需任何配置。企业版按实例年授权，一份授权对应一个部署：
-
-1. 把授权方给的 `license.json` 放到宿主机，例如 `${DATA_ROOT}/license.json`（**不要提交到 Git**）。
-2. 根 `.env` 增加三项：
-
-```ini
-# 容器内路径（来源码仓 backend 目录，容器里是 /app/backend）
-LICENSE_FILE=/app/backend/license.json
-# 授权方提供的 Ed25519 公钥（Base64 裸 32 字节或 PEM）
-LICENSE_PUBLIC_KEY=<base64 公钥>
-# 部署指纹：首次部署生成一次，之后保持不变（换值会让授权失效）
-DEPLOYMENT_ID=<python -c "import uuid;print(uuid.uuid4().hex)" 的输出>
-```
-
-3. 在 `docker-compose.override.yml`（或生产叠加）里只读挂载：
-
-```yaml
-services:
-  backend:
-    volumes:
-      - ${DATA_ROOT:-/srv/smart-cs}/license.json:/app/backend/license.json:ro
-```
-
-> 挂载前宿主机文件必须已存在；否则 Docker 会建一个同名目录，表现为“授权文件读取失败”。
-
-4. 验证：重启后看启动日志 `授权: license=enterprise customer=… expires_in=…d`，或在后台「授权与版本」页查看。
-
-换授权 / 续期：覆盖文件后调 `POST /api/v1/admin/license/reload`（或在授权页点“重新加载”），**不需要重启容器**。
-授权过期、签名不符、指纹不符都只会关闭企业功能位，对话与社区版功能不受影响。
-
-## 10. 上线检查清单
+## 9. 上线检查清单
 
 - [ ] 根 `.env` 已设置强 `JWT_SECRET`、`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`QDRANT_API_KEY`
 - [ ] `APP_ENV=production`，`SEED_DEMO=false`
@@ -280,4 +248,3 @@ services:
 - [ ] 备份脚本已跑通，恢复流程在测试环境演练过
 - [ ] 日志轮转、磁盘告警、`cleanup_traces` 定时任务已配置
 - [ ] 演示账号已禁用或改密，后台无默认口令
-- [ ] 企业版：`.env` 已配 `LICENSE_FILE` / `LICENSE_PUBLIC_KEY` / `DEPLOYMENT_ID`，后台「授权与版本」页显示“企业版”且剩余天数符合合同

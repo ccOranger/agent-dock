@@ -43,7 +43,6 @@ MENU_MODULES: list[dict[str, str]] = [
     {"key": "custom-tools", "name": "自定义工具", "group": "集成"},
     {"key": "staff", "name": "人员与配额", "group": "系统"},
     {"key": "roles", "name": "角色与权限", "group": "系统"},
-    {"key": "license", "name": "授权与版本", "group": "系统"},
 ]
 MENU_KEYS: set[str] = {m["key"] for m in MENU_MODULES}
 

@@ -28,10 +28,6 @@
           <el-button size="small" text @click="onLogout">退出</el-button>
         </div>
       </el-header>
-      <div v-if="license.banner" class="banner">
-        <el-alert :type="license.banner.type" :title="license.banner.text" show-icon :closable="false" />
-        <el-link type="primary" :underline="false" @click="router.push('/license')">查看授权</el-link>
-      </div>
       <el-main>
         <router-view />
       </el-main>
@@ -45,15 +41,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { apiListTakeovers } from '@/api'
 import { canAccess, useAuthStore } from '@/stores/auth'
-import { useLicenseStore } from '@/stores/license'
 
 const auth = useAuthStore()
-const license = useLicenseStore()
 const route = useRoute()
 const router = useRouter()
 
 const activePath = computed(() => route.path)
-const isAdmin = computed(() => auth.user?.role === 'admin')
 
 // ===== 菜单分组：按职责折叠、按 RBAC 权限过滤（perm = 菜单模块 key）=====
 type MenuItem = { path: string; title: string; perm: string }
@@ -128,7 +121,6 @@ const MENU: MenuEntry[] = [
     children: [
       { path: '/staff', title: '人员与配额', perm: 'staff' },
       { path: '/roles', title: '角色与权限', perm: 'roles' },
-      { path: '/license', title: '授权与版本', perm: 'license' },
     ],
   },
 ]
@@ -178,9 +170,8 @@ async function refreshPending() {
   }
 }
 
-// 授权状态只有 admin 能查（agent 调用 403）；降级时顶部常驻提醒，不阻断任何操作
+// 待接手会话数：非接管权限账号调用会 403，失败不影响后台其它操作
 onMounted(() => {
-  if (isAdmin.value) license.load()
   refreshPending()
   pollTimer = setInterval(refreshPending, 20000)
 })
@@ -270,15 +261,6 @@ function onLogout() {
 }
 .name {
   color: #606266;
-}
-.banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 20px 0;
-}
-.banner :deep(.el-alert) {
-  flex: 1;
 }
 .el-main {
   background: #f5f7fa;

@@ -4,6 +4,8 @@
 > 关联文档：[产品定位](./positioning.md)、[开源发布检查清单](./open-source-release.md)。
 > 估算假设：单人开发，每周投入 20–30 小时；以"可发布"为目标，不为完美主义加需求。
 > 历史说明：本文保留 v0.1 阶段的执行记录；场景包机制已在多场景平台化改造后移除，业务资产现位于 `app/agents/business/`、`app/agents/prompts/`、`app/tools/custom/`。
+> 其中“企业版 / License 版本分层”相关条目已作废：License 机制于 2026-10-29 移除（[U23](./updates/23-license-edition.md)），
+> RBAC 菜单级已在开源版落地（[U26](./updates/26-rbac-menu-matrix.md)）。
 
 ## 0. 当前基线
 
@@ -27,7 +29,7 @@
 | M3 文档物料 | 能对外讲清楚并演示 | 3–5 天 | README/Quickstart 可用，截图与 GIF 就绪 |
 | M4 第二场景包 | IT Helpdesk 可切换 | 5–10 天 | 同一内核切换包，端到端可用 |
 | M5 v0.1 发布 | 正式对外 | 2–3 天 | 发布检查清单全部勾选 |
-| M6 发布后 | 按反馈迭代与企业版能力 | 持续 | 按 issue 优先级排期 |
+| M6 发布后 | 按反馈迭代 | 持续 | 按 issue 优先级排期 |
 
 建议顺序：**M0 → M1 → M1.5 → M2 → M3 → M4 → M5**。M3 可与 M2 并行（等部署稳定后再截图）。
 
@@ -38,7 +40,7 @@
 ### M0 工程基线（发布阻塞）
 
 - [x] **M0-1 确认许可证并添加 LICENSE**（0.5d）
-  - 默认 Apache-2.0；企业版功能后续独立目录/仓库
+  - 默认 Apache-2.0；所有能力都在本仓库，不再区分社区版/企业版（原企业分层已于 2026-10-29 移除）
   - 验收：根目录有 `LICENSE`，README 有许可证段落
 - [x] **M0-2 仓库清理**（0.5h）
   - 删除 `.review_diff.txt`；补 `.gitattributes`（`* text=auto`）
@@ -216,7 +218,7 @@
 6. ~~Alembic/版本化迁移~~ → 已落地（W1：`scripts/migrations/NNNN_*.sql` + `python -m app.migrate`，非 Alembic）
 7. ~~评测与回归（用 `request_traces` 建 golden set）~~ → 已落地（W4：用例集 + 真实链路执行器 + `eval_runs`，见 [evaluation.md](./evaluation.md)；
    `trace_sample` 仍需在客户现场按真实链路回填）
-8. RBAC、SSO、审计增强（企业版）
+8. RBAC 菜单级（已落地，见 [U26](./updates/26-rbac-menu-matrix.md)）、SSO、审计增强
 9. `app_users` 合并、Ticket 迁包
 10. `tenant_id` 预留与多租户（仅 SaaS 时）
 11. 技术债：MCP 发现单飞锁、RAG 信号量模块级化、后台列表 N+1

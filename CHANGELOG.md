@@ -29,6 +29,13 @@
 - CI 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，Dockerfile 或前端产物坏掉会直接在 PR 上暴露。
 - `scripts/release.py check` 在 Windows 上可跑通：pytest 固定带 `--basetemp=.pytest_tmp`（避开 `%TEMP%` 权限问题），npm 改用 `shutil.which` 解析后的完整路径（CreateProcess 不会自动补 `.cmd`）。
 
+### 移除
+
+- **下线「授权与版本」（License 与版本分层）**：后台 `/license` 页与顶部降级横幅、`GET/POST /api/v1/admin/license*` 两个接口、`backend/app/core/license.py`（Ed25519 离线校验与 `FEATURE_CATALOG`）、`app/api/deps.py` 的 `require_feature()` 挂载点一并删除；`license` 菜单 key 从 `app/core/rbac.py` 移除（**17 → 16**）。产品不再区分社区版/企业版，也不再有 `rbac`/`audit`/`white_label`/`eval_pro`/`sso` 五个功能位。
+- **配置项减少三个**：`LICENSE_FILE`、`LICENSE_PUBLIC_KEY`、`DEPLOYMENT_ID` 不再是有效配置，`backend/.env.example` 已删除对应段落；存量 `.env` 里留着这三行不会报错，但没有任何效果。**无需迁移**：无表结构变更，`SCHEMA_VERSION` 仍为 `10`。
+- **测试**：`backend/tests/test_license.py` 全数删除（17 项），全量 `pytest` 由 646 变为 **629 passed / 3 skipped**。
+- 历史决策与移除范围见 [U23（已移除）](docs/updates/23-license-edition.md)；`LICENSE` 文件（仓库 Apache-2.0 许可证）与此无关，保留不动。
+
 ### 修复
 
 - CI 四个失败用例：三个断言工具/错误正文的用例未显式打开 `TRACE_STORE_PAYLOAD`（默认改为 `false` 后只存长度摘要），已补 `monkeypatch`；`test_stream_attaches_visitor_identity` 原先会连真实 PostgreSQL（本地有库才通过），已 mock `VisitorRepo.get_or_create`。
@@ -41,9 +48,13 @@
 - `docs/configuration.md`：补 `API_DOCS_ENABLED`，更新 `TRACE_STORE_PAYLOAD` 默认值。
 - `docs/open-source-release.md`：按实检结果重写，新增「当前阻塞项」与「维护者发布动作」。
 - `docs/productization-plan.md`：6 处本机绝对路径链接改为仓库相对路径。
+- **License 移除后的文档同步**：[U23](docs/updates/23-license-edition.md) 标题加“历史”、状态改为“已移除”并新增“后续变更”块（保留原文作决策留档）；spec 删 `admin_license.py`/`license.py`/`LicenseView`、`/license` 路由与两个接口（§12.2 改为 16 个菜单模块）、api.md 删「Admin · License」整节、configuration.md 删「License 与版本分层」整节、deployment.md 删「企业授权文件」一节、faq/runbook/README/evaluation/architecture/demo-script/open-source-release 同步去企业版与功能位表述；productization-plan 的 P0-3、G3、W3 与 D1/D2/D6 加撤销注（R1）。
 - **补记 [U26 后台 RBAC](docs/updates/26-rbac-menu-matrix.md)**：角色 × 菜单读写矩阵的设计取舍、三表模型与 0010 迁移、`require_perm` / 前端 `meta.perm` 的判定链路、7 个接口与默认授权、边界（不做资源级/动作级）。同步纠正 spec §12.2 中“人员经 `staff_users.roles` 绑多角色”的错误描述（实为 `user_roles` 关联表）。
 
 ## [0.1.0] - 2026-10-27
+
+> 补记（2026-10-29）：本节中的「新增：License 与版本分层（W3）」已在 `[Unreleased]` 整体移除，相关代码、
+> 接口、页面与配置均已不存在（见 [U23](docs/updates/23-license-edition.md)）；本节保留发布当时的原样记录。
 
 首个对外版本。定位：**可私有化部署的对话式 Agent 运营平台** —— 多意图路由、知识库、工具调用、跨轮记忆与全链路追踪都做成平台能力，客服/售后只是首个内置业务。
 
@@ -260,7 +271,7 @@ docker compose run --rm backend python -m app.migrate   # schema 6 → 8，顺�
 
 ### 后续版本方向
 
-- RBAC 与审计查询/导出、SSO（企业版功能位方向）；
+- RBAC 与审计查询/导出（RBAC 已落地，见 [U26](docs/updates/26-rbac-menu-matrix.md)）、SSO（原计划放企业功能位，功能位已移除，当前未做）；
 - 后台 IA 去客服化：`canned_scripts` → 通用 `response_templates`，`app_users` 合并、Ticket 领域拆分；
 - 模型供应商后台化、`/metrics` 与诊断包、交付 SOP 与验收单。
 
