@@ -21,7 +21,7 @@
 
 | # | 阻塞项 | 现状 |
 |---|---|---|
-| B1 | ~~默认分支与发布版本一致~~ **已清零** | 2026-10-29 已将 `main` 快进到发布提交（含 RBAC、数据分析、人工接管、截图与 GIF）；之前 `main` 落后 9 个提交 / 103 个文件 |
+| B1 | ~~默认分支与发布版本一致~~ **已清零** | 2026-10-29 已将 `main` 快进到发布提交（含 RBAC、数据分析、人工接管、截图与 GIF）；之前 `main` 落后 9 个提交 / 103 个文件。同日进一步收敛为**单 `main` + tag**：`release/v0.2.0` 本地与远端均已删除（删除前校验与 `main` 同点、tag 提交在 main 线上），远端 `refs/heads` 只剩 `main` |
 | B2 | **仓库仍为私有** | `https://github.com/ccOranger/smart-cs` 返回 404；转公开前需确认最终归属（个人号 / 组织）与仓库名，并同步 README 徽章、克隆地址与 issue 模板里的链接；**另需先定下 B4 的 `hello-agents` 许可处置**（CC BY-NC-SA 4.0 决定项目能不能商用） |
 | B3 | ~~CI 缺镜像构建~~ **已补** | `ci.yml` 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，分层缓存走 gha 且各用一个 scope；PR 上就能暴露 Dockerfile 与前端产物问题（待首次 Actions 运行确认） |
 | B4 | **依赖许可证与漏洞扫描** | **已扫描；`hello-agents` 的 CC BY-NC-SA 4.0 经维护者决定暂不处理（按现状发布，风险由 NOTICE 声明）** | 2026-10-29 新增 `scripts/license_report.py` 与 [第三方许可证清单](third-party-licenses.md)：Python 188 个发行版 + Node 274 个包（生产 87 个），除 `hello-agents 0.2.9` 外全部为宽松许可，处置见 §2。CI 新增 `audit` job（`pip-audit` + `npm audit --omit=dev` + 许可证白名单，目前观察模式）。`npm audit --omit=dev` **0 告警**；全量 6 项均在 devDependencies（`vitest` 2→5 / `vite` 5→8 大版本），已记入 `SECURITY.md` |
@@ -163,23 +163,36 @@
 - 自动化升级（只提供手动迁移脚本）。
 - 内置 mock 模型模式（对话与向量必须连 OpenAI 兼容端点）。
 
-## 13. 维护者发布动作（按顺序执行）
+## 13. 分支与发布动作
+
+**分支策略（2026-10-29 起）**：只保留 `main` 一条长期分支，**发布靠 tag 不靠发布分支**。
+历史功能分支已合并后删除；原 `release/v0.1.0` → `release/v0.2.0` → 已删除，远端 `refs/heads` 只剩 `main`。
+理由：单机私有化部署没有并行维护旧版本的场景，发布分支只会带来 `main`/`release` 双写不同步（即 B1 的成因）。
+
+- `main`：唯一开发分支，日常提交直接进。
+- `vX.Y.Z`（annotated tag）：发布快照，打在 `main` 当时的提交上。
+- 需要修旧版本时：不建议开维护分支，直接发新的 patch tag（本项目当前无长期支持分支）。
+- tag 之后允许 `main` 继续前进（纯文档 / 后续开发），**不必回填 tag**。
 
 ```bash
-# 1. 默认分支已对齐（B1 已清零，2026-10-29）：main == release 发布提交，日常提交直接进 main
+# 1. 同步 main（唯一的长期分支）
 git checkout main && git pull --ff-only
+git log --oneline -1 && git tag -n1          # 确认当前提交与已有 tag
 
-# 2. 发布前全量校验（B3/B4 补完后再跑一次）
+# 2. 发布前全量校验
 cd backend && ruff check app tests && pytest -q --basetemp=.pytest_tmp
 cd .. && python scripts/release.py check
 backend/.venv/bin/python scripts/license_report.py --check   # 依赖变动后先重跑清单，再校验白名单
 
-# 3. 打 tag 并推送（已打过则跳过；改版本时用 tag --push）
+# 3. 在 main 当前提交上打 annotated tag 并推送（已打过则跳过；改版本时用 tag --push）
 python scripts/release.py tag --push
 
 # 4. 生成离线交付包（可选，内网客户用）
 python scripts/release.py bundle
 ```
+
+> 回滚一次发布：`git push origin --delete <tag>` 删远端 tag + 用 `--force` 重打前一个提交；
+> 不要用删除/重建 `main` 的方式回滚，历史必须保持快进一致。
 
 GitHub 网页端（本地无法代替）：Settings → 转公开 / 转移归属；Actions 勾选 docker job 首次运行；
 Releases 用 [release-notes/v0.2.0.md](release-notes/v0.2.0.md) 作正文（依据 CHANGELOG 的 `[0.2.0]` 段落编写）；新建并置顶路线图 issue；开启 Discussions。
