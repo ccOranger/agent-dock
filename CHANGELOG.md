@@ -16,9 +16,9 @@
   Python 侧枚举 `backend/.venv` 实际安装的发行版（含传递依赖，并排除从仓库根运行时被误认成发行版的 `node_modules` 包），
   Node 侧读 `package-lock.json` 的 `packages`（自带 `license` 与 `dev` 标记，能区分是否随镜像分发）；
   `--check` 走白名单，白名单外（含 GPL/AGPL/非商业）即退出码 1。首次扫描：Python 188 个发行版 + Node 274 个包（生产 87 个）。
-- **发现一处许可冲突（待决）**：核心框架 `hello-agents 0.2.9` 的许可证为 **CC BY-NC-SA 4.0**（含非商业条款），
-  与 Apache-2.0 项目的分发口径不一致；已在 `NOTICE` 与 README 许可证段作事实性说明，
-  三条处置路径（上游改许可 / 自研编排层 / 收窄为非商业定位）记在 [发布清单 B4](docs/open-source-release.md)。
+- **发现一处许可冲突（暂不处理）**：核心框架 `hello-agents 0.2.9` 的许可证为 **CC BY-NC-SA 4.0**（含非商业条款），
+  与 Apache-2.0 项目的分发口径不一致；已在 `NOTICE` 与 README 许可证段作事实性说明。维护者决定本版**按现状发布**，
+  三条备选处置（上游改许可 / 自研编排层 / 收窄为非商业定位）留在 [发布清单 B4](docs/open-source-release.md)。
 - **依赖漏洞扫描并入 CI**：`.github/workflows/ci.yml` 新增 `audit` job（`pip-audit -r backend/requirements.txt`、
   `npm audit --omit=dev`、许可证白名单校验），目前 `continue-on-error` 观察模式，基线稳定后再转为阻塞。
 - `SECURITY.md`：支持版本改为 0.2.x；新增「依赖漏洞与许可证」段 —— `npm audit --omit=dev` **0 告警**，
