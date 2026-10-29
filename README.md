@@ -223,6 +223,7 @@ docs/             快速开始、架构说明、配置、部署、评测、FAQ�
 | [技术文章 · 记忆生命周期](docs/articles/02-memory-lifecycle.md) | 三层记忆怎么分层、晋升的四个入口、镜像表与上下文预算 |
 | [技术文章 · 权限与接管](docs/articles/03-rbac-and-takeover.md) | 菜单模块级 RBAC 与会话四态状态机，为什么必须拆开 |
 | [技术文章 · 链路追踪](docs/articles/04-request-tracing.md) | 一轮一行怎么存、十种 span、采样与旁路写入 |
+| [第三方许可证清单](docs/third-party-licenses.md) | 依赖许可证与扫描口径，由 `scripts/license_report.py` 生成 |
 | [开发规范](docs/spec.md) | Spec v2.0，与实现同步 |
 | [功能更新记录](docs/updates/README.md) | U01–U26 每项能力的落地细节 |
 
@@ -252,3 +253,6 @@ docs/             快速开始、架构说明、配置、部署、评测、FAQ�
 ## 许可证
 
 Apache License 2.0，详见 [LICENSE](LICENSE)。
+
+> 核心依赖 `hello-agents` 以 CC BY-NC-SA 4.0（含非商业条款）分发，商用前请先读 [NOTICE](NOTICE)；
+> 第三方依赖全量清单见 [docs/third-party-licenses.md](docs/third-party-licenses.md)。

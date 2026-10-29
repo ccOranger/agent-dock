@@ -16,6 +16,7 @@
 | 跑评测与回归（改提示词/换模型/调 RAG 后的发布闸门） | `eval.py` |
 | 生产环境备份 | `backup.sh` |
 | 发布前校验 / 离线包 / 打 tag | `release.py` |
+| 生成 / 校验第三方依赖许可证清单 | `license_report.py` |
 
 > 后端相关的 Python 脚本（`rebuild_and_seed.py`、`seed_data.py`、`verify_schema.py`、`cleanup_traces.py`）**统一在 `backend` 目录下执行**，因为它们通过 `Settings(env_file=".env")` 读取配置，`.env` 按工作目录解析。`init_db.py` 是例外：它直接读进程环境变量 `DATABASE_URL`。
 
@@ -311,6 +312,25 @@ python scripts/release.py tag --push
 - `check` 会校验 `CHANGELOG.md` 顶部版本与 `package.json`、`pyproject.toml`、`app/main.py`、`packages/shared` 完全一致。
 - `tag` 只有显式 `--push` 才会推送到 origin；`--force` 会覆盖已存在的同名 tag，慎用。
 - `bundle` 需要本机 Docker；`--no-build` 只导出已有镜像，`--out` 可改输出目录（默认 `dist/`）。
+
+### license_report.py
+
+**作用**：生成 `docs/third-party-licenses.md`（第三方依赖许可证清单），并可在发布前做白名单校验。
+Python 侧枚举 `backend/.venv` 里实际安装的发行版（含传递依赖，排除 `node_modules` 里被误认的 JS 包），
+Node 侧读 `package-lock.json` 的 `packages`（自带 `license` 与 `dev` 标记，因此能区分是否随镜像分发）。
+
+**执行步骤**（仓库根目录，必须用后端虚拟环境跑，否则扫不到 Python 依赖）：
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\license_report.py           # 重新生成清单
+.\backend\.venv\Scripts\python.exe scripts\license_report.py --check  # 只校验，有未确认项时退出码 1
+```
+
+**注意事项**：
+
+- 白名单是 MIT / BSD / Apache-2.0 / ISC / PSF / MPL-2.0 / 0BSD / Unlicense 等宽松许可；**白名单之外一律拦下**，不默认“大概是 MIT”。
+- 输出文件勿手改，依赖变动后重跑即可；CI 的 `audit` job 会跑 `--check`（失败只告警，见 `.github/workflows/ci.yml`）。
+- 待确认项的处置结论记在 `docs/open-source-release.md` 的 B4，目前唯一待确认项是 `hello-agents`（CC BY-NC-SA 4.0）。
 
 ### eval.py
 

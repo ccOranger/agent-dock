@@ -3,8 +3,8 @@
 > 目标：把当前仓库整理成"陌生人 30 分钟内能跑起来"的开源项目。
 > 关联文档：[产品定位](./positioning.md)、[开发清单](./development-checklist.md)。
 > 最近一次实检：**2026-10-29**（版本号已统一为 **0.2.0**；本地 `release.py check` 0 失败；`ruff check app tests` 通过；
-> `pytest -q --basetemp=.pytest_tmp` → 629 passed / 3 skipped；两端 `npm run build` 通过；CI 已加 `docker` job；
-> 66 个 Markdown 内链 0 坏链）。
+> `pytest -q --basetemp=.pytest_tmp` → 629 passed / 3 skipped；两端 `npm run build` 通过；CI 已加 `docker` / `audit` job；
+> 依赖许可证已扫描并入库：[third-party-licenses.md](third-party-licenses.md)；66 个 Markdown 内链 0 坏链）。
 > 勾选口径：`[x]` = 已在代码/仓库/CI 中验证；`[ ]` = 未做或不满足。
 
 ## 0. 发布目标
@@ -22,9 +22,9 @@
 | # | 阻塞项 | 现状 |
 |---|---|---|
 | B1 | ~~默认分支与发布版本一致~~ **已清零** | 2026-10-29 已将 `main` 快进到发布提交（含 RBAC、数据分析、人工接管、截图与 GIF）；之前 `main` 落后 9 个提交 / 103 个文件 |
-| B2 | **仓库仍为私有** | `https://github.com/ccOranger/smart-cs` 返回 404；转公开前需确认最终归属（个人号 / 组织）与仓库名，并同步 README 徽章、克隆地址与 issue 模板里的链接 |
+| B2 | **仓库仍为私有** | `https://github.com/ccOranger/smart-cs` 返回 404；转公开前需确认最终归属（个人号 / 组织）与仓库名，并同步 README 徽章、克隆地址与 issue 模板里的链接；**另需先定下 B4 的 `hello-agents` 许可处置**（CC BY-NC-SA 4.0 决定项目能不能商用） |
 | B3 | ~~CI 缺镜像构建~~ **已补** | `ci.yml` 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，分层缓存走 gha 且各用一个 scope；PR 上就能暴露 Dockerfile 与前端产物问题（待首次 Actions 运行确认） |
-| B4 | **依赖许可证与漏洞扫描** | 无第三方许可证清单，`pip-audit` / `npm audit` 未接入 CI，`SECURITY.md` 无"已知问题"段落。**2026-10-29 实测**：`npm audit` 原有 7 个漏洞，已升 `echarts` 到 6.1 修掉运行时 XSS，剩 2 个（1 moderate / 1 high）均在 devDependencies（vitest / esbuild 链），需随 vitest 5 一并升级并记入 `SECURITY.md` |
+| B4 | **依赖许可证与漏洞扫描** | **已扫描，剩 1 个非商业依赖待决** | 2026-10-29 新增 `scripts/license_report.py` 与 [第三方许可证清单](third-party-licenses.md)：Python 188 个发行版 + Node 274 个包（生产 87 个），除 `hello-agents 0.2.9` 为 **CC BY-NC-SA 4.0**（含非商业条款）外全部为宽松许可，处置见 §2。CI 新增 `audit` job（`pip-audit` + `npm audit --omit=dev` + 许可证白名单，目前观察模式）。`npm audit --omit=dev` **0 告警**；全量 6 项均在 devDependencies（`vitest` 2→5 / `vite` 5→8 大版本），已记入 `SECURITY.md` |
 | B5 | ~~`docs/architecture.md` 缺失~~ **已补** | 新增 [架构说明](architecture.md)：组件拓扑、启动关闭、一轮对话链路、场景路由、上下文工程、记忆生命周期、RAG、MCP、鉴权限流、追踪模型、数据层、前端、扩展点、明确边界；README 文档表已挂链，`release.py` 必备文件清单已纳入 |
 | B6 | **Release 实体未发布** | tag 需重打为 `v0.2.0`（原 `v0.1.0` 指向旧提交，与当前内容不符）；CHANGELOG 已写，但 GitHub Release 正文、置顶路线图 issue、Discussions / 支持入口都还没有 |
 
@@ -33,8 +33,9 @@
 ## 2. 法务与品牌
 
 - [x] 许可证：核心 Apache-2.0（`LICENSE`）。
-- [x] `NOTICE`（第三方声明位，当前只写本项目版权）。
-- [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）：当前 requirements 与前端依赖均为 MIT/BSD/Apache 类，但**没有正式扫描记录**。
+- [x] `NOTICE`（第三方声明位）：列出许可证清单的生成方式与唯一需单独说明的依赖 `hello-agents`（CC BY-NC-SA 4.0）。
+- [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）：2026-10-29 已用 `scripts/license_report.py` 扫描（Python 188 个发行版、Node 274 个包 / 生产 87 个），清单见 [third-party-licenses.md](third-party-licenses.md)。**发现 1 项不兼容**：核心框架 `hello-agents 0.2.9` 为 **CC BY-NC-SA 4.0**（非商业 + 相同方式共享），与 Apache-2.0 项目直接冲突，已在 `NOTICE` 与 README 许可证段声明。
+  - [ ] 待决（三选一，定之前不建议转公开）：① 向上游 [jjyaoao/HelloAgents](https://github.com/jjyaoao/HelloAgents) 确认能否改用宽松许可或取得商用授权；② 把该依赖换成自研编排层（涉及 40 处引用：`SimpleAgent` / `HelloAgentsLLM` / `ToolRegistry` / `MemoryTool` / `RAGTool` / `MCPTool`）；③ 保持依赖但把产品定位明确收窄为非商业用途。
 - [x] 产品名：对外 **AgentDock**；仓库名与代码代号保留 `smart-cs`（Compose 项目名、包名不变，避免已有数据卷失联）。
 - [x] 对外文案无真实客户名、内部系统名、真实域名：`docs/api.md`、`docs/configuration.md`、`docs/updates/23-license-edition.md` 里的客户名均为"某某科技有限公司"占位；截图抽查（嵌入挂件、数据分析页）无客户信息、无合同号、无真实域名。
   - [x] 截图复核：`06-admin-usage.png`、`08-admin-license.png` 对应页面（用量报表、授权与版本）已下线，旧图已删除；
@@ -106,7 +107,7 @@
 - [x] `TRUSTED_PROXIES` 说明：反向代理后必须配置，否则限流按直连 IP。
 - [x] `/docs`、`/redoc`、`/openapi.json` 可用 `API_DOCS_ENABLED` 关闭；生产叠加 `docker-compose.prod.yml` 默认 `false`。
 - [x] `TRACE_STORE_PAYLOAD` 默认值改为 `false`（开源默认不把客户工具入参落库，排障时显式打开）。
-- [ ] 依赖漏洞扫描（`pip-audit`、`npm audit`）并入 CI，已知问题记录到 `SECURITY.md`。
+- [x] 依赖漏洞扫描并入 CI：`.github/workflows/ci.yml` 的 `audit` job 跑 `pip-audit -r backend/requirements.txt`、`npm audit --omit=dev` 与许可证白名单校验（目前 `continue-on-error` 观察模式）；已知问题记入 `SECURITY.md`「依赖漏洞与许可证」。
 
 ## 8. 质量与 CI
 
@@ -170,6 +171,7 @@ git checkout main && git pull --ff-only
 # 2. 发布前全量校验（B3/B4 补完后再跑一次）
 cd backend && ruff check app tests && pytest -q --basetemp=.pytest_tmp
 cd .. && python scripts/release.py check
+backend/.venv/bin/python scripts/license_report.py --check   # 依赖变动后先重跑清单，再校验白名单
 
 # 3. 打 tag 并推送（已打过则跳过；改版本时用 tag --push）
 python scripts/release.py tag --push

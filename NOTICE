@@ -1,4 +1,28 @@
-smart-cs
+smart-cs（对外名称 AgentDock）
 Copyright 2026 The smart-cs Authors
 
 This product includes software developed by the smart-cs contributors.
+
+本仓库自有代码以 Apache License 2.0 发布，全文见 LICENSE。
+
+## 第三方组件
+
+构建与运行时会安装大量第三方 Python / Node 包，其许可证清单由脚本生成，**以清单为准，勿手改**：
+
+```bash
+backend/.venv/bin/python scripts/license_report.py    # Windows: backend\.venv\Scripts\python.exe
+```
+
+产物：[docs/third-party-licenses.md](docs/third-party-licenses.md)。清单只收录宽松许可（MIT / BSD / Apache-2.0 /
+ISC / PSF / MPL-2.0），白名单之外的包会在 `--check` 模式下被拦下并要求逐项确认。
+
+PostgreSQL / Qdrant / Redis 等以独立服务方式使用，不随本仓库分发，按各自许可证使用。
+
+## 需要单独说明的依赖
+
+- **hello-agents 0.2.9** —— CC BY-NC-SA 4.0（署名—非商业性使用—相同方式共享），
+  上游：https://github.com/jjyaoao/HelloAgents 。
+  本项目以库的形式调用该框架（未修改其源码），但其许可含**非商业条款**：以此为商业用途提供服务或分发产品时，
+  需自行向上游取得授权，或替换该依赖。本项目自有代码的 Apache-2.0 授权不改变第三方依赖自身的许可条件。
+
+本文件仅作事实性声明，不构成法律意见；对外分发前请自行评估。

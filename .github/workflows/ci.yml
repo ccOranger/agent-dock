@@ -87,3 +87,40 @@ jobs:
 
       - name: Inspect image
         run: docker image inspect smart-cs/${{ matrix.image }}:ci --format '{{.Id}} {{.Size}}'
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    # 观察模式，不阻塞合并：前端 devDependencies 的 vitest / vite 链与 hello-agents 的许可问题
+    # 都不是一天能清掉的（见 SECURITY.md「依赖漏洞与许可证」）。基线稳定后删掉 continue-on-error。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip install -r backend/requirements-dev.txt
+
+      - name: pip-audit (requirements.txt)
+        run: pip-audit -r backend/requirements.txt
+
+      # 白名单校验失败只告警：清单本身要先进仓库，处置结论记在 docs/open-source-release.md 的 B4
+      - name: License whitelist
+        run: python scripts/license_report.py --check || echo "::warning::存在未确认的许可证，见 docs/third-party-licenses.md"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # 只看随镜像分发的依赖；devDependencies 不进产物，单独在 SECURITY.md 记录
+      - name: npm audit (prod only)
+        run: npm audit --omit=dev --audit-level=high

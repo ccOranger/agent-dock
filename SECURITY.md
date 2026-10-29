@@ -4,7 +4,8 @@
 
 | 版本 | 安全更新 |
 |---|---|
-| 0.1.x | 支持 |
+| 0.2.x | 支持 |
+| 0.1.x | 仅在 0.2.x 发布前提供修复 |
 | < 0.1 | 不保证 |
 
 ## 报告漏洞
@@ -24,6 +25,19 @@
 - SSE、日志、链路追踪中的敏感数据泄露
 - 文档上传、解析、RAG 检索链路的注入与拒绝服务
 - 依赖链与容器镜像漏洞
+
+## 依赖漏洞与许可证
+
+- **扫描方式**：CI 的 `audit` job 跑 `pip-audit -r backend/requirements.txt`、`npm audit --omit=dev`，
+  并用 `scripts/license_report.py --check` 校验许可证白名单。该 job 目前是**观察模式**（`continue-on-error`），
+  结论看 job 日志与 annotation。
+- **许可证清单**：[docs/third-party-licenses.md](docs/third-party-licenses.md)，由 `scripts/license_report.py` 生成，勿手改。
+- **已知问题**（截至 2026-10-29）：
+  - 前端**开发依赖**在当前 `package-lock.json` 上有 6 项 `npm audit` 告警（2 critical / 1 high / 3 moderate），
+    全部落在 `vitest` 2.1.9 → 5、`vite` 5.4.x → 8 的升级链上（`tinypool` / `esbuild` / `@vitest/mocker` / `vite-node`
+    随主包一起动）；修复需要跨大版本升级，属专项任务。**生产依赖 0 项告警**，镜像产物不受影响。
+  - 核心依赖 `hello-agents` 以 **CC BY-NC-SA 4.0**（含非商业条款）分发，与本项目的 Apache-2.0 分发口径不一致；
+    本项目以库的形式调用、未修改其源码，商用场景需自行取得上游授权或替换该依赖。详见 [NOTICE](NOTICE)。
 
 ## 部署安全基线
 
