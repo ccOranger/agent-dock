@@ -47,6 +47,7 @@ REQUIRED_FILES = (
     "scripts/backup.sh",
     "docs/quickstart.md",
     "docs/architecture.md",
+    "docs/third-party-licenses.md",
     "docs/deployment.md",
     "docs/demo-script.md",
 )
