@@ -24,7 +24,7 @@
 | B1 | ~~默认分支与发布版本一致~~ **已清零** | 2026-10-29 已将 `main` 快进到发布提交（含 RBAC、数据分析、人工接管、截图与 GIF）；之前 `main` 落后 9 个提交 / 103 个文件 |
 | B2 | **仓库仍为私有** | `https://github.com/ccOranger/smart-cs` 返回 404；转公开前需确认最终归属（个人号 / 组织）与仓库名，并同步 README 徽章、克隆地址与 issue 模板里的链接 |
 | B3 | ~~CI 缺镜像构建~~ **已补** | `ci.yml` 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，分层缓存走 gha 且各用一个 scope；PR 上就能暴露 Dockerfile 与前端产物问题（待首次 Actions 运行确认） |
-| B4 | **依赖许可证与漏洞扫描** | 无第三方许可证清单，`pip-audit` / `npm audit` 未接入 CI，`SECURITY.md` 无"已知问题"段落。**2026-10-29 实测**：`npm audit` 报 7 个漏洞（4 moderate / 1 high / 2 critical，均在前端构建依赖链），需处置后记入 `SECURITY.md` |
+| B4 | **依赖许可证与漏洞扫描** | 无第三方许可证清单，`pip-audit` / `npm audit` 未接入 CI，`SECURITY.md` 无"已知问题"段落。**2026-10-29 实测**：`npm audit` 原有 7 个漏洞，已升 `echarts` 到 6.1 修掉运行时 XSS，剩 2 个（1 moderate / 1 high）均在 devDependencies（vitest / esbuild 链），需随 vitest 5 一并升级并记入 `SECURITY.md` |
 | B5 | ~~`docs/architecture.md` 缺失~~ **已补** | 新增 [架构说明](architecture.md)：组件拓扑、启动关闭、一轮对话链路、场景路由、上下文工程、记忆生命周期、RAG、MCP、鉴权限流、追踪模型、数据层、前端、扩展点、明确边界；README 文档表已挂链，`release.py` 必备文件清单已纳入 |
 | B6 | **Release 实体未发布** | tag 需重打为 `v0.2.0`（原 `v0.1.0` 指向旧提交，与当前内容不符）；CHANGELOG 已写，但 GitHub Release 正文、置顶路线图 issue、Discussions / 支持入口都还没有 |
 

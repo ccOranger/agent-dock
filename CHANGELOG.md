@@ -47,6 +47,7 @@
 ### 修复
 
 - CI 四个失败用例：三个断言工具/错误正文的用例未显式打开 `TRACE_STORE_PAYLOAD`（默认改为 `false` 后只存长度摘要），已补 `monkeypatch`；`test_stream_attaches_visitor_identity` 原先会连真实 PostgreSQL（本地有库才通过），已 mock `VisitorRepo.get_or_create`。
+- **echarts 5.6 → 6.1**：修复 `GHSA-fgmj-fm8m-jvvx`（数据可视化 XSS）；按需引入路径（`echarts/core`、`charts`、`components`、`renderers`）与 `EChartsCoreOption` 类型不变，`npm audit` 由 7 个漏洞降为 2 个（剩余均在 devDependencies：vitest / esbuild 链）。
 
 ### 文档
 
