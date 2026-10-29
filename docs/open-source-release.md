@@ -2,8 +2,8 @@
 
 > 目标：把当前仓库整理成"陌生人 30 分钟内能跑起来"的开源项目。
 > 关联文档：[产品定位](./positioning.md)、[开发清单](./development-checklist.md)。
-> 最近一次实检：**2026-10-27**（本地 `release.py check` 0 失败；`ruff check app tests` 通过；
-> `pytest -q --basetemp=.pytest_tmp` → 599 passed / 3 skipped；两端构建在 CI 绿；CI 已加 `docker` job）。
+> 最近一次实检：**2026-10-29**（本地 `release.py check` 0 失败；`ruff check app tests` 通过；
+> `pytest -q --basetemp=.pytest_tmp` → 646 passed / 3 skipped；两端构建在 CI 绿；CI 已加 `docker` job）。
 > 勾选口径：`[x]` = 已在代码/仓库/CI 中验证；`[ ]` = 未做或不满足。
 
 ## 0. 发布目标
@@ -108,7 +108,7 @@
 
 ## 8. 质量与 CI
 
-- [x] 后端：`ruff check app tests` + `pytest`（本地 599 passed / 3 skipped；CI Linux 上跳过 Windows 专用用例）。
+- [x] 后端：`ruff check app tests` + `pytest`（本地 646 passed / 3 skipped；CI Linux 上跳过 Windows 专用用例）。
 - [x] 前端：两端 `npm run build` 通过（仅有 chunk 体积告警）。
 - [x] GitHub Actions：backend job（Python 3.12，ruff + pytest）、frontend job（Node 20，矩阵构建两端）、docker job（backend / web 两个镜像 `push: false`，待首次运行确认）。
 - [x] 版本与锁文件：`requirements.txt` 版本策略、仓库根 `package-lock.json`（npm workspaces）入库；`python scripts/release.py check` 校验六处版本一致。
@@ -152,7 +152,7 @@
 ## 12. v0.1 明确不做
 
 - 多租户与租户隔离（只预留 `tenant_id`）。
-- SSO、RBAC、计费、用量账单。
+- SSO、计费、用量账单（RBAC 已落地：人员-角色-菜单矩阵，见 `app/core/rbac.py`）。
 - 可视化 DAG 编排、插件市场、移动端。
 - 托管 SaaS 与在线试用环境。
 - 自动化升级（只提供手动迁移脚本）。

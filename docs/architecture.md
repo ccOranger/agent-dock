@@ -202,7 +202,7 @@ MCP 链路的三个关键约束（都是踩过坑之后的实现）：
 
 | | `request_traces` | `chat_events` + `chat_usage_daily` |
 |---|---|---|
-| 目的 | 排障：这轮慢在哪、为什么转人工 | 记账：这轮用了多少 token、谁在用 |
+| 目的 | 排障：这轮慢在哪、为什么转人工 | 记账：这轮谁在用、转没转人工、有没有出错 |
 | 采样 | `TRACE_SAMPLE_RATE`；转人工 / 异常 / 工具出错始终全量 | 不采样，全量 |
 | 开关 | `TRACE_ENABLED` | 始终开启，失败只告警 |
 | 客户数据 | 工具入参/返回受 `TRACE_STORE_PAYLOAD` 控制（**默认关闭**） | 只存字符数与 token，不存正文与 IP |
@@ -216,13 +216,17 @@ MCP 链路的三个关键约束（都是踩过坑之后的实现）：
 **响应头与落库必须是同一个 id**，否则按头里的 id 永远查不到链路（这个缺陷由评测执行器发现并修复）。
 
 用量口径：拿不到供应商 usage 时按 `cl100k_base`（未装 tiktoken 则按 CJK 1 字 ≈ 1 token）估算并标记 `tokens_estimated`，
-`TOKEN_ESTIMATE_FACTOR` 供按账单整体校准；日聚合 `chat_usage_daily(day, scene_code, integration_id)` 长期保留作账目依据。
+`TOKEN_ESTIMATE_FACTOR` 供整体校准；日聚合 `chat_usage_daily(day, scene_code, integration_id)` 长期保留作统计依据。
+
+**对外只出请求数，不出 token**：运营台「数据分析」（`/admin/analytics/outcomes`）只输出 `day / requests / handoffs / errors`
+与六个比率（全量三率问日聚合、链路三率问 `request_traces`），token 仍照写入库，等接入供应商真实 usage 再决定是否展示。
+原「用量报表」页与 `/admin/usage/*`（含 CSV 导出）已并入该页并下线，见 [U25](updates/25-analytics-outcomes.md)。
 
 ## 11. 数据层
 
 | 存储 | 内容 | 备注 |
 |---|---|---|
-| PostgreSQL | 业务表：`staff_users` / `customer_users` / `scenes` / `scene_agents` / `agents` / `tools` / `knowledge_bases` / `documents` / `sessions` / `messages` / `memories` / `tickets` / `canned_scripts` / `integrations` / `integration_keys` / `integration_scenes` / `visitors` / `request_traces` / `chat_events` / `chat_usage_daily` / `eval_runs` / `audit_logs` / `schema_meta` | 新库结构唯一来源是 `scripts/init_db.sql`（共 23 张表） |
+| PostgreSQL | 业务表：`staff_users` / `customer_users` / `roles` / `user_roles` / `role_permissions` / `scenes` / `scene_agents` / `agents` / `tools` / `knowledge_bases` / `documents` / `sessions` / `messages` / `memories` / `tickets` / `canned_scripts` / `integrations` / `integration_keys` / `integration_scenes` / `visitors` / `request_traces` / `chat_events` / `chat_usage_daily` / `eval_runs` / `audit_logs` / `schema_meta` | 新库结构唯一来源是 `scripts/init_db.sql`（共 26 张表） |
 | Qdrant | 记忆与知识库向量，collection 由 `QDRANT_COLLECTION` 指定 | 命名空间按知识库/主体隔离 |
 | Redis | 限流计数桶、并发槽 | 前缀 `rl:chat:*`，故障 fail-open |
 | 磁盘 | `backend/data/doc_archives/`（原文）、`knowledge_bases/`、`memory_data/`（hello_agents 本地持久化） | 生产用 `DATA_ROOT` 挂载 |

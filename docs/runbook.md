@@ -235,11 +235,28 @@ docker compose stop backend web
 | 评测跑两次指标不一致 | 先比对两份报告的用例集指纹：不同就是用例变了（报告会自动标「不可比」）；相同则看 `--concurrency`（撞模型限流会出传输失败）、`TRACE_SAMPLE_RATE`（<1 时 RAG 指标落 `unobserved`）、以及登录客户身份跑时记忆会跨次累积（改用开匿名的场景或专用接入方 Key） |
 | `--baseline latest` 报「没有同用例集且场景匹配的历史运行」 | 三种可能：上一次跑了 `--no-db`（不落库）、换了场景、用例集改过判定字段导致指纹变了。可用 sidecar 文件当离线基线：`--baseline reports/eval-<timestamp>.json` |
 | 评测退出码 2 | 不是故障，是**闸门生效**：相对基线有指标超出容差（比率类下降 > 2 个百分点、耗时/token 上升 > 15%）。回滚变更，或在发布说明里逐项解释（含配置变动，报告解释不了配置造成的漂移） |
+| 后台登录后菜单少了几个模块 | 菜单按 RBAC 的 `read` 授权显隐（[spec §12.2](spec.md#122-rbac-权限矩阵) / [U26](updates/26-rbac-menu-matrix.md)）：在「角色与权限」给该账号的角色勾上对应模块；`admin` 是超级角色、不受矩阵限制。直接改 URL 也会被路由守卫送回第一个可读模块。授权后需刷新页面（菜单取自 `/auth/me` 缓存，接口是实时生效的） |
+| 授权页显示 community / 功能位未解锁 | 看「授权与版本」的失败原因（文件缺失、签名不符、指纹不符、已过期）；校验失败只降级不阻断，修好文件后在页面点「重新加载」，或 `POST /api/v1/admin/license/reload`。`DEPLOYMENT_ID` 变更会导致指纹不符，需重新签发 |
 
 ## 6. 数据维护与重建策略
 
+### 6.0 升级存量库（保留数据）
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.migrate --check     # 只读：当前版本与待执行增量
+.\.venv\Scripts\python.exe -m app.migrate --dry-run   # 事务内试跑后回滚
+.\.venv\Scripts\python.exe -m app.migrate --backup    # 先 pg_dump 再执行
+```
+
+- 增量文件在 `scripts/migrations/NNNN_*.sql`，按序号顺序执行并写入 `schema_migrations`；已执行文件被改动（checksum 不符）会直接中止。
+- 空库无需手工建表：`python -m app.migrate` 会改用 `init_db.sql` 一次建到最新结构（当前 `SCHEMA_VERSION=10`）。
+- 跳过迁移直接启动会被 `schema_meta.version` 断言拦下（提示「请执行数据库迁移」），不会带病运行。
+- 容器内：`docker compose run --rm backend python -m app.migrate`；或设 `MIGRATE_ON_START=true` 让入口脚本在启动时先迁移（与 `INIT_ON_START` 互不影响）。
+
 - `memories` / `documents` 仅为 MemoryTool / RAGTool 的归档镜像，**运行时真相在 Qdrant（向量）+ Neo4j（语义，若启用）**；删文档会先清 Qdrant 向量再删 DB。
-- **开发阶段 schema 重置**（本项目 schema 频繁变动，如 `users` 拆为 `staff_users`/`customer_users`、工单迁到 `tickets`）：改 ORM 后无需手写增量迁移，直接全量重建（⚠️ 清空业务数据，仅限开发）：
+- **开发阶段 schema 重置**（仅限本地丢弃数据时）：直接全量重建比逐个跑迁移快，
+  但它只适用于“数据可以不要”的环境——**任何要保留数据的库都必须走迁移**（见 6.0）：
   ```powershell
   cd backend; .\.venv\Scripts\python.exe ..\scripts\rebuild_and_seed.py
   # DROP 旧表（含遗留 users）→ init_db.sql 建表 → 灌种子；单往返 simple query 适配云库代理
@@ -250,6 +267,10 @@ docker compose stop backend web
   | 脚本 | 作用 |
   |------|------|
   | `init_db.sql` | 全量 schema（已去除 `uuid-ossp`/`pgvector` 依赖，UUID 用内置 `gen_random_uuid()`） |
+  | `init_db.py` | 执行 `init_db.sql` 建表（幂等；**不写 `schema_migrations`**，不能替代迁移） |
+  | `migrations/NNNN_*.sql` | 存量库增量迁移，按序号顺序执行；已上线文件不得修改（checksum 校验） |
+  | `python -m app.migrate` | 迁移执行器：`--check`（只读比对）/ `--dry-run`（事务内试跑后回滚）/ `--backup`（先 `pg_dump`） |
+  | `verify_schema.py` | 逐表逐列比对 `init_db.sql` 与 ORM，并校验 `schema_meta.version` |
   | `init_db.sh` | 本机一键建库 |
   | `seed_data.py` | 种子定义：初始人员/客户/Agent/工具/示例文档/MCP 配置（不建表；幂等；演示模式下顺带把 `docs/demo` 原文写成向量） |
   | `rebuild_and_seed.py` | 开发阶段全量重建 + 灌种子 + 补演示知识向量（云库友好） |
@@ -257,6 +278,8 @@ docker compose stop backend web
   | `backup.sh` | 生产备份：pg_dump + Qdrant 快照 + 业务数据 + Redis RDB（带保留期） |
   | `cleanup_traces.py` | 清理过期链路（见下） |
   | `eval.py` | 评测与回归：走真实 HTTP 链路跑用例集，出 `reports/eval-*.md`/`.json` 并写 `eval_runs`（见 6.1） |
+  | `backfill_scene_canned.py` | 存量库补齐场景身份话术（幂等，只补缺失不覆盖运营改过的行） |
+  | `release.py` | 发布前校验（版本/必备文件/仓库卫生，可带 ruff+pytest+前端构建）、导出离线镜像包、打 tag |
   | `start_all.ps1` / `start_all.bat` / `stop_all.ps1` | 一键起停三服务 |
 - `request_traces`（请求链路）按轮次增长、带 spans 时间线，需设保留期：`python scripts/cleanup_traces.py`（默认取 `TRACE_RETENTION_DAYS`，可 `--days N` / `--dry-run`）；建议挂 cron 每日执行。
 - 工具入参/返回含客户数据：合规敏感场景设 `TRACE_STORE_PAYLOAD=false`（只留类型与字节数，不存原文）。

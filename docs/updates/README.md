@@ -29,12 +29,13 @@
 | U17 | IT Helpdesk 场景包与包启停（历史） | 第二个场景包（3 Agent + 4 工具 + 3 知识库）；manifest `features`、包资产归属与运营台整体启停；场景包机制已移除，本文仅作记录 | [17-it-helpdesk-pack.md](17-it-helpdesk-pack.md) |
 | U18 | 接入方与 Key 归属（integrations） | 服务端 Key 从场景迁到接入方：多 Key 轮换、场景授权、访客按接入方命名空间隔离；移除场景 rotate-key | [18-integration-keys.md](18-integration-keys.md) |
 | U19 | 匿名接入的接入方归属 | `integrations.public_code` + `data-integration` / `X-Integration-Code`：匿名嵌入也能确定接入方，访客写入 `integration_id` | [19-anonymous-integration-attribution.md](19-anonymous-integration-attribution.md) |
-| U20 | 单租户降级与自定义埋点 | 后台隐藏接入方入口、默认接入方授权全部场景、嵌入不再带 `data-integration`；`ChatRequest.ext` + `chat_events` 全量埋点（预留 `tenant_id` / `total_tokens`） | [20-single-tenant-degradation.md](20-single-tenant-degradation.md) |
+| U20 | 单租户降级与自定义埋点 | 后台隐藏接入方入口、默认接入方授权全部场景、嵌入不再带 `data-integration`；`ChatRequest.ext` + `chat_events` 全量埋点（`tenant_id` 预留；`total_tokens` 自 U22 起写入估算值） | [20-single-tenant-degradation.md](20-single-tenant-degradation.md) |
 | U21 | 场景身份话术、运行参数与登录人配额 | 身份/能力话术按场景复制（可改或改查知识库）；`scenes.runtime_config` 配检索/历史/场景额度；`created_by` + `staff_users.quota` 限创建数量，超限 3006 | [21-scene-identity-runtime-quota.md](21-scene-identity-runtime-quota.md) |
 | U22 | 用量计量与报表（页面已下线） | token 估算 + 与链路采样解耦的采集、`chat_usage_daily` 日聚合；原 `/admin/usage` 汇总/CSV 与后台页已并入 U25 并删除 | [22-usage-metering.md](22-usage-metering.md) |
 | U23 | License 与版本分层 | 离线 Ed25519 授权校验（只降级不阻断）、5 个功能位与 `require_feature()` 挂载点、`DEPLOYMENT_ID` 指纹、`/admin/license` 与后台授权页 | [23-license-edition.md](23-license-edition.md) |
 | U24 | 评测与回归 | 用例集进 Git + 真实 HTTP 链路执行器、服务端链路回读、分母纪律与用例集指纹、基线 diff 与退化退出码、`eval_runs` 运行记录（schema v8） | [24-eval-regression.md](24-eval-regression.md) |
 | U25 | 数据分析（成效指标 + 请求量） | 新菜单 `analytics` + `/admin/analytics/outcomes`：全量三率 + 每日请求量（日聚合，可对账）与链路三率（traces，标采样口径），空数据不伪装 0%；并入原用量报表的日统计、移除 token 展示与该页，零 schema 变更 | [25-analytics-outcomes.md](25-analytics-outcomes.md) |
+| U26 | 后台 RBAC（角色 × 菜单读写矩阵） | 17 个菜单模块 × `read`/`write` 两级授权：`roles` / `user_roles` / `role_permissions` 三表（schema v10）、`MENU_MODULES` 单一事实源、`require_perm` + 前端 `meta.perm` 同源、admin 旁路、坐席默认授权不回退、零 DDL 扩展新模块 | [26-rbac-menu-matrix.md](26-rbac-menu-matrix.md) |
 
 ## 与三份主文档的关系
 

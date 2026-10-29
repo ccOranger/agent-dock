@@ -41,6 +41,7 @@
 - `docs/configuration.md`：补 `API_DOCS_ENABLED`，更新 `TRACE_STORE_PAYLOAD` 默认值。
 - `docs/open-source-release.md`：按实检结果重写，新增「当前阻塞项」与「维护者发布动作」。
 - `docs/productization-plan.md`：6 处本机绝对路径链接改为仓库相对路径。
+- **补记 [U26 后台 RBAC](docs/updates/26-rbac-menu-matrix.md)**：角色 × 菜单读写矩阵的设计取舍、三表模型与 0010 迁移、`require_perm` / 前端 `meta.perm` 的判定链路、7 个接口与默认授权、边界（不做资源级/动作级）。同步纠正 spec §12.2 中“人员经 `staff_users.roles` 绑多角色”的错误描述（实为 `user_roles` 关联表）。
 
 ## [0.1.0] - 2026-10-27
 

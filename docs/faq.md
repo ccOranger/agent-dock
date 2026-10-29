@@ -214,6 +214,17 @@ Windows 开了 Clash 一类系统代理时，httpx 会把 `http://127.0.0.1:6333
 - `TRACE_SAMPLE_RATE < 1` 时正常应答会被采样丢弃，转人工/异常/工具报错轮始终保留；
 - 固定话术命中的轮次没有 `route` 事件，只有 `canned.script` span，属正常。
 
+### 原来的「用量报表」页去哪了 / 后台为什么看不到 token
+
+- 请求数与每日趋势已并入「数据分析」（`/analytics`）：全量三率 + 每日请求量来自 `chat_usage_daily`（无采样偏差、可对账），链路三率来自 `request_traces`；
+- token 是框架估算值（`hello_agents` 不回传供应商真实 usage），口径上不能当账单，因此接口与页面都不输出；库内 `chat_events.total_tokens` / `chat_usage_daily.tokens` 仍照写，以后接入真实 usage 可复用；
+- `/admin/usage/*`（含 CSV 导出）已下线，需要日维度数据直接调 `GET /admin/analytics/outcomes`，取 `daily` 字段（`day / requests / handoffs / errors`，只含当天有请求的日期、不补零）。
+
+### 「问题解决率」为什么不是满意度
+
+解决率 = `(请求数 − 转人工 − 错误) / 请求数`，衡量的是**机器人自主把这一轮结束掉的比例**，不是用户评价；
+要满意度得接入评分或人工标注。分母为 0 时接口返回 `null`、页面显示「—」，不伪造成 0%。
+
 ## 数据与升级
 
 ### 怎么彻底重置数据？
@@ -227,14 +238,19 @@ docker compose up -d --build
 
 ### 升级后表结构不一致 / 缺列
 
-当前没有 Alembic 版本化迁移。升级步骤：
+表结构由自研的版本化增量迁移推进（不依赖 Alembic）：`scripts/migrations/NNNN_*.sql` + `schema_migrations` 记录表，
+升级后执行：
 
 ```bash
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
-$COMPOSE run --rm backend python ../scripts/init_db.py   # 幂等建表 + 增量列
+$COMPOSE run --rm backend python -m app.migrate --check   # 看当前版本与待执行迁移（有待执行时退出码 1）
+$COMPOSE run --rm backend python -m app.migrate           # 按编号顺序执行到当前 SCHEMA_VERSION
 ```
 
-开发环境可直接全量重建（会清空数据）：`python ../scripts/rebuild_and_seed.py`。
+- 空库不用迁移：`init_db.sql` 一次建到最新结构（当前 `SCHEMA_VERSION=10`）；
+- `python ../scripts/init_db.py` 只建表、**不记录已执行版本**，存量库不要用它代替迁移；
+- 迁移只向前、不回滚，跨版本回退要 `pg_restore` 到升级前备份（见 [部署 §5](deployment.md)）；
+- 开发/演示可直接全量重建（会清空数据）：`python ../scripts/rebuild_and_seed.py`。
 
 ### 怎么迁移到另一台机器？
 
@@ -247,8 +263,10 @@ $COMPOSE run --rm backend python ../scripts/init_db.py   # 幂等建表 + 增量
 
 ### 可以商用吗？
 
-核心采用 Apache-2.0，可商用与二次开发，需保留许可证与版权声明。企业版功能（RBAC 精细权限、审计查询、白标、评测管理、SSO）
-以私有包/镜像交付，需单独的实例年授权（授权文件只降级不阻断，见 [配置说明 3.15](configuration.md)）。
+核心采用 Apache-2.0，可商用与二次开发，需保留许可证与版权声明。企业版功能（审计查询、白标、评测管理、SSO，
+以及细分到场景/知识库/工单的资源级授权）以私有包/镜像交付，需单独的实例年授权
+（授权文件只降级不阻断，见 [配置说明 3.15](configuration.md)）。
+后台「角色与权限」的**菜单模块级**读写矩阵已在开源版提供（`app/core/rbac.py`，见 [U26](updates/26-rbac-menu-matrix.md)），不占企业功能位。
 
 ## 授权与版本
 

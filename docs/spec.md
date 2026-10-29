@@ -38,6 +38,11 @@
 | U19 | 匿名接入的接入方归属 | §4、§12 | [↗](updates/19-anonymous-integration-attribution.md) |
 | U20 | 单租户降级与自定义埋点（chat_events） | §4、§12 | [↗](updates/20-single-tenant-degradation.md) |
 | U21 | 场景身份话术、场景运行参数与登录人配额 | §4、§12、§13 | [↗](updates/21-scene-identity-runtime-quota.md) |
+| U22 | 用量计量（采集侧仍在，后台页已下线） | §4、§14 | [↗](updates/22-usage-metering.md) |
+| U23 | License 与版本分层（Ed25519、5 个功能位） | §12、§14 | [↗](updates/23-license-edition.md) |
+| U24 | 评测与回归（`eval_runs`、基线 diff） | §15、§16 | [↗](updates/24-eval-regression.md) |
+| U25 | 数据分析（成效指标 + 每日请求量，并入原用量报表） | §4、§14 | [↗](updates/25-analytics-outcomes.md) |
+| U26 | 后台 RBAC（角色 × 菜单读写矩阵） | §4、§12 | [↗](updates/26-rbac-menu-matrix.md) |
 
 > 接口清单以 [`api.md`](api.md) 为准（已同步全部实际端点与 SSE 事件）；部署/运维以 [`runbook.md`](runbook.md) 为准。
 
@@ -76,7 +81,7 @@
 | 后端服务名 | cs-backend |
 | 前端服务名 | cs-frontend |
 | 默认端口（后端） | 8000 |
-| 默认端口（前端） | 5173（开发） |
+| 默认端口（前端） | 5173（客户对话端）、5174（运营台，开发）；生产统一 `/` 与 `/admin/` |
 | API 前缀 | `/api/v1` |
 | 语言 | 中文（默认），预留 i18n |
 
@@ -88,37 +93,25 @@
 | chat | 对话流式接口 | Orchestrator + SimpleAgent |
 | memory | 四层记忆管理 | **MemoryTool** |
 | rag | 文档与检索 | **RAGTool** |
-| agents | 业务 Agent 独立开发 + 路由分发 | **SimpleAgent** + ToolRegistry |
+| agents | 业务 Agent 配置与路由分发（动态 Agent 为主 + 代码托管混合） | **SimpleAgent** + ToolRegistry |
 | tools | MCP 与自定义工具 | ToolRegistry + BaseTool |
-| admin | 系统管理与监控 | — |
+| admin | 系统管理、链路与成效分析、RBAC、授权 | — |
 
 ### 1.3 架构总览
 
 ```
-                       ┌─────────────────────────┐
-   用户消息 ──────────▶│     RouterAgent          │
-                       │  （路由 Agent，独立）    │
-                       │  • 轻量模型 gpt-4o-mini  │
-                       │  • 只做意图分类          │
-                       │  • 无业务工具            │
-                       └───────────┬─────────────┘
-                                   │ intent + agent_name + confidence
-                    ┌──────────────┼──────────────┬─────────────┐
-                    ▼              ▼              ▼             ▼
-        ┌───────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-        │KnowledgeAgent │ │  OrderAgent  │ │ComplaintAgent│ │  ...新增...  │
-        │  知识问答业务  │ │  订单服务业务 │ │  投诉处理业务  │ │              │
-        ├───────────────┤ ├──────────────┤ ├──────────────┤ ├──────────────┤
-        │独立 system_   │ │独立 system_  │ │独立 system_  │ │独立 system_  │
-        │prompt         │ │prompt        │ │prompt        │ │prompt        │
-        ├───────────────┤ ├──────────────┤ ├──────────────┤ ├──────────────┤
-        │tools:         │ │tools:        │ │tools:        │ │tools:        │
-        │ MemoryTool    │ │ MemoryTool   │ │ MemoryTool   │ │ ...          │
-        │ RAGTool       │ │ QueryOrder   │ │ CreateTicket │ │              │
-        │               │ │ ModifyOrder  │ │ Escalate     │ │              │
-        │               │ │ MCP订单工具  │ │              │ │              │
-        └───────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
-              独立开发        独立开发        独立开发        独立开发
+用户消息 ──▶ 解析 scene_code ──▶ 默认场景？
+                                │ 是 ──▶ default_assistant（代码托管，直连，不路由）
+                                │
+                                └─ 否 ──▶ 场景路由档案 router_mode
+                                             │ auto： RouterAgent 输出按主次排序的意图数组
+                                             ▼
+                       ┌──────────────┬──────────────┬────────────────┐
+                       ▼              ▼              ▼                ▼
+                DynamicAgent     DynamicAgent    default_assistant   ... 后台新建即生效
+                （后台配置）      （后台配置）     （兼做兜底）
+                       └──── Orchestrator 串行调度 ────┘
+                        上下文工程 → 记忆召回 → RAG 检索 → 工具调用 → 流式应答
 ```
 
 ### 1.4 多 Agent 三大核心约束
@@ -126,8 +119,8 @@
 | 约束 | 说明 |
 |------|------|
 | **路由 Agent 与业务 Agent 分离** | 路由 Agent 不加载任何业务工具，只做分类；业务 Agent 不含路由逻辑 |
-| **每个业务 Agent 独立成类** | 一个业务 = 一个 Python 类 = 一个文件，独立 Prompt + 独立工具集 |
-| **注册表驱动路由** | 路由结果通过字符串 `agent_name` 映射到具体类，新增业务只需注册 |
+| **业务 Agent 可独立配置** | 动态 Agent 在后台配置（提示词/工具/知识库/线索）；代码托管 Agent 一个业务一个类 |
+| **注册表驱动路由** | 路由结果通过字符串 `agent_name` 映射到生效 Agent（代码登记 + DB 动态合并） |
 
 ---
 
@@ -179,12 +172,14 @@ fastmcp>=2.0.0
 uv>=0.8.0
 python-dateutil>=2.8.2
 huggingface_hub>=0.25.0
+pyyaml>=6.0.0              # 场景包 manifest 解析（显式声明，不依赖传递依赖）
 
 # ============ 数据层 ============
 sqlalchemy[asyncio]==2.0.35
 # asyncpg 0.29.x 无 cp312/cp313 预编译 wheel（需本地 MSVC），0.30.0 起提供
 asyncpg>=0.30.0,<0.31
-alembic==1.13.2
+alembic==1.13.2            # 未启用：DDL 由 scripts/init_db.sql + migrations/NNNN_*.sql 手写维护
+pgvector==0.3.2            # 历史保留（部分旧代码仍 import），RAG/记忆向量实际存 Qdrant
 redis==5.0.8
 
 # ============ 鉴权 ============
@@ -220,13 +215,17 @@ testcontainers==4.8.2
     "pinia": "^2.2.4",
     "element-plus": "^2.8.4",
     "axios": "^1.7.7",
+    "dayjs": "^1.11.13",
     "markdown-it": "^14.1.0",
     "highlight.js": "^11.10.0",
-    "dayjs": "^1.11.13"
+    "nanoid": "^5.0.7",
+    "@cs/shared": "*"
   },
   "devDependencies": {
     "vite": "^5.4.8",
+    "@vitejs/plugin-vue": "^5.1.4",
     "typescript": "^5.6.2",
+    "vue-tsc": "^2.1.6",
     "eslint": "^9.11.1",
     "prettier": "^3.3.3",
     "vitest": "^2.1.2",
@@ -234,6 +233,10 @@ testcontainers==4.8.2
   }
 }
 ```
+
+> 上表为 `frontend/`（客户对话端 5173）。`admin-frontend/`（运营台 5174）不含 markdown-it / highlight.js / nanoid，
+> 另依赖 `@element-plus/icons-vue`（菜单与指标卡图标）与 `echarts`（仅「数据分析」的每日请求量折线图，按需注册组件）；
+> 两端的构建脚本相同：`vue-tsc --noEmit && vite build`。
 
 ### 2.4 环境变量（`.env.example`）
 
@@ -307,8 +310,7 @@ ROUTER_CONFIDENCE_THRESHOLD=0.5
 - 所有业务 Agent 必须继承 `BaseBusinessAgent`
 - 记忆一律通过 `MemoryTool`，知识库一律通过 `RAGTool`
 - 工具一律通过 `ToolRegistry.register_tool()`
-- 所有 Python 文件必须通过 `black` 和 `ruff` 检查
-- 提交前必须运行 `pre-commit run --all-files`
+- 所有 Python 文件必须通过 `ruff` 检查（`ruff check app tests`，E/F/I/W/UP/B，行宽 120）；提交前本地跑一遍与 pytest
 
 ---
 
@@ -319,78 +321,97 @@ smart-cs/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── main.py
+│   │   ├── main.py                       # FastAPI 装配、生命周期、/metrics
+│   │   ├── setup.py                      # 一次性初始化（建管理员 + 模型连通性自检）
+│   │   ├── migrate.py                    # python -m app.migrate 入口（实现在 core/migrate.py）
 │   │   ├── api/
-│   │   │   ├── deps.py
+│   │   │   ├── deps.py                   # current_user / require_staff / require_perm / require_admin / require_feature
+│   │   │   ├── params.py                 # 分页等公共查询参数
 │   │   │   └── v1/
-│   │   │       ├── router.py
-│   │   │       ├── auth.py
-│   │   │       ├── chat.py
+│   │   │       ├── router.py             # 汇总挂载
+│   │   │       ├── auth.py               # 人员/客户双登录、refresh、客户自助注册
+│   │   │       ├── chat.py               # /chat、/chat/stream（SSE）
 │   │   │       ├── sessions.py
 │   │   │       ├── memory.py
 │   │   │       ├── knowledge.py
-│   │   │       ├── admin.py              # Agent/MCP 管理
-│   │   │       ├── admin_inquiries.py    # 跨客户咨询 + CSV 导出
-│   │   │       ├── admin_tickets.py      # 工单增改查
-│   │   │       └── admin_traces.py       # 请求链路（只读）
+│   │   │       ├── public.py             # 嵌入端公开配置 + 访客签发
+│   │   │       ├── admin.py              # Agent / MCP / 自定义工具 / 旧 tools / metrics
+│   │   │       ├── admin_scenes.py       # 业务场景、接入配置、预览
+│   │   │       ├── admin_router.py       # 路由分发器只读
+│   │   │       ├── admin_inquiries.py    # 跨客户咨询
+│   │   │       ├── admin_takeover.py     # 人工接管队列与坐席操作
+│   │   │       ├── admin_tickets.py
+│   │   │       ├── admin_traces.py       # 请求链路（只读）
+│   │   │       ├── admin_analytics.py    # 数据分析：六个比率 + 每日请求量（U25）
+│   │   │       ├── admin_canned_scripts.py
+│   │   │       ├── admin_integrations.py # 接入方与 Key
+│   │   │       ├── admin_staff.py        # 人员与创建配额
+│   │   │       ├── admin_rbac.py         # 角色与菜单读写矩阵
+│   │   │       └── admin_license.py      # 授权状态与重新加载
 │   │   ├── core/
 │   │   │   ├── config.py
 │   │   │   ├── security.py
+│   │   │   ├── login_guard.py            # 登录失败限流
 │   │   │   ├── logging.py
 │   │   │   ├── exceptions.py
 │   │   │   ├── database.py
-│   │   │   ├── tracing.py               # request_traces 采集（旁路）
+│   │   │   ├── schema.py                 # SCHEMA_VERSION 与启动守卫
+│   │   │   ├── migrate.py                # 版本化迁移执行器（--check / --dry-run / --backup）
+│   │   │   ├── tracing.py                # request_traces 采集（旁路）
+│   │   │   ├── ratelimit.py              # Redis 多桶限流
+│   │   │   ├── rbac.py                   # 菜单模块单一事实源 + require_perm
+│   │   │   ├── license.py                # Ed25519 授权校验与功能位
+│   │   │   ├── cors.py
+│   │   │   ├── selfcheck.py              # 启动自检（模型/依赖/配置）
 │   │   │   ├── context_engineer.py
 │   │   │   ├── bootstrap.py
 │   │   │   └── constants.py
 │   │   ├── agents/
 │   │   │   ├── __init__.py
 │   │   │   ├── base_business_agent.py
-│   │   │   ├── router_agent.py
+│   │   │   ├── router_agent.py           # 多意图路由 + 兜底意图标记
+│   │   │   ├── scene_router.py           # scene_code → 场景路由档案
 │   │   │   ├── orchestrator.py
-│   │   │   ├── registry.py               # 显式登记代码 Agent（_CODE_AGENTS）
+│   │   │   ├── registry.py               # _CODE_AGENTS（当前为空元组）
 │   │   │   ├── canned_scripts.py
 │   │   │   ├── llm_factory.py
 │   │   │   ├── business/
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── dynamic_agent.py      # 动态 Agent（内核能力）
-│   │   │   │   ├── knowledge_agent.py
-│   │   │   │   ├── order_agent.py
-│   │   │   │   ├── complaint_agent.py
-│   │   │   │   └── it_*.py               # IT 知识/故障/资产
+│   │   │   │   ├── default_agent.py      # 内核默认助手（代码托管）
+│   │   │   │   └── dynamic_agent.py      # 后台动态 Agent
 │   │   │   └── prompts/
-│   │   │       ├── __init__.py
-│   │   │       ├── router.py             # 路由提示词（内核）
-│   │   │       └── {knowledge,order,complaint,it_*}.py
+│   │   │       └── router.py             # 路由提示词（内核）；业务提示词在 agents 表
 │   │   ├── tools/
-│   │   │   ├── __init__.py
 │   │   │   ├── memory_factory.py
 │   │   │   ├── rag_factory.py
 │   │   │   ├── mcp_loader.py
-│   │   │   ├── custom_catalog.py
+│   │   │   ├── custom_catalog.py         # 代码工具目录扫描/登记
 │   │   │   ├── custom_loader.py
 │   │   │   └── custom/
-│   │   │       ├── __init__.py
 │   │   │       ├── base.py               # BaseTool 适配层（async run(**kwargs)）
-│   │   │       └── {order,logistics,refund,ticket,it_*}_tool.py + mock_*.py
+│   │   │       ├── order_tool.py / logistics_tool.py / refund_tool.py / ticket_tool.py
+│   │   │       ├── it_asset_tool.py / it_ticket_tool.py / echo_tool.py
+│   │   │       └── mock_data.py / mock_assets.py   # 演示数据快照
 │   │   ├── models/
-│   │   ├── schemas/
+│   │   │   ├── entities.py
+│   │   │   └── repositories.py
+│   │   ├── schemas/                      # api / common / scene / scene_admin / integration / eval
 │   │   ├── services/
 │   │   │   ├── chat_service.py
 │   │   │   ├── memory_service.py
 │   │   │   ├── rag_service.py
 │   │   │   ├── qdrant_helper.py          # 直连 Qdrant：分块浏览/按源删除
-│   │   │   └── document_service.py
-│   │   └── utils/
-│   │       ├── sse.py
-│   │       └── text.py
+│   │   │   ├── document_service.py
+│   │   │   ├── scene_service.py / runtime_config.py / quota_service.py
+│   │   │   ├── canned_answer.py / canned_templates.py
+│   │   │   ├── widget_config.py
+│   │   │   └── eval_runner.py            # 评测打分与报告（不发请求、不碰 DB）
+│   │   └── utils/                        # sse / text / tokens / async_io / request
 │   ├── mcp_servers/              # 本地 FastMCP（stdio）演示服务
 │   │   ├── logistics_server.py
 │   │   └── refund_server.py
 │   ├── data/                     # 运行时数据（.gitignore 排除）：doc_archives/、knowledge_bases/（RAG_KB_ROOT 相对 backend 工作目录）
-│   ├── alembic/
 │   ├── tests/
-│   ├── pyproject.toml
+│   ├── pyproject.toml            # ruff（E/F/I/W/UP/B，行宽 120）
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/                     # Vue3 客户对话端（npm workspace，端口 5173）
@@ -411,8 +432,11 @@ smart-cs/
 ├── admin-frontend/               # Vue3 管理后台（npm workspace，端口 5174）
 │   ├── src/
 │   │   ├── api/  components/  layouts/  router/  stores/  types/
-│   │   └── views/               # AgentList/KnowledgeBaseView/TicketsView/
-│   │                             # TracesView/MemoryView/InquiriesView/McpServersView/Dashboard
+│   │   └── views/               # 一个菜单模块一个文件：Dashboard/AnalyticsView/TakeoverView/
+│   │                             # InquiriesView/TicketsView/TracesView/KnowledgeBaseView/ScenesView/
+│   │                             # AgentList/RouterInfoView/McpServersView/CustomToolsView/
+│   │                             # CannedScriptsView/MemoryView/IntegrationsView/StaffQuotaView/
+│   │                             # RoleView/LicenseView/LoginView
 │   ├── package.json
 │   └── vite.config.ts
 ├── packages/
@@ -423,16 +447,14 @@ smart-cs/
 │   ├── spec.md
 │   ├── api.md
 │   ├── runbook.md
-│   └── updates/                 # U01~U11 各已完成功能的详解文档 + 索引 README
+│   └── updates/                 # U01~U26 各已完成功能的详解文档 + 索引 README
 ├── scripts/
-│   ├── init_db.sh
-│   ├── init_db.sql
-│   ├── seed_data.py
-│   ├── rebuild_and_seed.py
-│   ├── seed_memory_via_chat.py
-│   ├── cleanup_traces.py
-│   ├── start_all.ps1
-│   └── stop_all.ps1
+│   ├── init_db.sql               # 空库一次建到最新结构（唯一 DDL 真相）
+│   ├── migrations/NNNN_*.sql      # 存量库增量迁移（永不修改已上线文件）
+│   ├── init_db.py / seed_data.py / rebuild_and_seed.py
+│   ├── eval.py                    # 评测 CLI（真实 HTTP 链路）
+│   ├── backup.sh / release.py / cleanup_traces.py / verify_schema.py
+│   └── start_all.ps1 / stop_all.ps1
 └── README.md
 ```
 
@@ -497,7 +519,7 @@ CREATE TABLE sessions (
     user_id         UUID NOT NULL REFERENCES customer_users(id) ON DELETE CASCADE,
     title           VARCHAR(128) DEFAULT '新对话',
     status          VARCHAR(16) NOT NULL DEFAULT 'active'
-                    CHECK (status IN ('active','closed','handover')),
+                    CHECK (status IN ('active','closed','handover','human_handling')),  -- human_handling 由 0009 引入
     assigned_agent  UUID REFERENCES staff_users(id),
     memory_tool_uid VARCHAR(64),
     rag_namespace   VARCHAR(64),
@@ -748,12 +770,14 @@ CREATE INDEX idx_canned_scripts_scene_enabled_priority
     ON canned_scripts(scene_id, enabled, priority);
 
 -- ========== schema 版本（启动时断言；不匹配请跑迁移） ==========
--- 当前值 8；新增列/表必须同时提升 init_db.sql 与 app 侧的 SCHEMA_VERSION，并补一个 scripts/migrations/NNNN_*.sql
-INSERT INTO schema_meta (key, value) VALUES ('version', '8')
+-- 当前值 10；新增列/表必须同时提升 init_db.sql 与 app 侧的 SCHEMA_VERSION，并补一个 scripts/migrations/NNNN_*.sql
+INSERT INTO schema_meta (key, value) VALUES ('version', '10')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 ```
 
 > `agents` / `knowledge_bases` 同样带 `created_by`（代码 Agent 与种子知识库为 `NULL`，不计入任何人的配额）；`chat_events` 是 U20 引入的全量埋点表，带 `(scene_code, created_at)` 索引。
+>
+> 上列为核心表节选。另有：`chat_usage_daily`（U22，日聚合，长期保留）、`eval_runs`（U24，评测运行记录）、`roles` / `user_roles` / `role_permissions`（RBAC，见 §12.2），DDL 全文以 [`init_db.sql`](../scripts/init_db.sql) 与 `scripts/migrations/` 为准。
 
 ### 4.2 迁移与 Schema 演进
 
@@ -763,7 +787,7 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 - **全量重建仅限开发/演示**：`python scripts/rebuild_and_seed.py`（DROP 旧表 → `init_db.sql` 建表 → seed），
   `APP_ENV=production` 时默认拒执行（需显式 `--force`）。
 - `init_db.sql` 与 ORM（`models/entities.py`）保持一致，`scripts/verify_schema.py` 逐表逐列比对两条路径；新增列/表在迁移 SQL 里用 `IF NOT EXISTS` 便于新库已到位时幂等补跑。
-- `schema_meta.version` 是唯一的结构版本源（当前 `8`）：后端启动断言，`verify_schema.py` 校验，不匹配直接报错而不是带病运行。版本历史：`2`（多场景）→ `3`（接入方三表 + `visitors.integration_id`）→ `4`（`integrations.public_code`）→ `5`（`chat_events`）→ `6`（`canned_scripts.answer_source/kb_namespaces`、`scenes.runtime_config/created_by`、`agents.created_by`、`knowledge_bases.created_by`、`staff_users.quota`）→ `7`（`chat_usage_daily` + `chat_events.tokens_estimated`，W2）→ `8`（`eval_runs`，W4）。
+- `schema_meta.version` 是唯一的结构版本源（当前 `10`）：后端启动断言，`verify_schema.py` 校验，不匹配直接报错而不是带病运行。版本历史：`2`（多场景）→ `3`（接入方三表 + `visitors.integration_id`）→ `4`（`integrations.public_code`）→ `5`（`chat_events`）→ `6`（`canned_scripts.answer_source/kb_namespaces`、`scenes.runtime_config/created_by`、`agents.created_by`、`knowledge_bases.created_by`、`staff_users.quota`）→ `7`（`chat_usage_daily` + `chat_events.tokens_estimated`，W2）→ `8`（`eval_runs`，W4）→ `9`（`sessions.status` 增加 `human_handling`，人工接管坐席态）→ `10`（`roles` / `user_roles` / `role_permissions`，RBAC）。
 - 不引入 Alembic：本项目 DDL 以手写 SQL 为单一真相（`init_db.sql` 与迁移文件同源），且需保持无额外依赖可部署。
 
 ---
@@ -1186,20 +1210,26 @@ def load_mcp_tools_by_name(registry: ToolRegistry, names: list[str]) -> None:
 
 ## 7. 多 Agent 架构规范
 
-> **本章核心**：每个业务 Agent 独立开发（独立 Prompt、独立工具、独立类），由路由 Agent 分发。
+> **实现现状（先读，U03/U12 起）**：业务 Agent 以**后台动态配置**为主 —— 提示词、路由线索、工具/MCP、知识库、模型都在 `agents` 表，
+> 后台「Agent 管理」新建/停用**即时进入路由候选**，无需改代码、无需重启（[U03](updates/03-dynamic-agents.md)、[U12](updates/12-agent-routing-clues.md)）。
+> 代码托管 Agent 只剩内核默认助手 `default_assistant`（`agents/business/default_agent.py`），在 `agents/registry.py` 的 `_CODE_AGENTS` 登记。
+> 因此 §7.1–§7.9 里“一个业务一个类”的写法是**代码托管路径**的规范与历史范例（原 `knowledge_agent.py` / `order_agent.py` / `complaint_agent.py` 已移除），
+> 新增业务优先在后台建动态 Agent；确需代码托管时按 §7.7 的 SOP 执行。
+
+> **本章核心**：业务 Agent 可独立开发（独立提示词、独立工具），由路由 Agent 分发。
 
 ### 7.1 架构澄清
 
 **正确理解**：
-> **每个业务一个独立的 Agent 类**，独立开发、独立测试、独立部署 Prompt 与工具集；**路由 Agent 只做意图识别**，识别后分发给对应业务 Agent。
+> **一个业务 = 一个可独立配置的 Agent**（动态 Agent 在后台配；代码托管 Agent 独立成类），**路由 Agent 只做意图识别**，识别后分发给对应业务 Agent。
 
 **核心约束**：
 
 | 约束 | 说明 |
 |------|------|
 | 路由 Agent 与业务 Agent 分离 | 路由 Agent 不加载任何业务工具，只做分类 |
-| 每个业务 Agent 独立成类 | 一个业务 = 一个 Python 类 = 一个文件 |
-| 注册表驱动路由 | 路由结果通过 `agent_name` 映射到具体类 |
+| 每个业务 Agent 可独立配置 | 动态 Agent：后台配置；代码托管：一个业务 = 一个类 = 一个文件 |
+| 注册表驱动路由 | 路由结果通过 `agent_name` 映射到生效 Agent（代码登记 + DB 动态混合） |
 
 ### 7.2 业务 Agent 抽象基类
 
@@ -1352,7 +1382,10 @@ ROUTER_SYSTEM_PROMPT = """你是智能客服系统的路由分发器。
   典型问法：帮我开张发票 / 发票抬头写错了能改吗
 ```
 
-### 7.4 业务 Agent 示例（每个独立开发）
+### 7.4 业务 Agent 示例（代码托管路径的历史范例）
+
+> 下面三个类（knowledge / order / complaint）**已从内核移除**，保留作为 `BaseBusinessAgent` 的写法参考；
+> 同样的能力现在在后台「Agent 管理」建动态 Agent 即可（提示词/工具/知识库/线索入库）。
 
 #### 7.4.1 知识问答 Agent
 
@@ -1488,7 +1521,10 @@ COMPLAINT_SYSTEM_PROMPT = """你是投诉处理专员，负责受理客户投诉
 """
 ```
 
-### 7.5 Agent 注册表
+### 7.5 Agent 生效清单（代码登记 + DB 动态）
+
+> 当前 `agents/registry.py` 用 `_CODE_AGENTS` 元组登记代码托管 Agent（现为空），与 DB 动态 Agent 合并成生效清单；
+> 下面代码是 v1.3 的 `AGENT_REGISTRY` 字典写法，仅示意“注册即可被路由”的意图。
 
 **文件：`backend/app/agents/registry.py`**
 
@@ -1529,6 +1565,8 @@ def list_agents() -> list[dict]:
 ```
 
 ### 7.6 Orchestrator 调度器
+
+> 当前实现支持多意图串行调度、链路 spans 采集与低置信转人工，下面示例只保留最小骨架（单意图）。
 
 **文件：`backend/app/agents/orchestrator.py`**
 
@@ -1651,11 +1689,10 @@ class RefundAgent(BaseBusinessAgent):
         registry.register_tool(SubmitRefundTool())
 ```
 
-#### Step 2：创建 Prompt 文件
+#### Step 2：准备提示词
 
-```bash
-touch backend/app/agents/prompts/refund.py
-```
+代码托管 Agent 的提示词可在 `agents/prompts/` 下新建模块（当前该目录只保留内核 `router.py`）；
+**推荐**把业务提示词写进 `agents.system_prompt`（后台可改、可灰度，无需发版）。
 
 #### Step 3：开发业务专属工具（可选）
 
@@ -1696,17 +1733,16 @@ VALUES ('refund_service', '退款服务', '申请退款、查询进度', true);
 
 ```python
 # 注册表已生效（无需真模型）
-from app.agents.registry import AGENT_REGISTRY
+from app.agents.registry import _CODE_AGENTS
 
 
 def test_refund_agent_registered():
-    assert "refund_service" in AGENT_REGISTRY
+    assert "refund_service" in {cls.name for cls in _CODE_AGENTS}
 ```
 
 #### Step 7：完成
 
-路由 Agent 会自动在 prompt 中看到 `refund_service`（`RouterAgent._build_prompt()` 从
-`AGENT_REGISTRY` + DB 动态 Agent 生成），无需改路由代码。
+路由 Agent 会自动在提示词里看到 `refund_service`（生效清单 = 代码登记 + DB 动态 Agent 派生），无需改路由代码。
 
 ### 7.8 自定义工具（继承 BaseTool）
 
@@ -1743,19 +1779,18 @@ class QueryOrderTool(BaseTool):
             return {"ok": True, "data": resp.json()}
 ```
 
-### 7.9 与旧版（v1.2）的差异对照
+### 7.9 设计演进（v1.3 → 当前）
 
-| 维度 | v1.2（旧） | v1.3（新） |
-|------|-----------|-----------|
-| 多 Agent 定义 | 一个 SimpleAgent + DB 元数据配置 | 每个业务独立 Python 类 |
-| Prompt 管理 | DB `agents.system_prompt` 字段 | 代码 `prompts/{business}.py` |
-| 工具装配 | DB `agents.tools` JSON 数组 | 每个类实现 `build_tools()` |
-| 新增 Agent | DB 插记录 + 重启 | 新建类文件 + 注册表加一行 |
-| 路由 | 隐藏在 IntentClassifier | 独立的 `RouterAgent` 类 |
-| 路由 Agent | 无独立类 | 独立的 `router_agent.py`，专用轻量模型 |
-| 业务 Agent 类结构 | 无 | `BaseBusinessAgent` 抽象基类 |
-| DB `agents` 表 | 存业务配置 | 只存管理元数据（name/enabled） |
-| 上下文工程 | 全局 ContextEngineer | 按业务 Agent 的 `rag_namespace` 定制 |
+| 维度 | v1.3 设计 | 当前实现（U03/U12 起） |
+|------|-----------|------------------------|
+| 多 Agent 定义 | 每个业务独立 Python 类 | 动态 Agent（DB）为主 + 代码托管 Agent 混合注册 |
+| Prompt 管理 | 代码 `prompts/{business}.py` | `agents.system_prompt`，后台可改 |
+| 工具装配 | 类内 `build_tools()` | 动态 Agent 在后台勾选 tools / MCP；代码 Agent 仍可 `build_tools()` |
+| 新增 Agent | 新建类文件 + 注册表加一行 + 重启 | 后台新建即生效（无需改代码/重启） |
+| 路由线索 | 类属性 | `agents.routing_keywords` / `routing_examples` 注入提示词（去具名化） |
+| 路由 | 独立 `RouterAgent` | 保留，输出按主次排序的多意图数组，支持兜底意图 |
+| DB `agents` 表 | 只存管理元数据（name/enabled） | 存提示词/工具/知识库/线索/模型/创建人 |
+| 上下文工程 | 按类 `rag_namespace` | 场景 `runtime_config` 可覆盖 + Agent 声明 |
 
 ---
 
@@ -2106,15 +2141,41 @@ export function streamChat(
 
 ### 11.1 页面路由
 
+**运营台**（`admin-frontend`，开发 `/`、生产 `/admin/`；`meta.perm` 与后端 `app/core/rbac.py` 的菜单 key 一一对应，菜单显隐与路由守卫都按它判定）：
+
 | 路径 | 组件 | 权限 |
 |------|------|------|
 | `/login` | LoginView | 公开 |
-| `/chat` | ChatView | customer/agent |
-| `/history` | HistoryView | customer/agent |
-| `/admin/knowledge` | DocumentList | admin |
-| `/admin/memory/:userId?` | MemoryView | agent/admin |
-| `/admin/agents` | AgentList | admin |
-| `/admin/dashboard` | Dashboard | admin |
+| `/takeover` | TakeoverView | `takeover` |
+| `/inquiries` | InquiriesView | `inquiries` |
+| `/tickets` | TicketsView | `tickets` |
+| `/traces` | TracesView | `traces` |
+| `/knowledge` | KnowledgeBaseView | `knowledge` |
+| `/canned-scripts` | CannedScriptsView | `canned-scripts` |
+| `/memory/:userId?` | MemoryView | `memory` |
+| `/dashboard` | Dashboard | `dashboard` |
+| `/analytics` | AnalyticsView | `analytics` |
+| `/scenes` | ScenesView | `scenes` |
+| `/agents` | AgentList | `agents` |
+| `/router` | RouterInfoView | `router` |
+| `/mcp-servers` | McpServersView | `mcp-servers` |
+| `/custom-tools` | CustomToolsView | `custom-tools` |
+| `/integrations` | IntegrationsView | `meta.roles=['admin']`（未纳入 RBAC） |
+| `/staff` | StaffQuotaView | `staff` |
+| `/roles` | RoleView | `roles` |
+| `/license` | LicenseView | `license` |
+
+**客户对话端**（`frontend`，5173）：
+
+| 路径 | 组件 | 权限 |
+|------|------|------|
+| `/login` | LoginView | 公开 |
+| `/chat` | customer/ChatView | 需登录（客户） |
+| `/history` | customer/HistoryView | 需登录（客户） |
+
+无 `read` 授权的模块不出现在菜单里；直接访问会被守卫送到 `firstAllowed()`（第一个可读模块，兜底 `/inquiries`），未登录跳 `/login`。
+
+> 管理功能（知识库 / Agent / 记忆 / 仪表盘 / 咨询）已全部迁到独立的运营台 SPA，客户对话端只保留对话与历史。
 
 ### 11.2 状态管理（Pinia）
 
@@ -2194,6 +2255,25 @@ Token `sub`=用户ID、`role`∈`{customer,agent,admin}`；`/auth/refresh` 按 `
 - Refresh Token TTL：604800 s
 
 ### 12.2 RBAC 权限矩阵
+
+实现：角色表 `roles` + `role_permissions.permissions`（JSONB `{菜单模块 key: read|write}`），人员经 `user_roles` 绑多个角色
+（`staff_users.role` 仍保留为主角色列，供 Token 与粗粒度守卫使用）；
+可授权清单的单一事实源是 `app/core/rbac.py` 的 `MENU_MODULES`（`0010_rbac.sql` 建表，零 DDL 扩展新模块）。
+专题文档：[U26 后台 RBAC](updates/26-rbac-menu-matrix.md)。
+
+- **模块粒度**：17 个菜单模块（takeover / inquiries / tickets / traces / dashboard / analytics / knowledge /
+canned-scripts / memory / scenes / agents / router / mcp-servers / custom-tools / staff / roles / license），
+每个只有 `read`（菜单可见 + 可查询）与 `write`（含 read）两级；
+- **内置角色**：`admin` 为超级角色（前后端一律旁路、不可删）；`agent` 为默认坐席角色，默认授予
+takeover / inquiries / tickets / memory 写与 traces / knowledge 读，**dashboard / analytics 不默认授予**；
+- **校验入口**：后端 `require_perm("<key>", "read"|"write")`；前端路由 `meta.perm` + 菜单显隐，两者同源；
+保存角色时按 `MENU_KEYS` 白名单过滤非法 key；
+- **接口**：`GET /admin/rbac/menus|roles`、`POST /admin/rbac/roles`、`DELETE /admin/rbac/roles/{id}`、
+`GET|PUT /admin/rbac/roles/{id}/permissions`（写操作仅 admin）；
+- **未纳入**：接入方管理（`/integrations`）仍按 `meta.roles=['admin']` 粗粒度；
+场景 / 知识库 / 工单级的**资源级**授权属企业功能位 `rbac`，尚未实现。
+
+资源层访问对照（不含菜单可见性，数据层限制在仓储与接口内实现）：
 
 | 资源 | customer | agent | admin |
 |------|----------|-------|-------|
@@ -2357,7 +2437,7 @@ SENSITIVE_PATTERNS = [
 ### 15.2 HelloAgents 全栈集成测试
 
 ```python
-# tests/integration/test_hello_agents_integration.py
+# backend/tests/test_hello_agents_integration.py
 import pytest
 from hello_agents.llm import HelloAgentsLLM
 from hello_agents.tools import MemoryTool, RAGTool, ToolRegistry
@@ -2398,44 +2478,25 @@ async def test_full_hello_agents_stack():
 
 ### 15.3 多 Agent 路由测试（必测）
 
-```python
-# tests/agents/test_router.py
-import pytest
-from app.agents.router_agent import RouterAgent
-from app.agents.registry import AGENT_REGISTRY
+现有实现：`backend/tests/test_router.py`（提示词去具名化、多意图拆分、追问续接、低置信兜底）与
+`backend/tests/test_dynamic_agents.py`（后台新建/停用 Agent 实时进候选，无需重启）。测试目录为**平铺**结构
+（`backend/tests/test_*.py`，无 `agents/` / `integration/` 子目录），公共 fixture 在 `conftest.py`。
 
+必测用例：
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("query, expected_agent", [
-    ("我的订单到哪了", "order_service"),
-    ("我要投诉", "complaint_handler"),
-    ("退货政策是什么", "knowledge_qa"),
-])
-async def test_router(query, expected_agent):
-    router = RouterAgent()
-    result = await router.route(query)
-    assert result["agent_name"] == expected_agent
-    assert result["confidence"] > 0.5
-
-
-def test_registry_completeness():
-    from app.agents.business.knowledge_agent import KnowledgeAgent
-    assert KnowledgeAgent.name in AGENT_REGISTRY
-```
+| 用例 | 断言 |
+|------|------|
+| 单意图路由 | `route.agent_name` 命中目标 Agent，`confidence` 过阈值 |
+| 多意图拆分 | `route.intents` 数量与顺序符合预期，`agent_start` 按意图串行 |
+| 追问续接 | 省略主语的追问落在上一轮同一 Agent |
+| 低置信兜底 | 不贴合任何 Agent 时走兜底意图（`is_fallback=true`），不被阈值拦成转人工 |
 
 ### 15.4 新增业务 Agent 的回归测试
 
-```python
-# tests/agents/test_new_agent_sop.py
-def test_new_agent_auto_discovered():
-    """新增 Agent 后，路由 prompt 应包含它"""
-    from app.agents.router_agent import RouterAgent
-    router = RouterAgent()
-    prompt = router._build_prompt()
-    for name, cls in AGENT_REGISTRY.items():
-        assert name in prompt
-        assert cls.description in prompt
-```
+新增 Agent 有两条路径，测试点不同：
+
+- **后台动态 Agent**（常态）：`backend/tests/test_dynamic_agents.py` —— 新建后立即出现在路由候选、停用后从候选消失；
+- **代码托管 Agent**（少数内核资产）：在 `app/agents/registry.py` 的 `_CODE_AGENTS` 登记后，路由提示词应包含其描述。
 
 ### 15.5 E2E 测试用例
 
@@ -2443,12 +2504,12 @@ def test_new_agent_auto_discovered():
 |------|------|------|
 | E2E-01 | 登录成功 | 返回 token |
 | E2E-02 | 对话触发路由 | 收到 route 事件 |
-| E2E-03 | 订单意图 | 路由到 order_service |
+| E2E-03 | 订单意图 | 路由到演示场景的 `order_service`（后台动态 Agent） |
 | E2E-04 | 对话触发工具调用 | tool_call / tool_result |
 | E2E-05 | 上传文档 → RAGTool 检索 | 返回相关 chunk |
 | E2E-06 | 查看 MemoryTool 记忆 | 时间线正确 |
 | E2E-07 | 低置信度 → handover | handover 事件 |
-| E2E-08 | 新增 Agent（代码注册） | 无需改路由即可命中 |
+| E2E-08 | 后台新建 Agent（动态注册） | 无需改路由代码/重启即可命中 |
 
 ### 15.6 性能测试
 
@@ -2468,14 +2529,16 @@ def test_new_agent_auto_discovered():
 | F-02 | MemoryTool 集成 | 四层记忆可写可查 |
 | F-03 | RAGTool 集成 | 上传后 30s 内可检索 |
 | F-04 | 路由 Agent | 意图路由准确率 ≥ 90% |
-| F-05 | 业务 Agent 独立开发 | 每个业务独立类、独立 Prompt、独立工具 |
-| F-06 | 新增 Agent 零改路由 | 注册表加一行即可命中 |
+| F-05 | 业务 Agent 独立开发 | 后台动态 Agent 可独立配置提示词/工具/知识库 |
+| F-06 | 新增 Agent 零改路由 | 后台新建后即时进候选（无需重启） |
 | F-07 | MCP 工具 | 至少 2 个 MCP Server |
 | F-08 | 自定义工具 | 参数校验、超时、重试生效 |
 | F-09 | 历史对话 | 分页加载 |
 | F-10 | 知识库管理 | pdf/docx/md/txt |
 | F-11 | 记忆查看 | 按用户、类型、重要性筛选 |
-| F-12 | 人工接管 | 低置信度触发 handover |
+| F-12 | 人工接管 | 低置信度触发 handover，坐席可接入/回复/释放 |
+| F-13 | 成效看板 | 数据分析页三率分母为 0 显示「—」，不把无数据当 0% |
+| F-14 | 权限矩阵 | 角色按菜单模块授 `read`/`write`，无权限的菜单不出现 |
 
 ### 16.2 非功能验收
 
@@ -2490,9 +2553,11 @@ def test_new_agent_auto_discovered():
 
 ### 16.3 交付物清单
 
+> 本节是 v1.x 的交付口径，完成情况以 §0 与 U01–U26 文档为准（下方复选框未随迭代勾选）。
+
 - [ ] 后端代码 + 迁移脚本 + 单元测试
 - [ ] 前端代码 + E2E 测试
-- [ ] 至少 3 个独立业务 Agent（knowledge / order / complaint）
+- [ ] 业务 Agent 交付方式：默认场景用代码托管的 `default_assistant`，其余业务在后台建动态 Agent（不再内置 knowledge / order / complaint 三个业务类，见 [U03](updates/03-dynamic-agents.md)）
 - [ ] 路由 Agent + 注册表 + Orchestrator
 - [ ] API 文档（Swagger 自动生成）
 - [ ] 运维手册（`docs/runbook.md`）
@@ -2584,12 +2649,21 @@ POST   /api/v1/admin/mcp-servers/test
 GET    /api/v1/admin/tools
 GET    /api/v1/admin/metrics
 
-# 工单 / 跨客户咨询 / 链路
+# 工单 / 跨客户咨询 / 链路 / 数据分析
 GET    /api/v1/admin/tickets
 PATCH  /api/v1/admin/tickets/{ticket_no}/status
 GET    /api/v1/admin/inquiries/sessions
+GET    /api/v1/admin/takeover/sessions
 GET    /api/v1/admin/traces
 GET    /api/v1/admin/traces/{trace_ref}
+GET    /api/v1/admin/analytics/outcomes
+
+# 权限与授权
+GET    /api/v1/admin/rbac/menus
+GET    /api/v1/admin/rbac/roles
+PUT    /api/v1/admin/rbac/roles/{role_id}/permissions
+GET    /api/v1/admin/license
+POST   /api/v1/admin/license/reload
 
 GET    /health
 GET    /metrics
@@ -2611,6 +2685,8 @@ GET    /metrics
 | `done` | 流结束 | message_id, trace_id |
 | `error` | 异常 | code, message |
 
+> `agent_start` / `agent_end` 在多意图轮次里每轮可出现多次（按意图串行，一次一个）；`route` 只在整轮开始时出现一次。事件定义见 §5 与 §10。
+
 ### 17.4 核心组件清单
 
 | 组件 | 文件 | 职责 |
@@ -2620,16 +2696,24 @@ GET    /metrics
 | `RouterAgent` | `agents/router_agent.py` | 路由 Agent（独立） |
 | `AGENT_REGISTRY` | `agents/registry.py` | 类注册表 |
 | `Orchestrator` | `agents/orchestrator.py` | 调度器 |
-| `KnowledgeAgent` | `agents/business/knowledge_agent.py` | 业务1 |
-| `OrderAgent` | `agents/business/order_agent.py` | 业务2 |
-| `ComplaintAgent` | `agents/business/complaint_agent.py` | 业务3 |
+| `DefaultAgent` | `agents/business/default_agent.py` | 内核默认助手（代码托管，`default_assistant`） |
+| `DynamicAgent` | `agents/business/dynamic_agent.py` | 后台动态 Agent（DB 驱动，实时进路由候选） |
+| `SceneRouter` | `agents/scene_router.py` | `scene_code` → 场景路由档案 |
 | `ContextEngineer` | `core/context_engineer.py` | 上下文融合 |
 | `MemoryFactory` | `tools/memory_factory.py` | MemoryTool 工厂 |
 | `RagFactory` | `tools/rag_factory.py` | RAGTool 工厂 |
 | `MCPLoader` | `tools/mcp_loader.py` | MCP 工具加载 |
-| `ChatService` | `services/chat_service.py` | SSE 输出 |
+| `TraceCollector` | `core/tracing.py` | 链路采集（旁路写 `request_traces`） |
+| `license` | `core/license.py` | Ed25519 授权校验与功能位（`has_feature` / `require_feature`） |
+| `rbac` | `core/rbac.py` | `MENU_MODULES` 单一事实源 + `require_perm` |
+| `migrate` | `core/migrate.py` | 版本化迁移执行器（`--check` / `--dry-run` / `--backup`） |
+| `ChatService` | `services/chat_service.py` | SSE 输出与用量记账 |
+| `EvalRunner` | `services/eval_runner.py` | 评测打分与报告（不发请求、不碰 DB） |
 
 ### 17.5 开发任务看板
+
+> 本节是 v1.x 的初始任务拆分，已全部随迭代落地并多轮重构（业务 Agent 动态化、多意图路由、链路追踪、用量/数据分析、License、评测、RBAC）；
+> 保留此节仅作历史记录，不再维护勾选状态。
 
 **Epic 1：HelloAgents 集成基础**
 - [ ] T1.1 安装 hello-agents 依赖
@@ -2708,6 +2792,7 @@ GET    /metrics
 | v1.1 | 2025-01-XX | 移除 Docker 与部署章节 |
 | v1.2 | 2025-01-XX | Agent / MemoryTool / RAGTool 基于 HelloAgents |
 | v1.3 | 2025-01-XX | 多 Agent 架构重写：业务独立开发 + 路由 Agent 分发 |
+| v2.0 | 2026-10-29 | 就地校正到当前实现：依赖版本、Schema 与迁移（`SCHEMA_VERSION=10`）、页面路由与 RBAC、仓库结构、U01–U26 索引 |
 
 ---
 

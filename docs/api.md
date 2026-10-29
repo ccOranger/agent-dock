@@ -8,6 +8,9 @@ Swagger：`http://localhost:8000/docs`
 - `current_customer` —— 客户端客户（`customer_users`）
 - `require_staff` —— 后台人员，`agent` 或 `admin` 均可（`staff_users`）
 - `require_admin` —— 仅 `admin`
+- `require_perm(模块, "read"|"write")` —— 按 RBAC 菜单矩阵校验，`admin` 直接放行；只有 `read` 授权的模块可查不可写。
+
+> 下文各节标题里的 `require_admin` / `require_staff` 是历史标注：**当前后台写接口实际按 `require_perm(模块, "write")` 校验**，模块 key 与菜单一对应（见 [spec §12.2](spec.md#122-rbac-权限矩阵)与 [Admin · RBAC](#admin--rbac角色与菜单矩阵require_admin)）。未纳入 RBAC 的接入方管理（`/admin/integrations`）仍按 `require_admin`。
 
 > 人员与客户分表后登录入口分离（[U07](updates/07-staff-customer-auth-split.md)）：后台走 `/auth/staff/login`，客户端走 `/auth/customer/login`（账号不存在返回可识别错误码 `2004` 以引导注册），客户端支持 `/auth/customer/register` 自助注册。Token 内含 `sub`(用户ID)+`role`，`/auth/refresh` 按 `role` 回查对应表。
 
@@ -314,9 +317,12 @@ POST   /api/v1/admin/canned-scripts/match      # 命中测试（body: query, sce
 ```
 GET    /api/v1/admin/staff                   # 人员列表 + 配额 + 已用 + 剩余（remaining=null 表示不限）
 POST   /api/v1/admin/staff                   # 新建（username 唯一、password ≥ 8、role ∈ {admin, agent}）
-PATCH  /api/v1/admin/staff/{id}              # 改 display_name / role / is_active / quota（quota 整对象替换）
+PATCH  /api/v1/admin/staff/{id}              # 改 display_name / role / roles / is_active / quota（quota 整对象替换）
 POST   /api/v1/admin/staff/{id}/password     # 重置密码
 ```
+
+- `roles`（角色 key 列表，如 `["agent"]`）作为多角色集合整体覆盖，`role` 列随之同步为主角色；不传时按 `role` 单角色起步。
+- 实际可见菜单由这些角色在「角色与权限」里的矩阵决定（见 [Admin · RBAC](#admin--rbac角色与菜单矩阵require_admin)）。
 
 ```json
 // 配额语义：键缺失或 null = 不限，0 = 禁止创建，> 0 = 上限
@@ -370,7 +376,8 @@ GET    /api/v1/admin/inquiries/sessions/{id}     # 会话详情（消息 + 每�
 
 ```
 GET    /api/v1/admin/traces                  # 列表（不带 spans；?session_id/trace_id/user_id/agent_name/tool_name/mcp_server/outcome/has_error/min_latency_ms/date_from/date_to + 分页）
-GET    /api/v1/admin/traces/usage            # 近 N 天依赖使用分布（?field=tool_names|agent_names|mcp_server_names, days）
+GET    /api/v1/admin/traces/usage             # 近 N 天依赖使用分布（?field=tool_names|agent_names|mcp_server_names, days）
+                                              # 注意：这里指“链路里的工具/Agent 使用分布”，与已下线的用量报表无关
 GET    /api/v1/admin/traces/sessions/{id}    # 某会话按轮次链路摘要（时间正序）
 GET    /api/v1/admin/traces/{trace_ref}      # 单条详情（含 spans 时间线；trace_ref=行ID/HTTP trace_id/助手消息ID）
 ```
@@ -383,6 +390,22 @@ GET    /api/v1/admin/traces/{trace_ref}      # 单条详情（含 spans 时间�
 > 还带意图依据 `matched_keywords`（原句命中的路由关键词，**本地子串匹配、仅供参考**，路由实际由 LLM 语义判定）
 > 与 `clue_basis`（`keyword_hit` / `keyword_miss` 配了关键词但未出现 / `no_keywords` 未配关键词），
 > 见 [U15](updates/15-route-intent-evidence.md)。数据只存 `spans` JSONB，无额外列。
+
+## Admin · Takeover（人工接管，require_staff）
+
+会话状态机：`active` --低置信/escalate--> `handover`（排队）--claim--> `human_handling`（机器人让位、客户消息只落库）--release--> `active` | `closed`。
+
+```
+GET    /api/v1/admin/takeover/sessions                       # 队列（?status=queued|handling、scene_code + 分页；缺省两者都返回，排队最久优先）
+GET    /api/v1/admin/takeover/sessions/{session_id}           # 详情 + 消息（?after_id= 增量轮询，客户端按 id 去重）
+POST   /api/v1/admin/takeover/sessions/{session_id}/claim     # 坐席接入（handover → human_handling；同一坐席重复调用幂等）
+POST   /api/v1/admin/takeover/sessions/{session_id}/messages  # 坐席回复（body: content，1–4000 字）
+POST   /api/v1/admin/takeover/sessions/{session_id}/release   # 结束人工（body: to=bot|close，缺省 bot）
+```
+
+- 除 `claim` 外的写接口要求会话处于 `human_handling` 且操作者是接手人（`admin` 可代操作），否则 409 / 403；
+- 坐席回复以 `role=assistant` + `metadata.sender_type=staff` 落库、`routed_to=staff`，机器人上下文会排除这些消息，避免复述坐席话术；
+- 已被其他坐席接入时 `claim` 返回 409，不会抢占。
 
 ## Admin · Analytics（数据分析，需 `analytics` 的 `read`）
 
@@ -427,6 +450,24 @@ GET /api/v1/admin/analytics/outcomes   # 六个成效比率 + 每日请求量（
 - 分母为 0 时对应 `value` 为 `null`（分子分母如实返回 0），前端显示「—」，不把「没有数据」当成 0%。
 - 默认区间为最近 7 天（含今天）；日期格式非法、`from > to`、跨度超 `USAGE_QUERY_MAX_DAYS` 均 400（业务码 1001）。
 - 无 `analytics` 读授权返回 403（业务码 2003）；**幻觉率本期不提供**（无 ground-truth，后续走离线评测）。
+
+## Admin · RBAC（角色与菜单矩阵，require_admin）
+
+（专题：[U26 后台 RBAC](updates/26-rbac-menu-matrix.md)；设计见 [spec §12.2](spec.md#122-rbac-权限矩阵)；可授权清单的单一事实源是 `app/core/rbac.py` 的 `MENU_MODULES`）
+
+```
+GET    /api/v1/admin/rbac/menus                         # 可授权模块清单（角色页矩阵的数据源）
+GET    /api/v1/admin/rbac/roles                         # 角色列表（含 permissions 矩阵与在册人数）
+POST   /api/v1/admin/rbac/roles                         # 新建角色（body: key/name/description?/permissions?）
+PATCH  /api/v1/admin/rbac/roles/{role_id}               # 改名/改描述（key 与 is_system 不可改）
+DELETE /api/v1/admin/rbac/roles/{role_id}               # 删除自定义角色（内置角色 400）
+GET    /api/v1/admin/rbac/roles/{role_id}/permissions   # 读取 {menu_key: read|write}
+PUT    /api/v1/admin/rbac/roles/{role_id}/permissions   # 整体替换矩阵（body: permissions）
+```
+
+- 权限只有两级：`read`（菜单可见 + 可查询）与 `write`（含 read）；非法 key / 等级在接口层被丢弃，不报错；
+- 角色里残留已下线菜单（如 `usage`）不影响运行，下次保存矩阵时按白名单清掉；
+- 写操作落审计（`admin.rbac.role_create` / `role_delete` / `role_grant`）。
 
 ## Admin · License（授权与版本，require_admin）
 

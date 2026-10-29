@@ -190,7 +190,7 @@
 | `tenant_id` | UUID NULL | 预留：多租户时由凭证注入，客户端 `ext` 不参与 |
 | `ext` | JSONB NOT NULL DEFAULT '{}' | 客户端自定义埋点（扁平标量，≤10 键 / ≤1KB）；渠道（platform）等设备信息都是其中的普通键，不单独建列 |
 | `message_chars` | INT NOT NULL DEFAULT 0 | 只记长度，不存消息正文 |
-| `total_tokens` | INT NULL | 预留：LLM 用量回填 |
+| `total_tokens` | INT NULL | LLM token 估算回填（[U22](updates/22-usage-metering.md) 起写入，估算值；后台不展示） |
 | `created_at` | TIMESTAMPTZ | 索引 `(scene_code, created_at)`、`(visitor_id, created_at)`、`(integration_id, created_at)`、`(trace_id)` |
 
 与 `request_traces` 分工：后者按采样落库、偏排障；`chat_events` 全量、偏统计，不存消息正文与 IP。

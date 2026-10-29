@@ -2,7 +2,7 @@
 
 > 状态：已落地（**无 schema 变更**，`SCHEMA_VERSION` 保持 `10`；菜单 key 仅登记在 `app/core/rbac.py`）
 > 修订：原「用量报表」的请求数与日维度统计已并入本页，`/usage` 页面与 `/admin/usage/*` 接口下线，token 不再对外展示
-> 关联：[API · Admin · Analytics](../api.md)、[U22 用量计量](22-usage-metering.md)、[U24 评测与回归](24-eval-regression.md)、[RBAC 设计](../productization-plan.md)
+> 关联：[API · Admin · Analytics](../api.md)、[U22 用量计量](22-usage-metering.md)、[U24 评测与回归](24-eval-regression.md)、[U26 后台 RBAC](26-rbac-menu-matrix.md)
 
 ## 1. 背景与问题
 

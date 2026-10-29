@@ -102,7 +102,9 @@ cd backend
 
 - **不提供签发工具与私钥**：`license_issue.py`、密钥生成与续期清单在私有仓库；开源仓库只做校验与挂载点。
 - **不做机器码硬绑、代码混淆、在线激活**：都会推高运维成本却不增实质安全（D6）。
-- **现有企业功能页尚未实现**：`require_feature()` 与后台授权页已就位，`rbac` / `audit` / `white_label` /
-  `eval_pro` / `sso` 的实际页面在私有仓库（W5 起）。
+- **企业功能页尚未实现**：`require_feature()` 与后台授权页已就位，`audit` / `white_label` / `eval_pro` /
+  `sso` 的实际页面在私有仓库（W5 起）；`rbac` 位预留给**资源级**（场景/知识库/工单）授权，
+  模块级的人员-角色-菜单读写矩阵已在开源版落地（`app/core/rbac.py`、`0010_rbac.sql`、`/admin/rbac/*`）——
+  见 [U26 后台 RBAC](26-rbac-menu-matrix.md) 与 [spec.md §12.2](../spec.md#122-rbac-权限矩阵)。
 - **`eval_pro` 不限制评测能力**：评测集、CLI 与 Markdown 报告留在社区版（D1），功能位只管“管理与定时回归”。
 - **时区**：`days_left` 按 UTC 整天差计算；跨时区部署的“到期日”以授权文件里的 UTC 时间为准。

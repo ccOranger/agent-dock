@@ -262,7 +262,7 @@ signature = base64.b64encode(private_key.sign(message)).decode()
 ### 3.16 评测与回归
 
 **不新增环境变量**。评测的口径由仓库里的用例集（`backend/tests/fixtures/eval/<scene>.json`）与执行器参数决定，
-用法、指标定义与退出码见 [评测与回归](evaluation.md)。服务端只有 `eval_runs` 一张新表（`SCHEMA_VERSION=8`）。
+用法、指标定义与退出码见 [评测与回归](evaluation.md)。服务端只新增 `eval_runs` 一张表（v8 引入；当前 `SCHEMA_VERSION=10`）。
 
 下列变量会直接拉动指标，**改它们等于换基线**（报告解释不了配置造成的波动，需写进变更说明）：
 

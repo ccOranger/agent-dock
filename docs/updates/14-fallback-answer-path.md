@@ -78,8 +78,7 @@ else:
 | [agents/router_agent.py](../../backend/app/agents/router_agent.py) | `FALLBACK_CONFIDENCE` 常量；`fallback_intent()` 带 `is_fallback`；`route()` 的兜底判定改看标记；`describe_router_agent()` 输出 `fallback_confidence` / `fallback_answer` / `fallback_answer_effect` |
 | [agents/orchestrator.py](../../backend/app/agents/orchestrator.py) | 低置信分支放行兜底意图（受开关控制） |
 | [core/tracing.py](../../backend/app/core/tracing.py) | `record_intents` 的 `route.intent` span 带 `is_fallback` |
-| [agents/business/knowledge_agent.py](../../backend/app/agents/business/knowledge_agent.py) | 关键词/典型问法重排并认领元问题 |
-| [agents/prompts/knowledge.py](../../backend/app/agents/prompts/knowledge.py) | 元问题应答规则 |
+| ~~`agents/business/knowledge_agent.py`~~ / ~~`agents/prompts/knowledge.py`~~ | 当时由代码托管的 knowledge Agent 重排关键词并认领元问题（**已移除**：业务 Agent 全部改为后台动态配置，线索与提示词在 `agents` 表，见 [U03](03-dynamic-agents.md)） |
 | `backend/.env` / `.env.example` | `ROUTER_FALLBACK_ANSWER=true` |
 | [views/RouterInfoView.vue](../../admin-frontend/src/views/RouterInfoView.vue) | 「兜底策略」行显示兜底置信度与应答模式（[U13](13-router-agent-readonly.md)） |
 

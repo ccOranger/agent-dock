@@ -39,7 +39,7 @@ AgentDock 把这些做成平台能力，而不是某个业务里的临时代码�
 | **评测与回归** | 用例集进 Git，走真实 HTTP 链路跑意图/工具/RAG/兜底/转人工/P95/token 七类指标，与基线逐项 diff，退化即退出码 2 | `scripts/eval.py`、[评测与回归](docs/evaluation.md) |
 | **固定话术** | 高频确定性问题在路由与大模型之前逐字命中，后台可测命中、可停用 | 运营台「固定话术」 |
 | **双端身份** | 后台人员与客户分表、分登录入口、Token 隔离；客户可自助注册 | `/auth/staff/*`、`/auth/customer/*` |
-| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘、数据分析、授权与版本 | `http://<host>:8080/admin/` |
+| **运营台** | 咨询、工单、链路、知识库、Agent、路由分发器、MCP、工具、话术、记忆、仪表盘、数据分析、人员与配额、角色与权限、授权与版本 | `http://<host>:8080/admin/` |
 
 ## 架构
 
@@ -141,7 +141,7 @@ docker compose logs backend | grep -i "密码"     # Windows: docker compose log
 
 ```
 backend/app/agents/business/   # 代码 Agent（继承 BaseBusinessAgent）
-backend/app/agents/prompts/    # 业务提示词
+backend/app/agents/prompts/    # 内核提示词（业务提示词存 agents 表，后台可改）
 backend/app/tools/custom/      # 自定义工具（继承 BaseTool）
 ```
 
@@ -222,7 +222,7 @@ docs/             快速开始、架构说明、配置、部署、评测、FAQ�
 | [API 速查](docs/api.md) | 接口、SSE 事件与错误码 |
 | [技术文章](docs/articles/01-multi-intent-routing.md) | 多意图路由与提示词去具名化 |
 | [开发规范](docs/spec.md) | Spec v2.0，与实现同步 |
-| [功能更新记录](docs/updates/README.md) | U01–U24 每项能力的落地细节 |
+| [功能更新记录](docs/updates/README.md) | U01–U26 每项能力的落地细节 |
 
 ## 路线图
 
@@ -230,7 +230,7 @@ docs/             快速开始、架构说明、配置、部署、评测、FAQ�
 |---|---|---|
 | M0–M4 | 已完成 | 工程基线、业务代码分层、前端单仓化、一键部署、IT Helpdesk |
 | 多场景 M0–M7 | 已完成 | 场景与路由档案、五类隔离、公开接入与限流、嵌入组件、重建验证 |
-| v0.2 | 进行中 | 发布物料、版本化迁移（已完成）、用量计量（已完成）、License 与版本分层（已完成）、评测与回归（已完成）、RBAC/SSO |
+| v0.2 | 进行中 | 发布物料、版本化迁移（已完成）、用量计量（已完成）、License 与版本分层（已完成）、评测与回归（已完成）、RBAC 菜单级（已完成）/ 资源级与 SSO |
 
 ## 明确不做（12 个月内）
 

@@ -91,7 +91,12 @@ CI 会执行以上全部检查。提交前请在本地至少跑通 lint、pytest
 
 ## 数据库变更
 
-当前开发阶段仍以 `scripts/rebuild_and_seed.py` 全量重建为主（会清空数据）。涉及线上兼容的变更，需要在 PR 中说明迁移 SQL，后续版本将接入 Alembic 版本化迁移。
+表结构由自研的版本化增量迁移维护（不依赖 Alembic）：
+
+- 结构变更：同步改 `scripts/init_db.sql`（空库快路径，末尾 `schema_meta.version`）与 `backend/app/core/schema.py` 的 `SCHEMA_VERSION`，
+  并**新增**（永不修改已上线）`scripts/migrations/NNNN_slug.sql`，PR 里说明迁移内容与影响面；
+- 本地验证：`python -m app.migrate --dry-run`（事务内试跑后回滚）→ `python -m app.migrate`；
+- 开发/演示可全量重建（会清空数据）：`scripts/rebuild_and_seed.py`，生产环境会直接拒绝执行。
 
 ## 业务代码边界
 
