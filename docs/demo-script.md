@@ -66,9 +66,9 @@ docker compose down -v && docker compose up -d --build   # 全新数据卷，种
 | `03-admin-scenes.png` | `/admin/scenes` | `customer_service` 已启用、3 个 Agent 按序绑定 | 一个 `/chat/stream` 靠 `scene_code` 分场景；场景是配置出来的，不是写死的 |
 | `04-admin-knowledge.png` | `/admin/knowledge` | 3 个演示文档 `ready`，跑过一次检索测试 | 多命名空间 + 分块浏览 + 检索测试命中片段 |
 | `05-admin-agents.png` | `/admin/agents` | 打开 `order_service` 编辑态 | 路由关键词/典型问法、绑定工具、按 Agent 指定模型 |
-| `06-admin-analytics.png`（待补） | `/admin/analytics` | 至少 7 天、每天 ≥6 轮对话，采样率 1 或 0.2 | 全量三率与链路三率分组、采样角标、每日请求量趋势折线图；原 `06-admin-usage.png`（`/admin/usage`）已随页面下线废弃 |
+| `06-admin-analytics.png` | `/admin/analytics` | 至少 7 天、每天 ≥6 轮对话，采样率 1 或 0.2 | 全量三率与链路三率分组、采样角标、每日请求量趋势折线图 |
 | `07-widget-embed.png` | `/embed-demo.html` | 场景接入已开「开放匿名」 | 一行 script 嵌入第三方页面，气泡 + iframe 样式隔离 |
-| `08-admin-roles.png`（可选） | `/admin/roles` | 至少建 1 个自定义角色并授权 | 角色 × 菜单读写矩阵：内置角色不可删、在册人数、按分组的只读/读写单选 |
+| `08-admin-roles.png` | `/admin/roles` | 至少建 1 个自定义角色并授权，打开该角色的「配置权限」 | 角色 × 菜单读写矩阵：内置角色不可删、在册人数、按分组的只读/读写单选 |
 
 README 只用 **1 / 2 / 3** 三张（首屏 1 张大图 + 2 张并排），其余放发布物料，不堆首屏。
 
@@ -82,7 +82,7 @@ README 只用 **1 / 2 / 3** 三张（首屏 1 张大图 + 2 张并排），其�
 | 参数 | 值 |
 |---|---|
 | 分辨率 | 1280×800（窗口与录制区域一致，别录进任务栏） |
-| 像素 | 截图按 2× 像素抓取后降采样到 1280×800，文字更锐利 |
+| 像素 | 按更大视口抓取后降采样到 1280×800（仓库现有截图是 1600×1000 → 1280×800），文字更锐利 |
 | 时长 | 当前产物 4 帧 /13 秒；录屏方案控制在 ≤40 秒 |
 | 体积 | GIF ≤ 5MB（当前 512KB）；PNG 单张 ≤ 500KB |
 | 工具 | 分帧截图用浏览器自动化（本仓库未引入依赖），录屏用 ScreenToGif |
