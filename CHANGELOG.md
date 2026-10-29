@@ -23,6 +23,8 @@
   `npm audit --omit=dev`、许可证白名单校验），目前 `continue-on-error` 观察模式，基线稳定后再转为阻塞。
 - `SECURITY.md`：支持版本改为 0.2.x；新增「依赖漏洞与许可证」段 —— `npm audit --omit=dev` **0 告警**，
   全量 6 项（2 critical / 1 high / 3 moderate）均在 devDependencies 的 `vitest` 2→5、`vite` 5→8 升级链上。
+- **Release Notes 正文**：新增 [docs/release-notes/v0.2.0.md](docs/release-notes/v0.2.0.md)，
+  含定位、本版内容、镜像构建、升级与已知限制，可直接粘贴为 GitHub Release 正文。
 
 ## [0.2.0] - 2026-10-29
 

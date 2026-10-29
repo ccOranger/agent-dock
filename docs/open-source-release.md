@@ -116,7 +116,7 @@
 - [x] GitHub Actions：backend job（Python 3.12，ruff + pytest）、frontend job（Node 20，矩阵构建两端）、docker job（backend / web 两个镜像 `push: false`，待首次运行确认）。
 - [x] 版本与锁文件：`requirements.txt` 版本策略、仓库根 `package-lock.json`（npm workspaces）入库；`python scripts/release.py check` 校验六处版本一致。
 - [x] 发布流程脚本：`scripts/release.py {check,bundle,tag}`（离线 bundle + 校验和 + 打 tag）。
-- [ ] Release Notes 正式发布：CHANGELOG 已备，GitHub Release 正文未发（含镜像构建说明与已知限制）。
+- [ ] Release Notes 正式发布：正文已备（[release-notes/v0.2.0.md](release-notes/v0.2.0.md)，含定位、本版内容、镜像构建、升级与已知限制，可直接粘贴），GitHub 侧尚未发布。
 
 ## 9. 发布物料
 
@@ -181,4 +181,4 @@ python scripts/release.py bundle
 ```
 
 GitHub 网页端（本地无法代替）：Settings → 转公开 / 转移归属；Actions 勾选 docker job 首次运行；
-Releases 用 CHANGELOG 的 `[0.2.0]` 段落作正文；新建并置顶路线图 issue；开启 Discussions。
+Releases 用 [release-notes/v0.2.0.md](release-notes/v0.2.0.md) 作正文（依据 CHANGELOG 的 `[0.2.0]` 段落编写）；新建并置顶路线图 issue；开启 Discussions。
