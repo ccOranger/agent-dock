@@ -219,7 +219,10 @@ docs/             快速开始、架构说明、配置、部署、评测、FAQ�
 | [评测与回归](docs/evaluation.md) | 用例集、指标口径、基线对比与退化判定、报告与退出码 |
 | [多场景开发](docs/multi-scene-development.md) | 场景/路由档案/隔离/公开接入/嵌入组件的设计与落地记录 |
 | [API 速查](docs/api.md) | 接口、SSE 事件与错误码 |
-| [技术文章](docs/articles/01-multi-intent-routing.md) | 多意图路由与提示词去具名化 |
+| [技术文章 · 多意图路由](docs/articles/01-multi-intent-routing.md) | 一条消息两个诉求：意图契约、提示词去具名化、兜底与可观测 |
+| [技术文章 · 记忆生命周期](docs/articles/02-memory-lifecycle.md) | 三层记忆怎么分层、晋升的四个入口、镜像表与上下文预算 |
+| [技术文章 · 权限与接管](docs/articles/03-rbac-and-takeover.md) | 菜单模块级 RBAC 与会话四态状态机，为什么必须拆开 |
+| [技术文章 · 链路追踪](docs/articles/04-request-tracing.md) | 一轮一行怎么存、十种 span、采样与旁路写入 |
 | [开发规范](docs/spec.md) | Spec v2.0，与实现同步 |
 | [功能更新记录](docs/updates/README.md) | U01–U26 每项能力的落地细节 |
 

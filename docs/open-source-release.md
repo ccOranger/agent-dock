@@ -121,11 +121,12 @@
 
 - [x] 演示 GIF：四帧 13 秒（发问 + 工具回填 → 多意图 + 自动建单 → 跨轮补单 → 转人工），分镜见 [demo-script.md](demo-script.md)。
 - [x] 8 张截图：链路详情、业务场景、知识库、Agent 编辑、数据分析、嵌入挂件、角色与权限（均 1280×800 PNG，单张 < 300KB）。
-- [ ] 技术文章三篇（当前 1/3）：
+- [x] 技术文章四篇（4/4）：
   1. [x] 多意图路由与提示词去具名化 —— [articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)
-  2. [ ] 记忆生命周期与跨轮上下文
-  3. [ ] 一轮对话的全链路追踪模型
-- [ ] 路线图 issue（置顶）：第二个业务场景、Docker 优化、评测、RBAC。
+  2. [x] 记忆生命周期与跨轮上下文 —— [articles/02-memory-lifecycle.md](articles/02-memory-lifecycle.md)
+  3. [x] 权限矩阵与会话状态机（RBAC + 人工接管）—— [articles/03-rbac-and-takeover.md](articles/03-rbac-and-takeover.md)
+  4. [x] 一轮对话的全链路追踪模型 —— [articles/04-request-tracing.md](articles/04-request-tracing.md)
+- [ ] 路线图 issue（置顶）：第二个业务场景、Docker 优化、评测回归、资源级授权与 SSO。
 - [ ] 发布公告：技术社区 1–2 处，附 GIF 与部署入口。
 
 ## 10. 发布后运营

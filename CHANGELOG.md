@@ -52,6 +52,8 @@
 ### 文档
 
 - 新增 `docs/architecture.md`（14 节）：组件拓扑、启动与关闭、一轮对话完整链路、场景路由与隔离、上下文工程、记忆生命周期、RAG、工具与 MCP、鉴权与限流、链路追踪与用量、数据层、前端结构、扩展点、明确边界。README 文档表与 `release.py` 必备文件清单已同步。
+- 新增三篇技术文章，文章共四篇：[记忆生命周期](docs/articles/02-memory-lifecycle.md)、[权限矩阵与会话状态机](docs/articles/03-rbac-and-takeover.md)、[全链路追踪](docs/articles/04-request-tracing.md)；README 文档表改为逐篇入口。
+- 重拍 `06-admin-analytics.png`（数据分析）与 `08-admin-roles.png`（角色与权限），删除已下线页面的 `06-admin-usage.png` / `08-admin-license.png`；`demo-script.md` 与 `open-source-release.md` 的验收项同步勾选。
 
 - `CONTRIBUTING.md`：测试命令补 `--basetemp=.pytest_tmp`（Windows 下 pytest 默认临时目录可能 `PermissionError: [WinError 5]`，表现为大量 fixture ERROR），并说明原因。
 - `docs/configuration.md`：补 `API_DOCS_ENABLED`，更新 `TRACE_STORE_PAYLOAD` 默认值。
