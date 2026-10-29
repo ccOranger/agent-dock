@@ -26,7 +26,7 @@
 | B3 | ~~CI 缺镜像构建~~ **已补** | `ci.yml` 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，分层缓存走 gha 且各用一个 scope；PR 上就能暴露 Dockerfile 与前端产物问题（待首次 Actions 运行确认） |
 | B4 | **依赖许可证与漏洞扫描** | **已扫描；`hello-agents` 的 CC BY-NC-SA 4.0 经维护者决定暂不处理（按现状发布，风险由 NOTICE 声明）** | 2026-10-29 新增 `scripts/license_report.py` 与 [第三方许可证清单](third-party-licenses.md)：Python 188 个发行版 + Node 274 个包（生产 87 个），除 `hello-agents 0.2.9` 外全部为宽松许可，处置见 §2。CI 新增 `audit` job（`pip-audit` + `npm audit --omit=dev` + 许可证白名单，目前观察模式）。`npm audit --omit=dev` **0 告警**；全量 6 项均在 devDependencies（`vitest` 2→5 / `vite` 5→8 大版本），已记入 `SECURITY.md` |
 | B5 | ~~`docs/architecture.md` 缺失~~ **已补** | 新增 [架构说明](architecture.md)：组件拓扑、启动关闭、一轮对话链路、场景路由、上下文工程、记忆生命周期、RAG、MCP、鉴权限流、追踪模型、数据层、前端、扩展点、明确边界；README 文档表已挂链，`release.py` 必备文件清单已纳入 |
-| B6 | **Release 实体未发布** | tag 需重打为 `v0.2.0`（原 `v0.1.0` 指向旧提交，与当前内容不符）；CHANGELOG 已写，但 GitHub Release 正文、置顶路线图 issue、Discussions / 支持入口都还没有 |
+| B6 | **Release 实体未发布** | tag `v0.2.0` 已重打进发布提交（annotated，含许可证清单与 NOTICE 声明）；[Release Notes 正文](release-notes/v0.2.0.md) 已备好可直接粘贴；剩下的是 GitHub 网页动作：建 Release、置顶路线图 issue、开 Discussions |
 
 > 建议顺序：B1 → B4 → 更新本文件 → B2（转公开）→ B6（发 Release）。转公开之后再做 B6 才有效。
 
