@@ -1,4 +1,4 @@
-# 演示脚本与取景清单（v0.1）
+# 演示脚本与取景清单（v0.2）
 
 > 用途：README 首屏 GIF 的录制台词 + 发布物料截图的取景清单。
 > 台词取自 `backend/tests/fixtures/eval/customer_service.json` 的**已验证用例**（W4 实测 36/39 通过），

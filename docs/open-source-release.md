@@ -1,9 +1,10 @@
-# 开源发布检查清单（v0.1）
+# 开源发布检查清单（v0.2）
 
 > 目标：把当前仓库整理成"陌生人 30 分钟内能跑起来"的开源项目。
 > 关联文档：[产品定位](./positioning.md)、[开发清单](./development-checklist.md)。
-> 最近一次实检：**2026-10-29**（本地 `release.py check` 0 失败；`ruff check app tests` 通过；
-> `pytest -q --basetemp=.pytest_tmp` → 646 passed / 3 skipped；两端构建在 CI 绿；CI 已加 `docker` job）。
+> 最近一次实检：**2026-10-29**（版本号已统一为 **0.2.0**；本地 `release.py check` 0 失败；`ruff check app tests` 通过；
+> `pytest -q --basetemp=.pytest_tmp` → 629 passed / 3 skipped；两端 `npm run build` 通过；CI 已加 `docker` job；
+> 66 个 Markdown 内链 0 坏链）。
 > 勾选口径：`[x]` = 已在代码/仓库/CI 中验证；`[ ]` = 未做或不满足。
 
 ## 0. 发布目标
@@ -12,7 +13,7 @@
 |---|---|
 | 受众 | 能自己跑 Docker 的技术型团队 |
 | 首次体验 | 克隆 → `cp backend/.env.example .env` → `docker compose up` → 打开管理台 → 用演示数据对话 |
-| 版本 | v0.1.0，明确标注"早期版本，接口可能变化" |
+| 版本 | v0.2.0，明确标注"早期版本，接口可能变化" |
 | 渠道 | GitHub（主）+ Gitee（镜像）+ 2–3 篇技术文章 |
 | 成功标准 | 10 个真实部署、3 个外部 issue、1 篇社区转载 |
 
@@ -20,12 +21,12 @@
 
 | # | 阻塞项 | 现状 |
 |---|---|---|
-| B1 | **默认分支与发布版本一致** | `main` 落后 `release/v0.1.0` 两个提交（版本归并 + 截图/GIF + `demo-script.md`）。`main` 上既没有 `docs/assets/screenshots/` 也没有 README 首屏 GIF，陌生人克隆默认分支看到的是残缺版本 |
+| B1 | ~~默认分支与发布版本一致~~ **已清零** | 2026-10-29 已将 `main` 快进到发布提交（含 RBAC、数据分析、人工接管、截图与 GIF）；之前 `main` 落后 9 个提交 / 103 个文件 |
 | B2 | **仓库仍为私有** | `https://github.com/ccOranger/smart-cs` 返回 404；转公开前需确认最终归属（个人号 / 组织）与仓库名，并同步 README 徽章、克隆地址与 issue 模板里的链接 |
 | B3 | ~~CI 缺镜像构建~~ **已补** | `ci.yml` 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，分层缓存走 gha 且各用一个 scope；PR 上就能暴露 Dockerfile 与前端产物问题（待首次 Actions 运行确认） |
-| B4 | **依赖许可证与漏洞扫描** | 无第三方许可证清单，`pip-audit` / `npm audit` 未接入 CI，`SECURITY.md` 无"已知问题"段落 |
+| B4 | **依赖许可证与漏洞扫描** | 无第三方许可证清单，`pip-audit` / `npm audit` 未接入 CI，`SECURITY.md` 无"已知问题"段落。**2026-10-29 实测**：`npm audit` 报 7 个漏洞（4 moderate / 1 high / 2 critical，均在前端构建依赖链），需处置后记入 `SECURITY.md` |
 | B5 | ~~`docs/architecture.md` 缺失~~ **已补** | 新增 [架构说明](architecture.md)：组件拓扑、启动关闭、一轮对话链路、场景路由、上下文工程、记忆生命周期、RAG、MCP、鉴权限流、追踪模型、数据层、前端、扩展点、明确边界；README 文档表已挂链，`release.py` 必备文件清单已纳入 |
-| B6 | **Release 实体未发布** | tag `v0.1.0` 已打，CHANGELOG 已写，但 GitHub Release 正文、置顶路线图 issue、Discussions / 支持入口都还没有 |
+| B6 | **Release 实体未发布** | tag 需重打为 `v0.2.0`（原 `v0.1.0` 指向旧提交，与当前内容不符）；CHANGELOG 已写，但 GitHub Release 正文、置顶路线图 issue、Discussions / 支持入口都还没有 |
 
 > 建议顺序：B1 → B4 → 更新本文件 → B2（转公开）→ B6（发 Release）。转公开之后再做 B6 才有效。
 
@@ -36,7 +37,8 @@
 - [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）：当前 requirements 与前端依赖均为 MIT/BSD/Apache 类，但**没有正式扫描记录**。
 - [x] 产品名：对外 **AgentDock**；仓库名与代码代号保留 `smart-cs`（Compose 项目名、包名不变，避免已有数据卷失联）。
 - [x] 对外文案无真实客户名、内部系统名、真实域名：`docs/api.md`、`docs/configuration.md`、`docs/updates/23-license-edition.md` 里的客户名均为"某某科技有限公司"占位；截图抽查（嵌入挂件、数据分析页）无客户信息、无合同号、无真实域名。
-  - [ ] 剩余 6 张截图与 GIF 逐张复核（目前只抽查了 2 张）。
+  - [ ] 截图复核：`06-admin-usage.png`、`08-admin-license.png` 对应页面（用量报表、授权与版本）已下线，需重拍为
+        `06-admin-analytics.png`（数据分析）、`08-admin-roles.png`（角色与权限），删旧图后逐张复核。
 - [x] `SECURITY.md`：漏洞报告方式、支持版本、响应时限（尽力而为）。
 - [x] API 文档标题统一为 AgentDock（`main.py` 的 FastAPI `title`、`pyproject.toml` 的 `description` 不再出现旧名）。
 
@@ -108,7 +110,7 @@
 
 ## 8. 质量与 CI
 
-- [x] 后端：`ruff check app tests` + `pytest`（本地 646 passed / 3 skipped；CI Linux 上跳过 Windows 专用用例）。
+- [x] 后端：`ruff check app tests` + `pytest`（本地 629 passed / 3 skipped；CI Linux 上跳过 Windows 专用用例）。
 - [x] 前端：两端 `npm run build` 通过（仅有 chunk 体积告警）。
 - [x] GitHub Actions：backend job（Python 3.12，ruff + pytest）、frontend job（Node 20，矩阵构建两端）、docker job（backend / web 两个镜像 `push: false`，待首次运行确认）。
 - [x] 版本与锁文件：`requirements.txt` 版本策略、仓库根 `package-lock.json`（npm workspaces）入库；`python scripts/release.py check` 校验六处版本一致。
@@ -118,7 +120,8 @@
 ## 9. 发布物料
 
 - [x] 演示 GIF：四帧 13 秒（发问 + 工具回填 → 多意图 + 自动建单 → 跨轮补单 → 转人工），分镜见 [demo-script.md](demo-script.md)。
-- [x] 8 张截图：链路详情、业务场景、知识库、Agent 编辑、**数据分析**（待补；原用量报表截图 `06-admin-usage.png` 已随页面下线）、嵌入挂件、角色与权限。
+- [ ] 8 张截图：链路详情、业务场景、知识库、Agent 编辑、**数据分析**（待补）、嵌入挂件、角色与权限（待补）。
+  仓库现有 `06-admin-usage.png` / `08-admin-license.png` 两张已随页面下线，需重拍替换。
 - [ ] 技术文章三篇（当前 1/3）：
   1. [x] 多意图路由与提示词去具名化 —— [articles/01-multi-intent-routing.md](articles/01-multi-intent-routing.md)
   2. [ ] 记忆生命周期与跨轮上下文
@@ -134,7 +137,7 @@
 - [ ] 收集部署反馈：至少记录部署失败原因 Top 5，作为下一版优先项。
 - [ ] 不默认采集遥测；如需统计，必须显式 opt-in 并在文档说明。
 
-## 11. v0.1 验收清单
+## 11. v0.2 验收清单
 
 全部勾选才可发布：
 
@@ -149,7 +152,7 @@
 - [x] LICENSE、SECURITY、CONTRIBUTING 齐备。
 - [x] README 与产品定位文档一致，不再以"智能客服系统"作为唯一身份。
 
-## 12. v0.1 明确不做
+## 12. v0.2 明确不做
 
 - 多租户与租户隔离（只预留 `tenant_id`）。
 - SSO、计费、用量账单（RBAC 已落地：人员-角色-菜单矩阵，见 `app/core/rbac.py`）。
@@ -161,8 +164,8 @@
 ## 13. 维护者发布动作（按顺序执行）
 
 ```bash
-# 1. 合并发布分支，默认分支与 tag 对齐（B1）
-git checkout main && git merge --ff-only release/v0.1.0 && git push origin main
+# 1. 默认分支已对齐（B1 已清零，2026-10-29）：main == release 发布提交，日常提交直接进 main
+git checkout main && git pull --ff-only
 
 # 2. 发布前全量校验（B3/B4 补完后再跑一次）
 cd backend && ruff check app tests && pytest -q --basetemp=.pytest_tmp
@@ -176,4 +179,4 @@ python scripts/release.py bundle
 ```
 
 GitHub 网页端（本地无法代替）：Settings → 转公开 / 转移归属；Actions 勾选 docker job 首次运行；
-Releases 用 CHANGELOG 的 `[0.1.0]` 段落作正文；新建并置顶路线图 issue；开启 Discussions。
+Releases 用 CHANGELOG 的 `[0.2.0]` 段落作正文；新建并置顶路线图 issue；开启 Discussions。

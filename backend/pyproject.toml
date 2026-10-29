@@ -1,8 +1,21 @@
 [project]
 name = "cs-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = "AgentDock backend (HelloAgents + FastAPI; repo codename smart-cs)"
 requires-python = ">=3.11,<3.13"
+license = { text = "Apache-2.0" }
+authors = [{ name = "The smart-cs Authors" }]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Repository = "https://github.com/ccOranger/smart-cs"
+Issues = "https://github.com/ccOranger/smart-cs/issues"
 
 [tool.black]
 line-length = 120

@@ -11,7 +11,7 @@
 | 用例集 | `backend/tests/fixtures/eval/<scene_code>.json` | 进 Git、评审后才可改的回归用例（含期望与来源标注） |
 | 数据模型与纯逻辑 | `backend/app/schemas/eval.py`、`backend/app/services/eval_runner.py` | 用例校验、指纹、打分、聚合、基线 diff、报告渲染（不发请求、不碰 DB，可用 mock 单测） |
 | 执行器 | `scripts/eval.py` | 走**真实 HTTP 链路**采集 + 服务端链路回读 + 落库 + 出报告 |
-| 运行记录 | 表 `eval_runs`（v8 引入；当前 `SCHEMA_VERSION=10`） | 「上一次跑是多少」的持久对照，也是 `eval_pro` 看板唯一数据源 |
+| 运行记录 | 表 `eval_runs`（v8 引入；当前 `SCHEMA_VERSION=10`） | 「上一次跑是多少」的持久对照，也是将来后台评测看板的唯一数据源（看板尚未实现） |
 
 ## 2. 为什么必须走真实 HTTP 链路
 

@@ -39,9 +39,5 @@ reports/
 # HelloAgents 本地持久化（记忆/RAG 运行时真相，勿入库）
 backend/memory_data/
 
-# 授权文件（按部署签发，含客户名与合同号，禁止入库）
-license.json
-backend/license.json
-
 # 临时/打包产物
 .tmp_pkg/

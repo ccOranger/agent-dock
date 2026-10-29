@@ -55,7 +55,7 @@ setup_logging(settings.log_level)
 
 app = FastAPI(
     title="AgentDock API（仓库代号 smart-cs）",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
     # API_DOCS_ENABLED=false 时三个入口一并关闭：只关 /docs 仍能从 /openapi.json 拿到全量描述
     docs_url="/docs" if settings.api_docs_enabled else None,
