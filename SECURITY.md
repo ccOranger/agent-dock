@@ -36,8 +36,8 @@
   - 前端**开发依赖**在当前 `package-lock.json` 上有 6 项 `npm audit` 告警（2 critical / 1 high / 3 moderate），
     全部落在 `vitest` 2.1.9 → 5、`vite` 5.4.x → 8 的升级链上（`tinypool` / `esbuild` / `@vitest/mocker` / `vite-node`
     随主包一起动）；修复需要跨大版本升级，属专项任务。**生产依赖 0 项告警**，镜像产物不受影响。
-  - 核心依赖 `hello-agents` 以 **CC BY-NC-SA 4.0**（含非商业条款）分发，与本项目的 Apache-2.0 分发口径不一致；
-    本项目以库的形式调用、未修改其源码，商用场景需自行取得上游授权或替换该依赖。详见 [NOTICE](NOTICE)。
+  - 核心依赖 `hello-agents` 以 **CC BY-NC-SA 4.0**（含非商业条款）分发。本项目以库的形式调用、未修改其源码，
+    并整体采用同一许可，因此**仅限非商业使用**；商用需先解决上游授权或替换该依赖。详见 [NOTICE](NOTICE) 与 [LICENSE](LICENSE)。
 
 ## 部署安全基线
 

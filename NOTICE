@@ -3,7 +3,8 @@ Copyright 2026 The smart-cs Authors
 
 This product includes software developed by the smart-cs contributors.
 
-本仓库自有代码以 Apache License 2.0 发布，全文见 LICENSE。
+本仓库自有代码以 CC BY-NC-SA 4.0（署名—非商业性使用—相同方式共享）发布，全文见 LICENSE。
+项目整体与核心依赖的非商业条款保持同一口径；商业使用需另行取得书面授权。
 
 ## 第三方组件
 
@@ -22,7 +23,8 @@ PostgreSQL / Qdrant / Redis 等以独立服务方式使用，不随本仓库分�
 
 - **hello-agents 0.2.9** —— CC BY-NC-SA 4.0（署名—非商业性使用—相同方式共享），
   上游：https://github.com/jjyaoao/HelloAgents 。
-  本项目以库的形式调用该框架（未修改其源码），但其许可含**非商业条款**：以此为商业用途提供服务或分发产品时，
-  需自行向上游取得授权，或替换该依赖。本项目自有代码的 Apache-2.0 授权不改变第三方依赖自身的许可条件。
+  本项目以库的形式调用该框架（未修改其源码）。它的非商业条款正是本仓库选用 CC BY-NC-SA 4.0 的直接原因：
+  自有代码与核心依赖口径一致，既避免冲突，也让使用者只需理解一套限制条件。商业使用需同时解决上游与本项目的授权，
+  或替换该依赖；第三方依赖自身的许可条件不因本项目许可而改变。
 
 本文件仅作事实性声明，不构成法律意见；对外分发前请自行评估。

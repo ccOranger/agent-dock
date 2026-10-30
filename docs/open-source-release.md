@@ -2,9 +2,10 @@
 
 > 目标：把当前仓库整理成"陌生人 30 分钟内能跑起来"的开源项目。
 > 关联文档：[产品定位](./positioning.md)、[开发清单](./development-checklist.md)。
-> 最近一次实检：**2026-10-29**（版本号已统一为 **0.2.0**；本地 `release.py check` 0 失败；`ruff check app tests` 通过；
-> `pytest -q --basetemp=.pytest_tmp` → 629 passed / 3 skipped；两端 `npm run build` 通过；CI 已加 `docker` / `audit` job；
-> 依赖许可证已扫描并入库：[third-party-licenses.md](third-party-licenses.md)；66 个 Markdown 内链 0 坏链）。
+> 最近一次实检：**2026-10-30**（版本号已统一为 **0.2.0**；本地 `release.py check` 0 失败；`ruff check app tests` 通过；
+> `pytest -q --basetemp=.pytest_tmp` → 637 passed / 3 skipped；两端 `npm run build` 通过；CI 已加 `docker` / `audit` job；
+> 依赖许可证已扫描并入库：[third-party-licenses.md](third-party-licenses.md)；**同日项目整体改为 CC BY-NC-SA 4.0（非商业）**；
+> 66 个 Markdown 内链 0 坏链）。
 > 勾选口径：`[x]` = 已在代码/仓库/CI 中验证；`[ ]` = 未做或不满足。
 
 ## 0. 发布目标
@@ -24,7 +25,7 @@
 | B1 | ~~默认分支与发布版本一致~~ **已清零** | 2026-10-29 已将 `main` 快进到发布提交（含 RBAC、数据分析、人工接管、截图与 GIF）；之前 `main` 落后 9 个提交 / 103 个文件。同日进一步收敛为**单 `main` + tag**：`release/v0.2.0` 本地与远端均已删除（删除前校验与 `main` 同点、tag 提交在 main 线上），远端 `refs/heads` 只剩 `main` |
 | B2 | **仓库仍为私有** | `https://github.com/ccOranger/smart-cs` 返回 404；转公开前需确认最终归属（个人号 / 组织）与仓库名，并同步 README 徽章、克隆地址与 issue 模板里的链接；**另需先定下 B4 的 `hello-agents` 许可处置**（CC BY-NC-SA 4.0 决定项目能不能商用） |
 | B3 | ~~CI 缺镜像构建~~ **已补** | `ci.yml` 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，分层缓存走 gha 且各用一个 scope；PR 上就能暴露 Dockerfile 与前端产物问题（待首次 Actions 运行确认） |
-| B4 | **依赖许可证与漏洞扫描** | **已扫描；`hello-agents` 的 CC BY-NC-SA 4.0 经维护者决定暂不处理（按现状发布，风险由 NOTICE 声明）** | 2026-10-29 新增 `scripts/license_report.py` 与 [第三方许可证清单](third-party-licenses.md)：Python 188 个发行版 + Node 274 个包（生产 87 个），除 `hello-agents 0.2.9` 外全部为宽松许可，处置见 §2。CI 新增 `audit` job（`pip-audit` + `npm audit --omit=dev` + 许可证白名单，目前观察模式）。`npm audit --omit=dev` **0 告警**；全量 6 项均在 devDependencies（`vitest` 2→5 / `vite` 5→8 大版本），已记入 `SECURITY.md` |
+| B4 | **依赖许可证与漏洞扫描** | **已处置：`hello-agents` 的 CC BY-NC-SA 4.0 无法与宽松许可共存，项目整体已改为同一许可（2026-10-30，方案 ③）** | 2026-10-29 新增 `scripts/license_report.py` 与 [第三方许可证清单](third-party-licenses.md)：Python 188 个发行版 + Node 274 个包（生产 87 个），除 `hello-agents 0.2.9` 外全部为宽松许可，处置见 §2。CI 新增 `audit` job（`pip-audit` + `npm audit --omit=dev` + 许可证白名单，目前观察模式）。`npm audit --omit=dev` **0 告警**；全量 6 项均在 devDependencies（`vitest` 2→5 / `vite` 5→8 大版本），已记入 `SECURITY.md` |
 | B5 | ~~`docs/architecture.md` 缺失~~ **已补** | 新增 [架构说明](architecture.md)：组件拓扑、启动关闭、一轮对话链路、场景路由、上下文工程、记忆生命周期、RAG、MCP、鉴权限流、追踪模型、数据层、前端、扩展点、明确边界；README 文档表已挂链，`release.py` 必备文件清单已纳入 |
 | B6 | **Release 实体未发布** | tag `v0.2.0` 已重打进发布提交（annotated，含许可证清单与 NOTICE 声明）；[Release Notes 正文](release-notes/v0.2.0.md) 已备好可直接粘贴；剩下的是 GitHub 网页动作：建 Release、置顶路线图 issue、开 Discussions |
 
@@ -32,11 +33,11 @@
 
 ## 2. 法务与品牌
 
-- [x] 许可证：核心 Apache-2.0（`LICENSE`）。
+- [x] 许可证：**CC BY-NC-SA 4.0**（`LICENSE`）；2026-10-30 由 Apache-2.0 变更，理由见下一条。
 - [x] `NOTICE`（第三方声明位）：列出许可证清单的生成方式与唯一需单独说明的依赖 `hello-agents`（CC BY-NC-SA 4.0）。
-- [ ] 确认依赖许可证兼容（Python/Node 依赖清单扫描）：2026-10-29 已用 `scripts/license_report.py` 扫描（Python 188 个发行版、Node 274 个包 / 生产 87 个），清单见 [third-party-licenses.md](third-party-licenses.md)。**发现 1 项不兼容**：核心框架 `hello-agents 0.2.9` 为 **CC BY-NC-SA 4.0**（非商业 + 相同方式共享），与 Apache-2.0 项目直接冲突，已在 `NOTICE` 与 README 许可证段声明。
-  - [ ] 待决（三选一）：① 向上游 [jjyaoao/HelloAgents](https://github.com/jjyaoao/HelloAgents) 确认能否改用宽松许可或取得商用授权；② 把该依赖换成自研编排层（涉及 40 处引用：`SimpleAgent` / `HelloAgentsLLM` / `ToolRegistry` / `MemoryTool` / `RAGTool` / `MCPTool`）；③ 保持依赖但把产品定位明确收窄为非商业用途。
-    **2026-10-29 维护者决定：暂不处理** —— 按现行许可发布 v0.2.0，风险由 `NOTICE` 与 README 许可证段声明；转公开后若收到许可质疑，再回到本条按 ①/②/③ 处置。
+- [x] 确认依赖许可证兼容（Python/Node 依赖清单扫描）：2026-10-29 已用 `scripts/license_report.py` 扫描（Python 188 个发行版、Node 274 个包 / 生产 87 个），清单见 [third-party-licenses.md](third-party-licenses.md)。**核心框架 `hello-agents 0.2.9` 为 CC BY-NC-SA 4.0**（非商业 + 相同方式共享），无法与 Apache-2.0 共存。
+  - [x] **2026-10-30 按方案 ③ 落地**：项目整体改为 CC BY-NC-SA 4.0（`LICENSE`、四个 `package.json`、`backend/pyproject.toml`、README、`NOTICE` 同步），口径冲突消除；因仓库始终私有，Apache-2.0 从未对外生效，不存在回收问题。
+  - [ ] 日后若转商用，仍需三选一：① 向上游 [jjyaoao/HelloAgents](https://github.com/jjyaoao/HelloAgents) 取得商用授权或改用宽松许可；② 把该依赖换成自研编排层（`app` 内 46 处引用、11 个符号：`SimpleAgent` / `HelloAgentsLLM` / `Message` / `ToolRegistry` / `Tool` / `ToolParameter` / `MemoryTool` / `MemoryConfig` / `RAGTool` / `MCPTool` / `MCPClient`）；③ 仅自己作为版权人自用（仍受上游 NC 约束，不构成对外商用路径）。
 - [x] 产品名：对外 **AgentDock**；仓库名与代码代号保留 `smart-cs`（Compose 项目名、包名不变，避免已有数据卷失联）。
 - [x] 对外文案无真实客户名、内部系统名、真实域名：`docs/api.md`、`docs/configuration.md`、`docs/updates/23-license-edition.md` 里的客户名均为"某某科技有限公司"占位；截图抽查（嵌入挂件、数据分析页）无客户信息、无合同号、无真实域名。
   - [x] 截图复核：`06-admin-usage.png`、`08-admin-license.png` 对应页面（用量报表、授权与版本）已下线，旧图已删除；

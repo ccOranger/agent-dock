@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "description": "AgentDock — 可私有化部署的对话式 Agent 运营平台（仓库代号 smart-cs）",
-  "license": "Apache-2.0",
+  "license": "CC-BY-NC-SA-4.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ccOranger/smart-cs.git"

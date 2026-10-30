@@ -252,7 +252,11 @@ docs/             快速开始、架构说明、配置、部署、评测、FAQ�
 
 ## 许可证
 
-Apache License 2.0，详见 [LICENSE](LICENSE)。
+**CC BY-NC-SA 4.0**（署名—非商业性使用—相同方式共享 4.0 国际），详见 [LICENSE](LICENSE)。
 
-> 核心依赖 `hello-agents` 以 CC BY-NC-SA 4.0（含非商业条款）分发，商用前请先读 [NOTICE](NOTICE)；
-> 第三方依赖全量清单见 [docs/third-party-licenses.md](docs/third-party-licenses.md)。
+> 本项目**仅限非商业使用**：不得对外销售、按订阅或授权收费，也不得作为收费产品/收费服务的一部分交付；
+> 修改后对外发行须继续采用同一许可。
+> 采用该许可的原因：核心依赖 `hello-agents` 以 CC BY-NC-SA 4.0 分发（见 [NOTICE](NOTICE)），
+> 两者保持同一口径，避免“自有代码许可比核心依赖更宽松”的冲突。
+> 如需商业使用，请联系维护者另行取得授权；第三方依赖全量清单见
+> [docs/third-party-licenses.md](docs/third-party-licenses.md)。
