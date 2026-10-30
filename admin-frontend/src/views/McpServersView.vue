@@ -1,56 +1,62 @@
 <template>
-  <el-card>
-    <template #header>
-      <div class="card-header">
-        <b>MCP 服务管理</b>
-        <el-button type="primary" size="small" @click="openCreate">新增 MCP 服务</el-button>
-      </div>
-    </template>
+  <div class="page">
+    <PageHeader
+      title="MCP 服务管理"
+      description="登记外部 MCP 服务并绑定到 Agent；支持 sse / http / stdio 三种传输。"
+      :count="servers.length ? `${servers.length} 个` : undefined"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" @click="openCreate">新增 MCP 服务</el-button>
+      </template>
+    </PageHeader>
 
-    <el-table :data="servers" v-loading="loading">
-      <el-table-column prop="name" label="名称" width="180" />
-      <el-table-column prop="description" label="描述" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span v-if="row.description">{{ row.description }}</span>
-          <span v-else class="muted">—</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="传输" width="90">
-        <template #default="{ row }">
-          <el-tag size="small">{{ row.config.transport }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="端点 / 命令" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span v-if="row.config.transport === 'stdio'">
-            {{ row.config.command }} {{ (row.config.args || []).join(' ') }}
-          </span>
-          <span v-else>{{ row.config.endpoint }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="被引用 Agent" min-width="160">
-        <template #default="{ row }">
-          <el-tag v-for="a in row.used_by_agents" :key="a" size="small" type="info" style="margin-right: 4px">
-            {{ a }}
-          </el-tag>
-          <span v-if="!row.used_by_agents.length" class="muted">—</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="启用" width="80">
-        <template #default="{ row }">
-          <el-switch v-model="row.enabled" @change="() => onToggle(row)" />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="300" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="success" size="small" @click="openTools(row)">查看工具</el-button>
-          <el-button link type="warning" size="small" @click="test(row)">测试</el-button>
-          <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-  </el-card>
+    <el-card>
+      <el-table :data="servers" v-loading="loading">
+        <el-table-column prop="name" label="名称" width="180" />
+        <el-table-column prop="description" label="描述" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.description">{{ row.description }}</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="传输" width="90">
+          <template #default="{ row }">
+            <el-tag size="small">{{ row.config.transport }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="端点 / 命令" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.config.transport === 'stdio'" class="mono">
+              {{ row.config.command }} {{ (row.config.args || []).join(' ') }}
+            </span>
+            <span v-else class="mono">{{ row.config.endpoint }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="被引用 Agent" min-width="160">
+          <template #default="{ row }">
+            <el-tag v-for="a in row.used_by_agents" :key="a" size="small" type="info" style="margin-right: 4px">
+              {{ a }}
+            </el-tag>
+            <span v-if="!row.used_by_agents.length" class="muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="启用" width="80">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" @change="() => onToggle(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="300" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="success" size="small" @click="openTools(row)">查看工具</el-button>
+            <el-button link type="warning" size="small" @click="test(row)">测试</el-button>
+            <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </div>
 
   <el-dialog v-model="dialogVisible" :title="editing ? '编辑 MCP 服务' : '新增 MCP 服务'" width="560px">
     <el-form :model="form" label-width="120px">
@@ -97,28 +103,28 @@
     </template>
   </el-dialog>
 
-  <el-dialog v-model="toolsDialogVisible" :title="`工具列表 · ${toolsServerName}`" width="720px">
+  <el-drawer v-model="toolsDialogVisible" :title="`工具列表 · ${toolsServerName}`" size="55%">
     <div v-loading="toolsLoading" element-loading-text="连接 MCP 服务中…">
       <el-alert v-if="toolsError" :title="`获取失败：${toolsError}`" type="error" :closable="false" show-icon />
       <template v-else>
         <div class="tools-summary">共 {{ tools.length }} 个工具（展开行可查看参数 Schema）</div>
-        <el-table :data="tools" size="small" max-height="440">
+        <el-table :data="tools" size="small" max-height="calc(100vh - 220px)">
           <el-table-column type="expand">
             <template #default="{ row }">
-              <pre class="schema-pre">{{ JSON.stringify(row.input_schema, null, 2) }}</pre>
+              <pre class="text-block mono">{{ JSON.stringify(row.input_schema, null, 2) }}</pre>
             </template>
           </el-table-column>
           <el-table-column prop="name" label="工具名" width="260" />
           <el-table-column prop="description" label="描述" show-overflow-tooltip />
         </el-table>
-        <div v-if="!tools.length && !toolsLoading" class="muted">未发现工具</div>
+        <div v-if="!tools.length && !toolsLoading" class="muted" style="padding-top: 12px">未发现工具</div>
       </template>
     </div>
     <template #footer>
       <el-button @click="toolsDialogVisible = false">关闭</el-button>
       <el-button type="primary" :loading="toolsLoading" @click="loadTools(toolsServerId)">刷新</el-button>
     </template>
-  </el-dialog>
+  </el-drawer>
 </template>
 
 <script setup lang="ts">
@@ -133,6 +139,7 @@ import {
   apiUpdateMcpServer,
 } from '@/api'
 import type { MCPServer, MCPServerPayload, MCPServerTool } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
 
 const servers = ref<MCPServer[]>([])
 const loading = ref(false)
@@ -306,27 +313,16 @@ onMounted(load)
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.muted {
-  color: #909399;
-}
 .tools-summary {
-  margin-bottom: 8px;
-  color: #606266;
+  margin-bottom: 10px;
+  color: var(--cs-text-3);
   font-size: 13px;
 }
-.schema-pre {
-  margin: 0;
-  padding: 8px 12px;
-  background: #f5f7fa;
-  border-radius: 4px;
+
+/* 工具 input_schema 展开行 */
+.text-block.mono {
   font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  line-height: 1.55;
   word-break: break-all;
 }
 </style>

@@ -1,12 +1,17 @@
 <template>
-  <el-card>
-    <template #header>
-      <div class="card-header">
-        <b>Agent 管理</b>
-        <el-button type="primary" size="small" @click="openCreate">新增 Agent</el-button>
-      </div>
-    </template>
+  <div class="page">
+    <PageHeader
+      title="Agent 管理"
+      description="代码 Agent 全局可用；动态 Agent 由后台创建、只在所属场景内可绑定。知识库与工具绑定均在此维护。"
+      :count="agents.length ? `${agents.length} 个` : undefined"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" @click="openCreate">新增 Agent</el-button>
+      </template>
+    </PageHeader>
 
+    <el-card>
     <el-table :data="agents" v-loading="loading">
       <el-table-column prop="name" label="名称" width="160" />
       <el-table-column label="来源" width="90">
@@ -85,9 +90,9 @@
         </template>
       </el-table-column>
     </el-table>
-  </el-card>
+    </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="editing ? '编辑 Agent' : '新增 Agent'" width="640px">
+    <el-dialog v-model="dialogVisible" :title="editing ? '编辑 Agent' : '新增 Agent'" width="640px">
     <el-form :model="form" label-width="120px">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" :disabled="editing" placeholder="唯一标识，字母/数字/下划线" />
@@ -224,7 +229,7 @@
     </template>
   </el-dialog>
 
-  <el-dialog v-model="detailVisible" title="Agent 详情" width="720px">
+  <el-drawer v-model="detailVisible" title="Agent 详情" size="52%">
     <div v-loading="detailLoading">
       <el-descriptions v-if="detail" :column="2" border size="small">
         <el-descriptions-item label="名称">{{ detail.name }}</el-descriptions-item>
@@ -284,10 +289,8 @@
         </el-descriptions-item>
       </el-descriptions>
     </div>
-    <template #footer>
-      <el-button @click="detailVisible = false">关闭</el-button>
-    </template>
-  </el-dialog>
+  </el-drawer>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -306,6 +309,7 @@ import {
   apiUpdateAgent,
 } from '@/api'
 import type { AgentInfo, CustomToolSpec, DynamicAgentPayload, KnowledgeBase, MCPServer, Scene } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
 
 const agents = ref<AgentInfo[]>([])
 const mcpServers = ref<MCPServer[]>([])
@@ -459,13 +463,8 @@ onMounted(load)
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 .muted {
-  color: #909399;
+  color: var(--cs-text-3);
 }
 .hint {
   font-size: 12px;
@@ -479,7 +478,7 @@ onMounted(load)
   height: 14px;
   margin-left: 4px;
   border-radius: 50%;
-  background: #909399;
+  background: var(--cs-info);
   color: #fff;
   font-size: 10px;
   line-height: 1;
@@ -494,8 +493,9 @@ onMounted(load)
   word-break: break-word;
   font-size: 12px;
   line-height: 1.5;
-  background: #f5f7fa;
-  border-radius: 4px;
+  background: var(--cs-surface-sub);
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-sm);
   padding: 8px 12px;
 }
 </style>

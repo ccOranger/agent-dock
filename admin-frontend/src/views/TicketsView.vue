@@ -1,21 +1,24 @@
 <template>
-  <div>
-    <el-card>
-      <template #header>
-        <div class="head">
-          <b>工单管理</b>
-          <span class="hint">共 {{ total }} 张</span>
-        </div>
+  <div class="page">
+    <PageHeader
+      title="工单管理"
+      description="客户问题沉淀成的工单：按状态、紧急度与时间筛选，抽屉内可改状态并补录处理进展。"
+      :count="total"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
       </template>
+    </PageHeader>
 
-      <div class="filters">
+    <el-card>
+      <FilterBar :loading="loading" @search="reload" @reset="reset">
         <el-select v-model="filters.status" placeholder="状态" clearable style="width: 130px">
           <el-option v-for="(label, val) in TICKET_STATUS_LABELS" :key="val" :label="label" :value="val" />
         </el-select>
         <el-select v-model="filters.urgency" placeholder="紧急度" clearable style="width: 120px">
           <el-option v-for="(label, val) in TICKET_URGENCY_LABELS" :key="val" :label="label" :value="val" />
         </el-select>
-        <el-input v-model="filters.category" placeholder="分类（如 it_network / logistics）" clearable style="width: 200px" />
+        <el-input v-model="filters.category" placeholder="分类（如 it_network / logistics）" clearable style="width: 220px" />
         <el-input v-model="filters.keyword" placeholder="工单号 / 内容关键字" clearable style="width: 220px" />
         <el-date-picker
           v-model="dateRange"
@@ -26,9 +29,7 @@
           value-format="YYYY-MM-DDTHH:mm:ss"
           style="width: 340px"
         />
-        <el-button type="primary" @click="reload">查询</el-button>
-        <el-button @click="reset">重置</el-button>
-      </div>
+      </FilterBar>
 
       <el-table :data="rows" v-loading="loading" style="margin-top: 16px">
         <el-table-column prop="ticket_no" label="工单号" width="150">
@@ -46,7 +47,7 @@
             <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="update_count" label="补录数" width="80" />
+        <el-table-column prop="update_count" label="补录数" width="80" align="right" />
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">{{ fmt(row.created_at) }}</template>
         </el-table-column>
@@ -58,7 +59,7 @@
       </el-table>
 
       <el-pagination
-        style="margin-top: 16px; justify-content: flex-end"
+        class="pager"
         layout="total, prev, pager, next, sizes"
         :total="total"
         v-model:current-page="page"
@@ -95,9 +96,16 @@
           <el-empty v-if="current && !current.updates.length" description="暂无补录" :image-size="60" />
         </div>
 
-        <div class="add-note">
-          <el-input v-model="noteText" type="textarea" :rows="2" placeholder="补录一条信息（资产编号 / 报错信息 / 处理进展…）" />
-          <el-button type="primary" :loading="noteSaving" @click="onAddNote" style="margin-top: 8px">保存补录</el-button>
+        <div>
+          <el-input
+            v-model="noteText"
+            type="textarea"
+            :rows="2"
+            placeholder="补录一条信息（资产编号 / 报错信息 / 处理进展…）"
+          />
+          <el-button type="primary" :loading="noteSaving" @click="onAddNote" style="margin-top: 8px">
+            保存补录
+          </el-button>
         </div>
       </div>
     </el-drawer>
@@ -109,8 +117,12 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { apiAddTicketNote, apiListTickets, apiTicketDetail, apiUpdateTicketStatus } from '@/api'
+import type { TicketFilters } from '@/api'
+import { usePagedList } from '@/composables/usePagedList'
 import type { TicketDetail, TicketSummary } from '@/types'
 import { TICKET_STATUS_LABELS, TICKET_URGENCY_LABELS } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
+import FilterBar from '@/components/FilterBar.vue'
 
 function fmt(v?: string | null) {
   return v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'
@@ -128,11 +140,8 @@ function statusLabel(s: string) {
   return TICKET_STATUS_LABELS[s as keyof typeof TICKET_STATUS_LABELS] ?? s
 }
 
-const rows = ref<TicketSummary[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(20)
-const loading = ref(false)
+const { rows, total, page, pageSize, loading, load: fetchPage, reload: reloadPage } =
+  usePagedList<TicketSummary>((params, p, size) => apiListTickets(params as TicketFilters, p, size))
 
 const filters = ref<{ status?: string; urgency?: string; category?: string; keyword?: string }>({})
 const dateRange = ref<[string, string] | null>(null)
@@ -153,20 +162,12 @@ function buildParams() {
   return p
 }
 
-async function load() {
-  loading.value = true
-  try {
-    const data = await apiListTickets(buildParams() as any, page.value, pageSize.value)
-    rows.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
+function load() {
+  return fetchPage(buildParams())
 }
 
 function reload() {
-  page.value = 1
-  load()
+  return reloadPage(buildParams())
 }
 
 function reset() {
@@ -226,58 +227,49 @@ onMounted(load)
 </script>
 
 <style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.pager {
+  margin-top: 16px;
+  justify-content: flex-end;
 }
-.hint {
-  color: #909399;
-  font-size: 13px;
-}
-.filters {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.mono {
-  font-family: Consolas, Menlo, monospace;
-  font-size: 12px;
-  color: #606266;
-}
+
 .detail {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
+
 .section-title {
+  font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--cs-text-1);
 }
+
 .timeline {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+
 .upd {
   padding: 8px 12px;
-  border-radius: 8px;
-  background: #f4f4f5;
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface-sub);
+  border: 1px solid var(--cs-border-light);
 }
+
 .upd-meta {
   font-size: 12px;
-  color: #909399;
+  color: var(--cs-text-3);
   margin-bottom: 4px;
 }
+
 .upd .act {
-  color: #e6a23c;
+  color: var(--cs-warning);
 }
+
 .upd-content {
   white-space: pre-wrap;
   word-break: break-word;
-  color: #303133;
-}
-.add-note {
-  margin-top: 8px;
+  color: var(--cs-text-1);
 }
 </style>

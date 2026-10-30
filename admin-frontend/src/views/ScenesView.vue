@@ -1,103 +1,106 @@
 <template>
-  <el-card>
-    <template #header>
-      <div class="card-header">
-        <b>业务场景</b>
-        <div class="header-ops">
-          <el-button size="small" @click="load">刷新</el-button>
-          <el-button type="primary" size="small" @click="openCreate">新建场景</el-button>
-        </div>
-      </div>
-    </template>
+  <div class="page">
+    <PageHeader
+      title="业务场景"
+      description="场景把「谁能回答」圈定在绑定的 Agent 里；路由模式决定直连还是走路由 LLM。"
+      :count="scenes.length ? `${scenes.length} 个` : undefined"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" @click="openCreate">新建场景</el-button>
+      </template>
+    </PageHeader>
 
-    <el-alert
-      type="info"
-      :closable="false"
-      show-icon
-      title="一套代码、一个聊天入口：请求带 scene_code 就落到对应场景，不带就是默认场景"
-      description="场景只做一件事——把「谁能回答」圈定在绑定的 Agent 里。路由不是独立实体：auto 下 1 个 Agent 直连、2 个及以上才调用路由 LLM；llm 强制路由；direct 强制直连。默认场景固定直连 default_assistant，避免通用提问被业务 Agent 抢答。"
-      style="margin-bottom: 12px"
-    />
+    <el-card>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="一套代码、一个聊天入口：请求带 scene_code 就落到对应场景，不带就是默认场景"
+        description="场景只做一件事——把「谁能回答」圈定在绑定的 Agent 里。路由不是独立实体：auto 下 1 个 Agent 直连、2 个及以上才调用路由 LLM；llm 强制路由；direct 强制直连。默认场景固定直连 default_assistant，避免通用提问被业务 Agent 抢答。"
+        style="margin-bottom: 12px"
+      />
 
-    <el-table :data="scenes" v-loading="loading">
-      <el-table-column label="场景" min-width="200">
-        <template #default="{ row }">
-          <div class="scene-name">
-            <span class="name">{{ row.display_name }}</span>
-            <el-tag v-if="row.is_default" size="small" type="success">默认</el-tag>
-            <el-tag v-if="row.status === 'paused'" size="small" type="warning">已停用</el-tag>
-            <el-tag v-if="row.status === 'archived'" size="small" type="info">已归档</el-tag>
-          </div>
-          <div class="code-line">
-            <code>{{ row.code }}</code>
-            <el-tooltip content="复制场景标识" placement="top">
-              <el-button link size="small" @click="copyCode(row.code)">复制</el-button>
-            </el-tooltip>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column label="路由模式" width="170">
-        <template #default="{ row }">
-          <el-tag size="small" :type="modeTagType(row.router_mode)">
-            {{ modeLabel(row.router_mode) }}
-          </el-tag>
-          <div class="muted small">{{ modeHint(row) }}</div>
-        </template>
-      </el-table-column>
-      <el-table-column label="绑定 Agent" width="110">
-        <template #default="{ row }">
-          <span :class="{ muted: !row.agent_count }">{{ row.agent_count }} 个</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="今日请求" width="150">
-        <template #default="{ row }">
-          <span :class="quotaTextClass(row)">{{ row.today_requests ?? 0 }}</span>
-          <span class="muted small"> / {{ row.quota_daily ? row.quota_daily : '不限' }}</span>
-          <div class="muted small">
-            {{ row.quota_daily ? (row.quota_source === 'scene' ? '场景日额度' : '继承额度') : '未配置额度' }}
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column label="说明" min-width="220" show-overflow-tooltip>
-        <template #default="{ row }">
-          {{ row.description || '—' }}
-        </template>
-      </el-table-column>
-      <el-table-column label="启用" width="70">
-        <template #default="{ row }">
-          <el-switch
-            v-model="row.status"
-            active-value="active"
-            inactive-value="paused"
-            :disabled="row.is_default"
-            @change="() => onToggle(row)"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="380" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button
-            link
-            type="primary"
-            size="small"
-            :disabled="row.is_default"
-            @click="openBind(row)"
-          >绑定 Agent</el-button>
-          <el-button link type="primary" size="small" @click="openScripts(row)">固定话术</el-button>
-          <el-button link type="primary" size="small" @click="openEmbed(row)">接入</el-button>
-          <el-button link type="primary" size="small" @click="openChat(row)">试聊</el-button>
-          <el-button
-            v-if="!row.is_default"
-            link
-            type="danger"
-            size="small"
-            @click="remove(row)"
-          >删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-  </el-card>
+      <el-table :data="scenes" v-loading="loading">
+        <el-table-column label="场景" min-width="200">
+          <template #default="{ row }">
+            <div class="scene-name">
+              <span class="name">{{ row.display_name }}</span>
+              <el-tag v-if="row.is_default" size="small" type="success">默认</el-tag>
+              <el-tag v-if="row.status === 'paused'" size="small" type="warning">已停用</el-tag>
+              <el-tag v-if="row.status === 'archived'" size="small" type="info">已归档</el-tag>
+            </div>
+            <div class="code-line">
+              <code>{{ row.code }}</code>
+              <el-tooltip content="复制场景标识" placement="top">
+                <el-button link size="small" @click="copyCode(row.code)">复制</el-button>
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="路由模式" width="170">
+          <template #default="{ row }">
+            <el-tag size="small" :type="modeTagType(row.router_mode)">
+              {{ modeLabel(row.router_mode) }}
+            </el-tag>
+            <div class="muted small">{{ modeHint(row) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="绑定 Agent" width="110">
+          <template #default="{ row }">
+            <span :class="{ muted: !row.agent_count }">{{ row.agent_count }} 个</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="今日请求" width="150">
+          <template #default="{ row }">
+            <span :class="quotaTextClass(row)">{{ row.today_requests ?? 0 }}</span>
+            <span class="muted small"> / {{ row.quota_daily ? row.quota_daily : '不限' }}</span>
+            <div class="muted small">
+              {{ row.quota_daily ? (row.quota_source === 'scene' ? '场景日额度' : '继承额度') : '未配置额度' }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="说明" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.description || '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="启用" width="70">
+          <template #default="{ row }">
+            <el-switch
+              v-model="row.status"
+              active-value="active"
+              inactive-value="paused"
+              :disabled="row.is_default"
+              @change="() => onToggle(row)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="380" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button
+              link
+              type="primary"
+              size="small"
+              :disabled="row.is_default"
+              @click="openBind(row)"
+            >绑定 Agent</el-button>
+            <el-button link type="primary" size="small" @click="openScripts(row)">固定话术</el-button>
+            <el-button link type="primary" size="small" @click="openEmbed(row)">接入</el-button>
+            <el-button link type="primary" size="small" @click="openChat(row)">试聊</el-button>
+            <el-button
+              v-if="!row.is_default"
+              link
+              type="danger"
+              size="small"
+              @click="remove(row)"
+            >删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </div>
 
   <el-dialog
     v-model="dialogVisible"
@@ -1353,45 +1356,36 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.header-ops {
-  display: flex;
-  gap: 8px;
-}
 .scene-name {
   display: flex;
   align-items: center;
   gap: 6px;
 }
+
 .scene-name .name {
   font-weight: 600;
 }
+
 .code-line {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-top: 2px;
-}
-.code-line code {
-  color: #606266;
   font-size: 12px;
 }
-.muted {
-  color: #909399;
-}
+
 .small {
   font-size: 12px;
 }
+
 .rule-tip {
   margin-top: 2px;
-  color: #909399;
+  color: var(--cs-text-3);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
 }
+
+/* 表单里的 ? 帮助标记 */
 .q-help {
   display: inline-block;
   margin-left: 4px;
@@ -1400,18 +1394,20 @@ onMounted(async () => {
   line-height: 14px;
   text-align: center;
   border-radius: 50%;
-  background: #c0c4cc;
+  background: var(--cs-info);
   color: #fff;
   font-size: 11px;
   cursor: help;
 }
+
 /* 今日请求 / 日额度着色：达上限标红、超 80% 标黄 */
 .quota-warn {
-  color: #e6a23c;
+  color: var(--cs-warning);
   font-weight: 600;
 }
+
 .quota-full {
-  color: #f56c6c;
+  color: var(--cs-danger);
   font-weight: 600;
 }
 /* 运行参数：每项右侧的来源标签与生效值 */
@@ -1437,7 +1433,7 @@ onMounted(async () => {
 .script-text {
   margin-top: 2px;
   font-size: 12px;
-  color: #606266;
+  color: var(--cs-text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1452,8 +1448,8 @@ onMounted(async () => {
 .bind-col {
   flex: 1;
   min-width: 0;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-sm);
   padding: 8px;
 }
 .bind-col-title {
@@ -1471,8 +1467,8 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 8px;
-  background: #f8f9fb;
-  border-radius: 4px;
+  background: var(--cs-surface-sub);
+  border-radius: var(--cs-radius-sm);
 }
 .bind-info {
   display: flex;
@@ -1487,7 +1483,7 @@ onMounted(async () => {
   line-height: 18px;
   text-align: center;
   border-radius: 50%;
-  background: #2b5aa0;
+  background: var(--cs-brand-strong);
   color: #fff;
   font-size: 11px;
 }
@@ -1529,13 +1525,16 @@ onMounted(async () => {
 .track-label {
   flex: none;
   font-size: 13px;
-  color: #606266;
+  color: var(--cs-text-2);
 }
+
 .track-error {
   display: block;
   margin-top: 2px;
-  color: #f56c6c;
+  color: var(--cs-danger);
 }
+
+/* 嵌入代码示例：固定暗色块，便于区分「可复制配置」与正文 */
 .embed-code pre,
 .embed-pre {
   width: 100%;
@@ -1544,17 +1543,18 @@ onMounted(async () => {
   padding: 10px 12px;
   background: #0f172a;
   color: #e2e8f0;
-  border-radius: 6px;
+  border-radius: var(--cs-radius-sm);
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
 }
+
 .embed-preview {
   width: 100%;
   height: 560px;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  background: #f5f7fa;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-bg);
 }
 </style>

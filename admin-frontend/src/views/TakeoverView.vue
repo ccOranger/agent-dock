@@ -3,8 +3,8 @@
     <!-- 左：待接入 / 已接入队列 -->
     <el-card class="queue-card" shadow="never">
       <template #header>
-        <div class="head">
-          <b>接管队列</b>
+        <div class="card-head">
+          <span class="card-head-title">接管队列</span>
           <el-button size="small" text :loading="queueLoading" @click="loadQueue()">刷新</el-button>
         </div>
       </template>
@@ -71,9 +71,9 @@
     <!-- 右：会话工作区 -->
     <el-card class="work-card" shadow="never">
       <template #header>
-        <div class="head">
+        <div class="card-head">
           <div class="work-title">
-            <b>{{ detail?.session.title || '选择一个会话开始接入' }}</b>
+            <span class="card-head-title">{{ detail?.session.title || '选择一个会话开始接入' }}</span>
             <el-tag v-if="detail" :type="detail.session.status === 'human_handling' ? 'success' : 'warning'" size="small">
               {{ detail.session.status === 'human_handling' ? '人工接管中' : '待接入' }}
             </el-tag>
@@ -373,61 +373,68 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 双栏工作台：左队列固定宽，右工作区自适应；容器撑满可视区 */
 .takeover {
   display: grid;
   grid-template-columns: minmax(320px, 380px) 1fr;
   gap: 16px;
   align-items: start;
 }
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
+
 .tab-badge {
   margin-left: 6px;
 }
+
 .queue-list {
   max-height: calc(100vh - 260px);
   overflow-y: auto;
 }
+
+/* 队列条目：悬停淡蓝、选中左边缘强调 */
 .queue-item {
   padding: 10px 12px;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
   margin-bottom: 8px;
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-md);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
+
 .queue-item:hover {
-  border-color: #c6e2ff;
-  background: #f5faff;
+  border-color: rgba(64, 158, 255, 0.35);
+  background: rgba(64, 158, 255, 0.03);
 }
+
 .queue-item.active {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: var(--cs-brand);
+  background: rgba(64, 158, 255, 0.08);
+  box-shadow: inset 3px 0 0 var(--cs-brand);
 }
+
 .qi-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
 }
+
 .qi-title {
   font-weight: 600;
+  color: var(--cs-text-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .qi-sub {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 6px;
   font-size: 13px;
-  color: #606266;
+  color: var(--cs-text-2);
 }
+
 .qi-foot {
   display: flex;
   justify-content: space-between;
@@ -435,26 +442,31 @@ onBeforeUnmount(() => {
   margin-top: 6px;
   font-size: 12px;
 }
+
+/* 队列内文字普遍偏小，单条信息密度高 */
 .muted {
-  color: #909399;
   font-size: 12px;
 }
+
 .work-title {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
+
 .work-actions {
   display: flex;
   gap: 8px;
 }
+
 .placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 320px;
 }
+
 .conversation {
   display: flex;
   flex-direction: column;
@@ -463,55 +475,69 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding-bottom: 8px;
 }
+
 .msg {
   max-width: 80%;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: #f4f4f5;
+  padding: 10px 12px;
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-surface-sub);
 }
+
 /* 坐席工作台视角：客户在左、我方（人工/机器人）在右 */
 .msg.customer {
   align-self: flex-start;
-  background: #ecf5ff;
+  background: rgba(64, 158, 255, 0.08);
+  border-color: rgba(64, 158, 255, 0.18);
 }
+
 .msg.staff {
   align-self: flex-end;
-  background: #f0f9eb;
+  background: rgba(103, 194, 58, 0.1);
+  border-color: rgba(103, 194, 58, 0.2);
 }
+
 .msg.bot {
   align-self: flex-end;
-  background: #f4f4f5;
+  background: var(--cs-surface-sub);
 }
+
 .msg.staff .msg-meta,
 .msg.bot .msg-meta {
   justify-content: flex-end;
 }
+
 .msg-meta {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   font-size: 12px;
-  color: #909399;
+  color: var(--cs-text-3);
 }
+
 .msg-content {
   white-space: pre-wrap;
   word-break: break-word;
-  color: #303133;
+  color: var(--cs-text-1);
 }
+
 .composer {
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid var(--cs-border-light);
   padding-top: 12px;
   margin-top: 8px;
 }
+
 .claim-bar {
   display: flex;
   align-items: center;
   gap: 12px;
 }
+
 .claim-bar :deep(.el-alert) {
   flex: 1;
 }
+
 .reply-row {
   display: flex;
   gap: 8px;

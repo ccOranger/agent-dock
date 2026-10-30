@@ -1,166 +1,166 @@
 <template>
-  <el-card>
-    <template #header>
-      <div class="card-header">
-        <b>固定话术</b>
-        <div class="header-ops">
-          <el-select
-            v-model="sceneFilter"
-            placeholder="全部场景"
+  <div class="page">
+    <PageHeader
+      title="固定话术"
+      description="命中规则的话术会在路由与大模型之前逐字接住；支持问法、关键词两种匹配，也可挂知识库做检索拼接。"
+      :count="`${enabledCount} / ${scripts.length} 启用`"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" @click="openCreate">新增话术</el-button>
+      </template>
+    </PageHeader>
+
+    <el-card>
+      <FilterBar :loading="loading" @search="load" @reset="resetSceneFilter">
+        <el-select v-model="sceneFilter" placeholder="全部场景" clearable style="width: 180px" @change="load">
+          <el-option label="全部场景" value="" />
+          <el-option
+            v-for="scene in scenes"
+            :key="scene.code"
+            :label="scene.display_name"
+            :value="scene.code"
+          />
+        </el-select>
+      </FilterBar>
+
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="命中的客户提问会在路由与大模型之前被这句话逐字接住"
+        description="匹配只开放两种规则：问法（归一化后整句相同才算命中，不会吞掉带后半句的业务问法）与关键词（句中出现即命中，判定更宽），不开放正则。话术全部存在这张表里（代码里没有兜底规则）：停用或删除某条，这类提问就正常交给路由与大模型。新增关键词请先用下方命中测试验证，误吞的代价是把真实业务诉求用一句模板打发掉。"
+        style="margin-bottom: 12px"
+      />
+
+      <el-alert
+        v-if="!loading && !enabledCount"
+        type="info"
+        :closable="false"
+        show-icon
+        title="当前没有任何启用的话术，固定话术能力等于关闭（所有提问都走路由与大模型）"
+        style="margin-bottom: 12px"
+      />
+
+      <el-card shadow="never" class="match-card">
+        <div class="match-row">
+          <span class="match-label">命中测试</span>
+          <el-input
+            v-model="matchQuery"
+            placeholder="输入一句客户真实会问的话，例如：请问你是谁呀？"
             clearable
-            style="width: 150px"
-            @change="load"
-          >
-            <el-option label="全部场景" value="" />
-            <el-option
-              v-for="scene in scenes"
-              :key="scene.code"
-              :label="scene.display_name"
-              :value="scene.code"
-            />
-          </el-select>
-          <el-button size="small" @click="load">刷新</el-button>
-          <el-button type="primary" size="small" @click="openCreate">新增话术</el-button>
+            @keyup.enter="runMatch"
+          />
+          <el-button type="primary" :loading="matching" @click="runMatch">测试</el-button>
         </div>
-      </div>
-    </template>
+        <div v-if="matchResult" class="match-result">
+          <div class="match-line">
+            <span class="muted">归一化主干：</span>
+            <code>{{ matchResult.normalized || '（空）' }}</code>
+            <template v-if="matchResult.matched">
+              <el-tag size="small" type="success">{{ matchResult.title || matchResult.key }}</el-tag>
+              <el-tag size="small" type="info">{{ categoryLabel(matchResult.category) }}</el-tag>
+              <el-tag v-if="matchResult.answer_source === 'kb'" size="small" type="warning">
+                知识库：{{ (matchResult.kb_namespaces || []).join('、') || '未选库' }}
+              </el-tag>
+            </template>
+            <el-tag v-else size="small" type="info">未命中，本轮交给路由与大模型</el-tag>
+          </div>
+          <pre v-if="matchResult.reply_text" class="text-block reply-pre">{{ matchResult.reply_text }}</pre>
+        </div>
+      </el-card>
 
-    <el-alert
-      type="warning"
-      :closable="false"
-      show-icon
-      title="命中的客户提问会在路由与大模型之前被这句话逐字接住"
-      description="匹配只开放两种规则：问法（归一化后整句相同才算命中，不会吞掉带后半句的业务问法）与关键词（句中出现即命中，判定更宽），不开放正则。话术全部存在这张表里（代码里没有兜底规则）：停用或删除某条，这类提问就正常交给路由与大模型。新增关键词请先用下方命中测试验证，误吞的代价是把真实业务诉求用一句模板打发掉。"
-      style="margin-bottom: 12px"
-    />
-
-    <el-alert
-      v-if="!loading && !enabledCount"
-      type="info"
-      :closable="false"
-      show-icon
-      title="当前没有任何启用的话术，固定话术能力等于关闭（所有提问都走路由与大模型）"
-      style="margin-bottom: 12px"
-    />
-
-    <el-card shadow="never" class="match-card">
-      <div class="match-row">
-        <span class="match-label">命中测试</span>
-        <el-input
-          v-model="matchQuery"
-          placeholder="输入一句客户真实会问的话，例如：请问你是谁呀？"
-          clearable
-          @keyup.enter="runMatch"
-        />
-        <el-button type="primary" :loading="matching" @click="runMatch">测试</el-button>
-      </div>
-      <div v-if="matchResult" class="match-result">
-        <div class="match-line">
-          <span class="muted">归一化主干：</span>
-          <code>{{ matchResult.normalized || '（空）' }}</code>
-          <template v-if="matchResult.matched">
-            <el-tag size="small" type="success">{{ matchResult.title || matchResult.key }}</el-tag>
-            <el-tag size="small" type="info">{{ categoryLabel(matchResult.category) }}</el-tag>
-            <el-tag v-if="matchResult.answer_source === 'kb'" size="small" type="warning">
-              知识库：{{ (matchResult.kb_namespaces || []).join('、') || '未选库' }}
+      <el-table :data="scripts" v-loading="loading">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="expand-box">
+              <div class="expand-title">应答正文（逐字下发，支持 Markdown）</div>
+              <pre class="text-block reply-pre">{{ row.reply_text }}</pre>
+              <div class="expand-title">回答来源</div>
+              <div class="tag-wrap">
+                <template v-if="row.answer_source === 'kb'">
+                  <el-tag size="small" type="warning">知识库检索拼接（不经模型改写）</el-tag>
+                  <el-tag v-for="ns in row.kb_namespaces" :key="ns" size="small" type="info">{{ ns }}</el-tag>
+                  <span v-if="!row.kb_namespaces.length" class="muted">未选择知识库</span>
+                </template>
+                <span v-else class="muted">文本逐字下发</span>
+              </div>
+              <div class="expand-title">问法（{{ row.patterns.length }}）</div>
+              <div class="tag-wrap">
+                <el-tag v-for="p in row.patterns" :key="p" size="small" type="info">{{ p }}</el-tag>
+                <span v-if="!row.patterns.length" class="muted">—</span>
+              </div>
+              <div class="expand-title">关键词（{{ row.keywords.length }}）</div>
+              <div class="tag-wrap">
+                <el-tag v-for="k in row.keywords" :key="k" size="small" type="warning">{{ k }}</el-tag>
+                <span v-if="!row.keywords.length" class="muted">—</span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priority" label="优先级" width="80" sortable />
+        <el-table-column label="归属" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.scene_id" size="small" type="success">{{ sceneName(row) }}</el-tag>
+            <el-tag v-else size="small" type="info">全局</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="标识" width="150">
+          <template #default="{ row }">
+            <span>{{ row.key }}</span>
+            <el-tooltip
+              v-if="row.is_builtin"
+              placement="top"
+              content="建库时写入的种子话术：可改文案、可停用，不可删除（删掉探听拒答会把系统提示词类提问重新交回模型发挥）"
+            >
+              <el-tag size="small" type="info" class="builtin-tag">种子</el-tag>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column label="分组" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.category === 'probing' ? 'danger' : ''">
+              {{ categoryLabel(row.category) }}
             </el-tag>
           </template>
-          <el-tag v-else size="small" type="info">未命中，本轮交给路由与大模型</el-tag>
-        </div>
-        <pre v-if="matchResult.reply_text" class="reply-pre">{{ matchResult.reply_text }}</pre>
-      </div>
+        </el-table-column>
+        <el-table-column label="回答来源" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.answer_source === 'kb'" size="small" type="warning">知识库</el-tag>
+            <el-tag v-else size="small" type="info">文本</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="title" label="名称" width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.title || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="规则" min-width="220">
+          <template #default="{ row }">
+            <span class="muted">问法 {{ row.patterns.length }} 条 · 关键词 {{ row.keywords.length }} 个</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="正文" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">{{ oneLine(row.reply_text) }}</template>
+        </el-table-column>
+        <el-table-column label="启用" width="70">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" @change="() => onToggle(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button
+              v-if="!row.is_builtin"
+              link
+              type="danger"
+              size="small"
+              @click="remove(row)"
+            >删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
-
-    <el-table :data="scripts" v-loading="loading">
-      <el-table-column type="expand">
-        <template #default="{ row }">
-          <div class="expand-box">
-            <div class="expand-title">应答正文（逐字下发，支持 Markdown）</div>
-            <pre class="reply-pre">{{ row.reply_text }}</pre>
-            <div class="expand-title">回答来源</div>
-            <div class="tag-wrap">
-              <template v-if="row.answer_source === 'kb'">
-                <el-tag size="small" type="warning">知识库检索拼接（不经模型改写）</el-tag>
-                <el-tag v-for="ns in row.kb_namespaces" :key="ns" size="small" type="info">{{ ns }}</el-tag>
-                <span v-if="!row.kb_namespaces.length" class="muted">未选择知识库</span>
-              </template>
-              <span v-else class="muted">文本逐字下发</span>
-            </div>
-            <div class="expand-title">问法（{{ row.patterns.length }}）</div>
-            <div class="tag-wrap">
-              <el-tag v-for="p in row.patterns" :key="p" size="small" type="info">{{ p }}</el-tag>
-              <span v-if="!row.patterns.length" class="muted">—</span>
-            </div>
-            <div class="expand-title">关键词（{{ row.keywords.length }}）</div>
-            <div class="tag-wrap">
-              <el-tag v-for="k in row.keywords" :key="k" size="small" type="warning">{{ k }}</el-tag>
-              <span v-if="!row.keywords.length" class="muted">—</span>
-            </div>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="priority" label="优先级" width="80" sortable />
-      <el-table-column label="归属" width="120">
-        <template #default="{ row }">
-          <el-tag v-if="row.scene_id" size="small" type="success">{{ sceneName(row) }}</el-tag>
-          <el-tag v-else size="small" type="info">全局</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="标识" width="150">
-        <template #default="{ row }">
-          <span>{{ row.key }}</span>
-          <el-tooltip
-            v-if="row.is_builtin"
-            placement="top"
-            content="建库时写入的种子话术：可改文案、可停用，不可删除（删掉探听拒答会把系统提示词类提问重新交回模型发挥）"
-          >
-            <el-tag size="small" type="info" class="builtin-tag">种子</el-tag>
-          </el-tooltip>
-        </template>
-      </el-table-column>
-      <el-table-column label="分组" width="100">
-        <template #default="{ row }">
-          <el-tag size="small" :type="row.category === 'probing' ? 'danger' : ''">
-            {{ categoryLabel(row.category) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="回答来源" width="110">
-        <template #default="{ row }">
-          <el-tag v-if="row.answer_source === 'kb'" size="small" type="warning">知识库</el-tag>
-          <el-tag v-else size="small" type="info">文本</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="title" label="名称" width="150" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.title || '—' }}</template>
-      </el-table-column>
-      <el-table-column label="规则" min-width="220">
-        <template #default="{ row }">
-          <span class="muted">问法 {{ row.patterns.length }} 条 · 关键词 {{ row.keywords.length }} 个</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="正文" min-width="220" show-overflow-tooltip>
-        <template #default="{ row }">{{ oneLine(row.reply_text) }}</template>
-      </el-table-column>
-      <el-table-column label="启用" width="70">
-        <template #default="{ row }">
-          <el-switch v-model="row.enabled" @change="() => onToggle(row)" />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="120" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button
-            v-if="!row.is_builtin"
-            link
-            type="danger"
-            size="small"
-            @click="remove(row)"
-          >删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-  </el-card>
+  </div>
 
   <el-dialog v-model="dialogVisible" :title="editing ? `编辑话术：${form.key}` : '新增话术'" width="640px">
     <el-form :model="form" label-width="110px">
@@ -321,6 +321,8 @@ import type {
   SceneOption,
 } from '@/types'
 import { CANNED_CATEGORY_LABELS } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
+import FilterBar from '@/components/FilterBar.vue'
 
 const scripts = ref<CannedScript[]>([])
 const scenes = ref<SceneOption[]>([])
@@ -401,6 +403,11 @@ function requireSceneCode(row: CannedScript): string | null {
 
 function oneLine(text: string) {
   return (text || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+}
+
+function resetSceneFilter() {
+  sceneFilter.value = ''
+  load()
 }
 
 async function load() {
@@ -557,71 +564,66 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.header-ops {
-  display: flex;
-  gap: 8px;
-}
 .match-card {
   margin-bottom: 12px;
-  background: #f8f9fb;
+  background: var(--cs-surface-sub);
 }
+
 .match-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
+
 .match-label {
   font-weight: 600;
   white-space: nowrap;
+  color: var(--cs-text-1);
 }
+
 .match-result {
   margin-top: 10px;
 }
+
 .match-line {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
+
 .expand-box {
   padding: 8px 16px;
 }
+
 .expand-title {
   margin: 8px 0 4px;
   font-weight: 600;
-  color: #303133;
+  color: var(--cs-text-1);
 }
+
 .tag-wrap {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
+
+/* 应答正文 / 检索片段：与全局 .text-block 一致，仅缩小字号适配表格展开行 */
 .reply-pre {
-  margin: 0;
-  padding: 8px 12px;
-  background: #f5f7fa;
-  border-radius: 4px;
   font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
+
 .builtin-tag {
   margin-left: 6px;
 }
-.muted {
-  color: #909399;
-}
+
 .tip {
   margin-left: 10px;
-  color: #909399;
+  color: var(--cs-text-3);
   font-size: 12px;
 }
+
+/* 表单里的 ? 帮助标记 */
 .q-help {
   display: inline-block;
   margin-left: 4px;
@@ -630,15 +632,16 @@ onMounted(async () => {
   line-height: 14px;
   text-align: center;
   border-radius: 50%;
-  background: #c0c4cc;
+  background: var(--cs-info);
   color: #fff;
   font-size: 11px;
   cursor: help;
 }
+
 .rule-tip {
   margin-top: 2px;
-  color: #909399;
+  color: var(--cs-text-3);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 </style>

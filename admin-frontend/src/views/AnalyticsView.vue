@@ -1,16 +1,16 @@
 <template>
-  <div>
-    <el-card>
-      <template #header>
-        <div class="head">
-          <b class="head-title"><el-icon><DataAnalysis /></el-icon>数据分析 · 成效指标</b>
-          <span class="tip">
-            全量三率来自日聚合（可对账）；链路三率来自采样链路，<b>仅作参考</b>
-          </span>
-        </div>
+  <div class="page">
+    <PageHeader
+      title="数据分析 · 成效指标"
+      description="全量三率来自日聚合（可对账）；链路三率来自采样链路，仅作参考。"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
       </template>
+    </PageHeader>
 
-      <div class="filters">
+    <el-card>
+      <FilterBar :loading="loading" @search="load" @reset="reset">
         <el-date-picker
           v-model="dateRange"
           type="daterange"
@@ -24,9 +24,11 @@
         <el-select v-model="sceneCode" placeholder="全部场景" clearable style="width: 170px">
           <el-option v-for="s in scenes" :key="s.code" :label="s.display_name" :value="s.code" />
         </el-select>
-        <el-button type="primary" :icon="Search" @click="load">查询</el-button>
-        <el-button :icon="Refresh" @click="reset">近 7 天</el-button>
-      </div>
+        <template #actions>
+          <el-button type="primary" :icon="Search" :loading="loading" @click="load">查询</el-button>
+          <el-button :icon="Refresh" @click="reset">近 7 天</el-button>
+        </template>
+      </FilterBar>
 
       <!-- 采样提示：链路三率可能低估，不能与全量三率混着解读 -->
       <el-alert
@@ -140,7 +142,6 @@ import {
   CircleCheck,
   CircleClose,
   Connection,
-  DataAnalysis,
   DataLine,
   Refresh,
   RefreshLeft,
@@ -152,6 +153,8 @@ import {
 import dayjs from 'dayjs'
 import { apiAnalyticsOutcomes, apiSceneOptions } from '@/api'
 import LineTrendChart from '@/components/LineTrendChart.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import FilterBar from '@/components/FilterBar.vue'
 import type { AnalyticsDailyRow, AnalyticsOutcomes, AnalyticsRate, SceneOption } from '@/types'
 
 type RateKey =
@@ -270,64 +273,48 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.head-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 15px;
-}
-.head-title .el-icon {
-  color: #409eff;
-}
-.tip {
-  font-size: 12px;
-  color: #909399;
-}
 .tip-row {
   margin-top: 12px;
 }
-.filters {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
+
 .group-title {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 20px 0 10px;
-  font-weight: 600;
   font-size: 14px;
+  font-weight: 600;
+  color: var(--cs-text-1);
 }
+
 .group-tag {
   cursor: help;
 }
+
 .group-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
+
 .group-label .el-icon {
-  color: #909399;
+  color: var(--cs-text-3);
   font-size: 15px;
 }
+
 .metric-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
 }
+
 .metric-label {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
+
 /* 图标底色：不靠颜色单独传递语义，标题文字仍在，色弱用户也能读 */
 .metric-icon {
   display: inline-flex;
@@ -335,57 +322,64 @@ onMounted(async () => {
   height: 26px;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: var(--cs-radius-sm);
   font-size: 15px;
 }
+
 .metric-icon.is-success {
-  background: #f0f9eb;
-  color: #67c23a;
+  background: rgba(103, 194, 58, 0.1);
+  color: var(--cs-success);
 }
+
 .metric-icon.is-warning {
-  background: #fdf6ec;
-  color: #e6a23c;
+  background: rgba(230, 162, 60, 0.1);
+  color: var(--cs-warning);
 }
+
 .metric-icon.is-danger {
-  background: #fef0f0;
-  color: #f56c6c;
+  background: rgba(245, 108, 108, 0.1);
+  color: var(--cs-danger);
 }
+
 .metric-icon.is-primary {
-  background: #ecf5ff;
-  color: #409eff;
+  background: rgba(64, 158, 255, 0.1);
+  color: var(--cs-brand);
 }
+
 .metric-title {
   font-size: 13px;
-  color: #606266;
+  color: var(--cs-text-2);
 }
+
 .metric-empty {
   font-size: 24px;
   line-height: 1.5;
-  color: #c0c4cc;
+  color: var(--cs-text-3);
 }
+
 .suffix {
   font-size: 14px;
-  color: #606266;
+  color: var(--cs-text-2);
 }
+
 .hint {
   margin-top: 6px;
 }
+
 .empty-day {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 8px 0;
 }
+
 .chart-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 14px;
 }
-.muted {
-  color: #909399;
-  font-size: 13px;
-}
+
 .footnote {
   margin-top: 20px;
   line-height: 1.6;

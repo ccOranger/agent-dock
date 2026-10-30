@@ -1,70 +1,73 @@
 <template>
-  <el-card>
-    <template #header>
-      <div class="card-header">
-        <b>接入方管理</b>
-        <div class="header-ops">
-          <el-button size="small" @click="load">刷新</el-button>
-          <el-button type="primary" size="small" @click="openCreate">新建接入方</el-button>
-        </div>
-      </div>
-    </template>
+  <div class="page">
+    <PageHeader
+      title="接入方管理"
+      description="服务端调用凭证按接入方管理：Key 归接入方，接入方再被授权到场景。"
+      :count="integrations.length ? `${integrations.length} 个` : undefined"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" @click="openCreate">新建接入方</el-button>
+      </template>
+    </PageHeader>
 
-    <el-alert
-      type="info"
-      :closable="false"
-      show-icon
-      title="服务端调用凭证按接入方管理：Key 归接入方，接入方再被授权到场景"
-      description="一个接入方可持多把 Key（轮换过渡期新旧并存），停用接入方会让名下所有 Key 立即失效。访客会话按接入方命名空间隔离，不同接入方下相同的客户标识互不干扰。"
-      style="margin-bottom: 12px"
-    />
+    <el-card>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="服务端调用凭证按接入方管理：Key 归接入方，接入方再被授权到场景"
+        description="一个接入方可持多把 Key（轮换过渡期新旧并存），停用接入方会让名下所有 Key 立即失效。访客会话按接入方命名空间隔离，不同接入方下相同的客户标识互不干扰。"
+        style="margin-bottom: 12px"
+      />
 
-    <el-table :data="integrations" v-loading="loading">
-      <el-table-column label="接入方" min-width="200">
-        <template #default="{ row }">
-          <div class="name-line">
-            <span class="name">{{ row.name }}</span>
-            <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
-              {{ row.status === 'active' ? '启用' : '已停用' }}
+      <el-table :data="integrations" v-loading="loading">
+        <el-table-column label="接入方" min-width="200">
+          <template #default="{ row }">
+            <div class="name-line">
+              <span class="name">{{ row.name }}</span>
+              <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
+                {{ row.status === 'active' ? '启用' : '已停用' }}
+              </el-tag>
+            </div>
+            <div class="muted small">{{ row.description || '—' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="公开标识" min-width="220">
+          <template #default="{ row }">
+            <code class="public-code mono">{{ row.public_code }}</code>
+            <el-button link size="small" @click="copyText(row.public_code)">复制</el-button>
+          </template>
+        </el-table-column>
+        <el-table-column label="授权场景" min-width="240">
+          <template #default="{ row }">
+            <el-tag
+              v-for="scene in row.scenes"
+              :key="scene.id"
+              size="small"
+              type="info"
+              class="scene-tag"
+            >
+              {{ scene.display_name }}
             </el-tag>
-          </div>
-          <div class="muted small">{{ row.description || '—' }}</div>
-        </template>
-      </el-table-column>
-      <el-table-column label="公开标识" min-width="220">
-        <template #default="{ row }">
-          <code class="public-code">{{ row.public_code }}</code>
-          <el-button link size="small" @click="copyText(row.public_code)">复制</el-button>
-        </template>
-      </el-table-column>
-      <el-table-column label="授权场景" min-width="240">
-        <template #default="{ row }">
-          <el-tag
-            v-for="scene in row.scenes"
-            :key="scene.id"
-            size="small"
-            type="info"
-            class="scene-tag"
-          >
-            {{ scene.display_name }}
-          </el-tag>
-          <span v-if="!row.scenes.length" class="muted">未授权任何场景</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="Key" width="90">
-        <template #default="{ row }">
-          <span :class="{ muted: !row.key_count }">{{ row.key_count }} 把</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="230" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="primary" size="small" @click="openKeys(row)">Key 管理</el-button>
-          <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-  </el-card>
+            <span v-if="!row.scenes.length" class="muted">未授权任何场景</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="Key" width="90">
+          <template #default="{ row }">
+            <span :class="{ muted: !row.key_count }">{{ row.key_count }} 把</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="230" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="primary" size="small" @click="openKeys(row)">Key 管理</el-button>
+            <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </div>
 
   <el-dialog
     v-model="dialogVisible"
@@ -193,6 +196,7 @@ import type {
   IntegrationUpdatePayload,
   Scene,
 } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
 
 const integrations = ref<Integration[]>([])
 const scenes = ref<Scene[]>([])
@@ -380,60 +384,60 @@ onMounted(load)
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.header-ops {
-  display: flex;
-  gap: 8px;
-}
 .name-line {
   display: flex;
   align-items: center;
   gap: 6px;
 }
+
 .name {
   font-weight: 600;
 }
+
 .public-code {
   font-size: 12px;
   word-break: break-all;
 }
+
 .scene-tag {
   margin-right: 4px;
   margin-bottom: 2px;
 }
-.muted {
-  color: #909399;
-}
+
 .small {
   font-size: 12px;
 }
+
 .rule-tip {
   margin-top: 2px;
-  color: #909399;
+  color: var(--cs-text-3);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
 }
+
 .keys-body {
   min-height: 160px;
 }
+
 .keys-ops {
   margin-bottom: 10px;
 }
+
+/* 新签发的 Key 明文：需要强提醒，用告警底色 */
 .issued-key {
   margin-bottom: 12px;
   padding: 10px 12px;
-  background: #fdf6ec;
-  border-radius: 6px;
+  border: 1px solid rgba(230, 162, 60, 0.28);
+  border-radius: var(--cs-radius-sm);
+  background: rgba(230, 162, 60, 0.08);
 }
+
 .issued-title {
   margin-bottom: 4px;
   color: #b88230;
   font-size: 12px;
 }
+
 .issued-key code {
   word-break: break-all;
 }

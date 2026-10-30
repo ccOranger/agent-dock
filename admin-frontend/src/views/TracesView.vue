@@ -1,11 +1,17 @@
 <template>
-  <div>
-    <el-card>
-      <template #header>
-        <b>请求链路</b>
+  <div class="page">
+    <PageHeader
+      title="请求链路"
+      description="逐次请求的意图、RAG、记忆、工具与耗时归因；行可点开查看时间线。"
+      :count="total"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
       </template>
+    </PageHeader>
 
-      <div class="filters">
+    <el-card>
+      <FilterBar :loading="loading" @search="reload" @reset="reset">
         <el-select v-model="filters.outcome" placeholder="结局" clearable style="width: 120px">
           <el-option label="已应答" value="answered" />
           <el-option label="转人工" value="handover" />
@@ -36,9 +42,7 @@
           value-format="YYYY-MM-DDTHH:mm:ss"
           style="width: 340px"
         />
-        <el-button type="primary" @click="reload">查询</el-button>
-        <el-button @click="reset">重置</el-button>
-      </div>
+      </FilterBar>
 
       <el-alert
         v-if="route.query.session_id"
@@ -70,19 +74,19 @@
         <el-table-column label="Agent" min-width="170">
           <template #default="{ row }">
             <el-tag v-for="n in row.agent_names" :key="n" size="small" class="chip">{{ n }}</el-tag>
-            <span v-if="!row.agent_names?.length" class="hint">-</span>
+            <span v-if="!row.agent_names?.length" class="muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="工具" min-width="170">
           <template #default="{ row }">
             <el-tag v-for="n in row.tool_names" :key="n" size="small" type="success" class="chip">{{ n }}</el-tag>
-            <span v-if="!row.tool_names?.length" class="hint">-</span>
+            <span v-if="!row.tool_names?.length" class="muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="MCP" min-width="140">
           <template #default="{ row }">
             <el-tag v-for="n in row.mcp_server_names" :key="n" size="small" type="warning" class="chip">{{ n }}</el-tag>
-            <span v-if="!row.mcp_server_names?.length" class="hint">-</span>
+            <span v-if="!row.mcp_server_names?.length" class="muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="意图/RAG/记忆" width="120">
@@ -102,7 +106,7 @@
           <template #default="{ row }">
             <el-tag v-if="row.tool_error_count" type="danger" size="small">工具×{{ row.tool_error_count }}</el-tag>
             <el-tag v-else-if="row.error_code" type="danger" size="small">{{ row.error_code }}</el-tag>
-            <span v-else class="hint">-</span>
+            <span v-else class="muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
@@ -114,7 +118,7 @@
       </el-table>
 
       <el-pagination
-        style="margin-top: 16px; justify-content: flex-end"
+        class="pager"
         layout="total, prev, pager, next, sizes"
         :total="total"
         v-model:current-page="page"
@@ -143,15 +147,20 @@ import dayjs from 'dayjs'
 import { apiListAgents, apiListTraces, apiSceneOptions, apiTraceDetail } from '@/api'
 import type { AgentInfo, RequestTraceDetail, RequestTraceSummary, SceneOption } from '@/types'
 import TraceTimeline from '@/components/TraceTimeline.vue'
+import { usePagedList } from '@/composables/usePagedList'
+import PageHeader from '@/components/PageHeader.vue'
+import FilterBar from '@/components/FilterBar.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-const rows = ref<RequestTraceSummary[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(20)
-const loading = ref(false)
+const { rows, total, page, pageSize, loading, load: fetchPage, reload: reloadPage } =
+  usePagedList<RequestTraceSummary>((params, p, size) =>
+    apiListTraces(params, p, size).catch((e: any) => {
+      ElMessage.error(e?.message || '加载链路失败')
+      throw e
+    }),
+  )
 const agents = ref<AgentInfo[]>([])
 const scenes = ref<SceneOption[]>([])
 
@@ -203,21 +212,11 @@ function buildParams() {
 }
 
 async function load() {
-  loading.value = true
-  try {
-    const data = await apiListTraces(buildParams(), page.value, pageSize.value)
-    rows.value = data.items
-    total.value = data.total
-  } catch (e: any) {
-    ElMessage.error(e?.message || '加载链路失败')
-  } finally {
-    loading.value = false
-  }
+  return fetchPage(buildParams())
 }
 
 function reload() {
-  page.value = 1
-  load()
+  return reloadPage(buildParams())
 }
 
 function reset() {
@@ -282,28 +281,30 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.filters {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
+.pager {
+  margin-top: 16px;
+  justify-content: flex-end;
 }
+
 .chip {
   margin-right: 4px;
 }
-.hint {
-  color: #909399;
-}
+
+/* 表格内密排数字：等宽 + 统一字号 */
 .mono {
-  font-family: Consolas, Menlo, monospace;
   font-size: 12px;
 }
+
 .tip {
   margin-top: 12px;
 }
+
 .drawer-actions {
   margin-top: 16px;
+  display: flex;
+  gap: 8px;
 }
+
 :deep(.el-table__row) {
   cursor: pointer;
 }

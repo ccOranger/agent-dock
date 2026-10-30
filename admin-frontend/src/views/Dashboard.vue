@@ -1,5 +1,10 @@
 <template>
-  <div>
+  <div class="page">
+    <PageHeader
+      title="概览"
+      description="资源总量、近 7 天调用排行与 Agent 状态一览；明细可前往对应管理页。"
+    />
+
     <!-- 顶部资源统计卡片 -->
     <el-row :gutter="16">
       <el-col :span="6">
@@ -40,7 +45,7 @@
       </el-col>
     </el-row>
 
-    <el-row :gutter="16" style="margin-top: 16px">
+    <el-row :gutter="16">
       <el-col :span="6">
         <el-card>
           <el-statistic title="MCP 工具引用次数" :value="mcpRefCount" />
@@ -64,10 +69,10 @@
     </el-row>
 
     <!-- 近 7 天调用排行：基于 request_traces 聚合的真实数据，非 Prometheus 指标 -->
-    <el-row :gutter="16" style="margin-top: 16px">
+    <el-row :gutter="16">
       <el-col :span="12">
         <el-card>
-          <template #header><b>近 7 天工具调用 Top 5</b></template>
+          <template #header><span class="card-head-title">近 7 天工具调用 Top 5</span></template>
           <p v-if="!toolUsageBars.length" class="muted">近 7 天暂无工具调用记录</p>
           <div v-else class="bar-list">
             <div v-for="bar in toolUsageBars" :key="bar.name" class="bar-row">
@@ -80,7 +85,7 @@
       </el-col>
       <el-col :span="12">
         <el-card>
-          <template #header><b>近 7 天 Agent 应答 Top 5</b></template>
+          <template #header><span class="card-head-title">近 7 天 Agent 应答 Top 5</span></template>
           <p v-if="!agentUsageBars.length" class="muted">近 7 天暂无 Agent 应答记录</p>
           <div v-else class="bar-list">
             <div v-for="bar in agentUsageBars" :key="bar.name" class="bar-row">
@@ -94,11 +99,11 @@
     </el-row>
 
     <!-- Agent 概览 -->
-    <el-card style="margin-top: 16px">
+    <el-card>
       <template #header>
-        <div class="head">
-          <b>Agent 概览</b>
-          <span class="tip">详情与开关请前往「Agent 管理」页</span>
+        <div class="card-head">
+          <span class="card-head-title">Agent 概览</span>
+          <span class="card-head-hint">详情与开关请前往「Agent 管理」页</span>
         </div>
       </template>
       <el-table :data="agents">
@@ -143,6 +148,7 @@ import {
   apiTraceUsage,
 } from '@/api'
 import type { AgentInfo, KnowledgeBase, MCPServer, CustomToolSpec } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
 
 const agents = ref<AgentInfo[]>([])
 const bases = ref<KnowledgeBase[]>([])
@@ -194,21 +200,10 @@ onMounted(async () => {
 <style scoped>
 .suffix {
   font-size: 13px;
-  color: #909399;
+  color: var(--cs-text-3);
 }
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.tip {
-  font-size: 12px;
-  color: #909399;
-}
-.muted {
-  color: #909399;
-  font-size: 13px;
-}
+
+/* 排行榜：细轨道 + 品牌色填充 */
 .bar-list {
   display: flex;
   flex-direction: column;
@@ -222,26 +217,27 @@ onMounted(async () => {
 .bar-label {
   width: 130px;
   font-size: 13px;
+  color: var(--cs-text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .bar-track {
   flex: 1;
-  height: 12px;
-  background: #f0f2f5;
-  border-radius: 6px;
+  height: 8px;
+  background: var(--cs-border-light);
+  border-radius: 4px;
   overflow: hidden;
 }
 .bar-fill {
   height: 100%;
-  background: #409eff;
-  border-radius: 6px;
+  background: var(--cs-brand);
+  border-radius: 4px;
 }
 .bar-count {
   width: 40px;
   text-align: right;
   font-size: 13px;
-  color: #606266;
+  color: var(--cs-text-2);
 }
 </style>

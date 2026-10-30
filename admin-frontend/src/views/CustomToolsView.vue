@@ -1,55 +1,60 @@
 <template>
-  <el-card>
-    <template #header>
-      <div class="card-header">
-        <b>自定义工具</b>
-        <el-button size="small" @click="load">刷新目录</el-button>
-      </div>
-    </template>
+  <div class="page">
+    <PageHeader
+      title="自定义工具"
+      description="后台登记代码目录中的工具，供动态 Agent 绑定；启用状态即时生效。"
+      :count="tools.length ? `${tools.length} 个` : undefined"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新目录</el-button>
+      </template>
+    </PageHeader>
 
-    <el-alert
-      type="info"
-      :closable="false"
-      show-icon
-      title="工具实现位于代码目录 app/tools/custom/（基类 BaseTool 同目录），此处仅做后台登记、启用/禁用，并供动态 Agent 绑定；新增工具需先在该目录开发，并在 app/tools/custom_catalog.py 的 _TOOL_CLASSES 中登记，重启后端后刷新。"
-      style="margin-bottom: 12px"
-    />
+    <el-card>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="工具实现位于代码目录 app/tools/custom/（基类 BaseTool 同目录），此处仅做后台登记、启用/禁用，并供动态 Agent 绑定；新增工具需先在该目录开发，并在 app/tools/custom_catalog.py 的 _TOOL_CLASSES 中登记，重启后端后刷新。"
+        style="margin-bottom: 12px"
+      />
 
-    <el-table :data="tools" v-loading="loading">
-      <el-table-column type="expand">
-        <template #default="{ row }">
-          <pre class="schema-pre">{{ JSON.stringify(row.parameters, null, 2) }}</pre>
-        </template>
-      </el-table-column>
-      <el-table-column prop="name" label="名称" width="180" />
-      <el-table-column label="描述" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.display_description || row.description }}</template>
-      </el-table-column>
-      <el-table-column label="参数" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span class="muted">{{ paramNames(row.parameters) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="登记状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.registered ? 'success' : 'info'" size="small">
-            {{ row.registered ? '已登记' : '未登记' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="启用" width="80">
-        <template #default="{ row }">
-          <el-switch v-model="row.enabled" :disabled="!row.registered" @change="() => onToggle(row)" />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="140" fixed="right">
-        <template #default="{ row }">
-          <el-button v-if="!row.registered" link type="primary" size="small" @click="openRegister(row)">登记</el-button>
-          <el-button v-else link type="danger" size="small" @click="unregister(row)">取消登记</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-  </el-card>
+      <el-table :data="tools" v-loading="loading">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <pre class="text-block mono">{{ JSON.stringify(row.parameters, null, 2) }}</pre>
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="名称" width="180" />
+        <el-table-column label="描述" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.display_description || row.description }}</template>
+        </el-table-column>
+        <el-table-column label="参数" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="muted">{{ paramNames(row.parameters) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="登记状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.registered ? 'success' : 'info'" size="small">
+              {{ row.registered ? '已登记' : '未登记' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="启用" width="80">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" :disabled="!row.registered" @change="() => onToggle(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="!row.registered" link type="primary" size="small" @click="openRegister(row)">登记</el-button>
+            <el-button v-else link type="danger" size="small" @click="unregister(row)">取消登记</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </div>
 
   <el-dialog v-model="dialogVisible" title="登记自定义工具" width="480px">
     <el-form :model="form" label-width="110px">
@@ -88,6 +93,7 @@ import {
   apiToggleCustomTool,
 } from '@/api'
 import type { CustomToolSpec } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
 
 const tools = ref<CustomToolSpec[]>([])
 const loading = ref(false)
@@ -168,28 +174,17 @@ onMounted(load)
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.muted {
-  color: #909399;
-}
 .desc-text {
-  color: #606266;
+  color: var(--cs-text-2);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap;
 }
-.schema-pre {
-  margin: 0;
-  padding: 8px 12px;
-  background: #f5f7fa;
-  border-radius: 4px;
+
+/* 参数 schema 展开行：等宽字体 + 柔和底 */
+.text-block.mono {
   font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  line-height: 1.55;
   word-break: break-all;
 }
 </style>

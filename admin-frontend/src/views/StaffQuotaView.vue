@@ -1,79 +1,80 @@
 <template>
-  <el-card>
-    <template #header>
-      <div class="card-header">
-        <b>人员与配额</b>
-        <div class="header-ops">
-          <el-button size="small" @click="load">刷新</el-button>
-          <el-button type="primary" size="small" @click="openCreate">新建人员</el-button>
-        </div>
-      </div>
-    </template>
+  <div class="page">
+    <PageHeader
+      title="人员与配额"
+      description="管理后台账号、角色集合与资源创建配额；配额只统计本人创建的资源，删除即释放。"
+      :count="staff.length ? `${staff.length} 人` : undefined"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button type="primary" @click="openCreate">新建人员</el-button>
+      </template>
+    </PageHeader>
 
-    <el-alert
-      type="info"
-      :closable="false"
-      show-icon
-      title="配额只统计「当前登录人自己创建」的资源，删除即释放；留空表示不限，0 表示禁止创建"
-      description="默认场景、seed 的代码 Agent 与演示数据 created_by 为空，不占用任何人的额度。管理员自身默认也不受限，但可以被另一个管理员配置额度——为了避免把自己锁死，后端不允许修改自己的配额、角色与启停状态。"
-      style="margin-bottom: 12px"
-    />
+    <el-card>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="配额只统计「当前登录人自己创建」的资源，删除即释放；留空表示不限，0 表示禁止创建"
+        description="默认场景、seed 的代码 Agent 与演示数据 created_by 为空，不占用任何人的额度。管理员自身默认也不受限，但可以被另一个管理员配置额度——为了避免把自己锁死，后端不允许修改自己的配额、角色与启停状态。"
+        style="margin-bottom: 12px"
+      />
 
-    <el-table :data="staff" v-loading="loading">
-      <el-table-column label="人员" min-width="180">
-        <template #default="{ row }">
-          <div class="staff-name">
-            <span class="name">{{ row.display_name || row.username }}</span>
-            <el-tag v-if="row.id === auth.user?.id" size="small" type="success">当前登录</el-tag>
-            <el-tag v-if="!row.is_active" size="small" type="danger">已停用</el-tag>
-          </div>
-          <div class="code-line">
-            <code>{{ row.username }}</code>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column label="角色" min-width="160">
-        <template #default="{ row }">
-          <el-tag
-            v-for="k in row.roles && row.roles.length ? row.roles : [row.role]"
-            :key="k"
-            size="small"
-            class="role-tag"
-            :type="k === 'admin' ? 'warning' : 'info'"
-          >
-            {{ roleName(k) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column
-        v-for="item in quotaColumns"
-        :key="item.key"
-        :label="item.label"
-        width="150"
-      >
-        <template #default="{ row }">
-          <span :class="quotaClass(row, item.key)">
-            {{ row.used[item.usageKey] }} / {{ quotaLimitText(row, item.key) }}
-          </span>
-        </template>
-      </el-table-column>
-      <el-table-column label="启用" width="80">
-        <template #default="{ row }">
-          <el-switch
-            v-model="row.is_active"
-            :disabled="row.id === auth.user?.id"
-            @change="() => onToggleActive(row)"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="primary" size="small" @click="openPassword(row)">重置密码</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-  </el-card>
+      <el-table :data="staff" v-loading="loading">
+        <el-table-column label="人员" min-width="180">
+          <template #default="{ row }">
+            <div class="staff-name">
+              <span class="name">{{ row.display_name || row.username }}</span>
+              <el-tag v-if="row.id === auth.user?.id" size="small" type="success">当前登录</el-tag>
+              <el-tag v-if="!row.is_active" size="small" type="danger">已停用</el-tag>
+            </div>
+            <div class="code-line mono">{{ row.username }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="角色" min-width="160">
+          <template #default="{ row }">
+            <el-tag
+              v-for="k in row.roles && row.roles.length ? row.roles : [row.role]"
+              :key="k"
+              size="small"
+              class="role-tag"
+              :type="k === 'admin' ? 'warning' : 'info'"
+            >
+              {{ roleName(k) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-for="item in quotaColumns"
+          :key="item.key"
+          :label="item.label"
+          width="150"
+        >
+          <template #default="{ row }">
+            <span :class="quotaClass(row, item.key)">
+              {{ row.used[item.usageKey] }} / {{ quotaLimitText(row, item.key) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="启用" width="80">
+          <template #default="{ row }">
+            <el-switch
+              v-model="row.is_active"
+              :disabled="row.id === auth.user?.id"
+              @change="() => onToggleActive(row)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="primary" size="small" @click="openPassword(row)">重置密码</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </div>
 
   <el-dialog v-model="dialogVisible" :title="editing ? `编辑人员：${form.username}` : '新建人员'" width="560px">
     <el-form :model="form" label-width="110px">
@@ -152,6 +153,7 @@ import { apiCreateStaff, apiListRoles, apiListStaff, apiResetStaffPassword, apiU
 import { useAuthStore } from '@/stores/auth'
 import { STAFF_QUOTA_LABELS } from '@/types'
 import type { StaffCreatePayload, StaffMember, StaffQuota, StaffUpdatePayload } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
 
 const auth = useAuthStore()
 
@@ -366,57 +368,52 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.header-ops {
-  display: flex;
-  gap: 8px;
-}
 .staff-name {
   display: flex;
   align-items: center;
   gap: 6px;
 }
+
 .staff-name .name {
   font-weight: 600;
 }
+
 .role-tag {
   margin: 2px 4px 2px 0;
 }
+
 .code-line {
   margin-top: 2px;
-}
-.code-line code {
-  color: #606266;
   font-size: 12px;
 }
+
 .quota-tip {
   margin: -4px 0 10px;
 }
+
 .quota-used {
   margin-left: 10px;
 }
+
+/* 配额水线：达上限标红、过 80% 标黄 */
 .quota-warn {
-  color: #e6a23c;
+  color: var(--cs-warning);
   font-weight: 600;
 }
+
 .quota-full {
-  color: #f56c6c;
+  color: var(--cs-danger);
   font-weight: 600;
 }
-.muted {
-  color: #909399;
-}
+
 .small {
   font-size: 12px;
 }
+
 .rule-tip {
   margin-top: 2px;
-  color: #909399;
+  color: var(--cs-text-3);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 </style>

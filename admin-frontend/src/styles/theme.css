@@ -1,0 +1,215 @@
+/* ============================================================
+   管理后台设计令牌与基础样式
+   - 页面里不再散落硬编码色值/圆角，统一走 CSS 变量
+   - 视觉方向：深色侧栏 + 浅色内容，细边框、弱阴影、8px 圆角
+   ============================================================ */
+:root {
+  /* 品牌与语义色 */
+  --cs-brand: #409eff;
+  --cs-brand-strong: #2b6cd4;
+  --cs-success: #67c23a;
+  --cs-warning: #e6a23c;
+  --cs-danger: #f56c6c;
+  --cs-info: #909399;
+
+  /* 深色侧栏 */
+  --cs-sidebar-bg: #1f2d3d;
+  --cs-sidebar-bg-sub: #1a2634;
+  --cs-sidebar-border: #2c3e50;
+  --cs-sidebar-text: #cfd8e3;
+  --cs-sidebar-text-active: #ffffff;
+  --cs-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --cs-sidebar-active-bg: rgba(64, 158, 255, 0.16);
+
+  /* 表面与文字 */
+  --cs-bg: #f5f7fa;
+  --cs-surface: #ffffff;
+  --cs-surface-sub: #fafbfc;
+  --cs-border: #e6e8eb;
+  --cs-border-light: #eef0f3;
+  --cs-text-1: #303133;
+  --cs-text-2: #606266;
+  --cs-text-3: #909399;
+
+  /* 圆角 / 间距 / 阴影 */
+  --cs-radius-sm: 6px;
+  --cs-radius-md: 8px;
+  --cs-radius-lg: 12px;
+  --cs-space-1: 4px;
+  --cs-space-2: 8px;
+  --cs-space-3: 12px;
+  --cs-space-4: 16px;
+  --cs-space-5: 20px;
+  --cs-space-6: 24px;
+  --cs-shadow-card: 0 1px 2px rgba(29, 41, 57, 0.04), 0 2px 8px rgba(29, 41, 57, 0.04);
+  --cs-shadow-pop: 0 6px 24px rgba(29, 41, 57, 0.12);
+
+  /* 布局尺寸 */
+  --cs-header-h: 56px;
+  --cs-aside-w: 220px;
+  --cs-aside-w-collapsed: 64px;
+
+  /* 对齐 Element Plus 内建变量 */
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-color-primary: #409eff;
+  --el-text-color-primary: #303133;
+  --el-text-color-regular: #606266;
+  --el-border-color-lighter: #eef0f3;
+  --el-box-shadow-light: 0 1px 2px rgba(29, 41, 57, 0.04), 0 2px 8px rgba(29, 41, 57, 0.04);
+}
+
+/* ---------- 基础 ---------- */
+html,
+body {
+  background: var(--cs-bg);
+  color: var(--cs-text-1);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cdd3dc transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #cdd3dc;
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 卡片：细边框 + 弱阴影，去掉默认重投影 ---------- */
+.el-card {
+  border-radius: var(--cs-radius-md);
+  border: 1px solid var(--cs-border);
+}
+
+/* shadow="never" 的嵌套卡片不加投影，避免盒中盒双层阴影 */
+.el-card:not(.is-never-shadow) {
+  box-shadow: var(--cs-shadow-card);
+}
+
+.el-card__header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--cs-border-light);
+  font-weight: 600;
+  color: var(--cs-text-1);
+}
+
+.el-card__body {
+  padding: 18px;
+}
+
+/* ---------- 表格：表头轻量、行分隔柔和 ---------- */
+.el-table {
+  --el-table-border-color: var(--cs-border-light);
+  --el-table-header-bg-color: var(--cs-surface-sub);
+  --el-table-header-text-color: var(--cs-text-2);
+  --el-table-row-hover-bg-color: #f7f9fc;
+  font-size: 13px;
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+}
+
+/* ---------- 抽屉：头部/底部固定分隔，正文留白 ---------- */
+.el-drawer__header {
+  margin-bottom: 0;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--cs-border-light);
+  color: var(--cs-text-1);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.el-drawer__body {
+  padding: 20px;
+}
+
+.el-drawer__footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--cs-border-light);
+}
+
+/* ---------- 对话框 ---------- */
+.el-dialog {
+  border-radius: var(--cs-radius-md);
+}
+
+.el-dialog__header {
+  padding: 18px 20px 12px;
+  margin-right: 0;
+  font-weight: 600;
+}
+
+.el-dialog__body {
+  padding: 4px 20px 18px;
+}
+
+/* ---------- 侧栏折叠后的弹出菜单（挂在 body 上，需全局样式） ---------- */
+.el-menu--popup {
+  --el-menu-bg-color: var(--cs-sidebar-bg-sub);
+  --el-menu-text-color: var(--cs-sidebar-text);
+  --el-menu-hover-bg-color: var(--cs-sidebar-hover);
+  --el-menu-active-color: var(--cs-sidebar-text-active);
+  border-radius: var(--cs-radius-sm);
+  padding: 6px;
+}
+
+/* ---------- 通用工具类（供页面复用） ---------- */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cs-space-4);
+}
+
+.muted {
+  color: var(--cs-text-3);
+  font-size: 13px;
+}
+
+.mono {
+  font-family: Consolas, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--cs-text-2);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cs-space-3);
+}
+
+.card-head-title {
+  font-weight: 600;
+  color: var(--cs-text-1);
+}
+
+.card-head-hint {
+  color: var(--cs-text-3);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* 键值类文本块（提示词、分块内容、检索片段） */
+.text-block {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface-sub);
+  color: var(--cs-text-1);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

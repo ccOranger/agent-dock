@@ -1,20 +1,28 @@
 <template>
-  <div class="router-view">
+  <div class="page">
+    <PageHeader
+      title="路由档案"
+      description="路由是派生视图：每个场景的候选池、阈值与兜底都不同；这里看到的提示词与参数就是请求真正会用的。"
+      :count="scenes.length ? `${scenes.length} 个场景` : undefined"
+    >
+      <template #actions>
+        <el-button :loading="listLoading" @click="loadScenes(true)">刷新</el-button>
+      </template>
+    </PageHeader>
+
     <el-alert
       type="info"
       :closable="false"
       show-icon
-      title="路由是派生视图：每个场景的候选池、阈值与兜底都不同"
-      description="同一份档案同时服务运行时与后台：这里看到的候选、提示词和参数，就是请求真正会用的。标「继承」表示取全局默认（backend/.env），标「覆盖」表示该场景单独配置。"
-      class="notice"
+      title="标「继承」表示取全局默认（backend/.env），标「覆盖」表示该场景单独配置"
     />
 
     <div class="layout">
       <!-- 左：场景列表 -->
       <el-card shadow="never" class="scene-list" v-loading="listLoading">
         <template #header>
-          <div class="card-header">
-            <span>场景路由</span>
+          <div class="card-head">
+            <span class="card-head-title">场景路由</span>
             <el-button size="small" text @click="loadScenes(true)">刷新</el-button>
           </div>
         </template>
@@ -48,9 +56,9 @@
         <template v-else>
           <el-card shadow="never" class="block">
             <template #header>
-              <div class="card-header wrap">
+              <div class="card-head wrap">
                 <div class="title-line">
-                  <b>{{ detail.scene_name }}</b>
+                  <span class="card-head-title">{{ detail.scene_name }}</span>
                   <span class="muted code">{{ detail.scene_code }}</span>
                   <el-tag v-if="detail.is_default" size="small" type="info">默认场景</el-tag>
                   <el-tag v-if="detail.scene_status !== 'active'" size="small" type="danger">已停用</el-tag>
@@ -121,9 +129,9 @@
                   这是不含对话上下文的基准提示词；真实每轮还会注入最近对话、上一轮承接 Agent 与当前消息。
                   修改候选线索或场景规则后，指纹会变化，可据此对比链路里的路由配置。
                 </div>
-                <pre class="prompt-pre">{{ promptInfo?.prompt || '加载中…' }}</pre>
+                <pre class="text-block prompt-pre">{{ promptInfo?.prompt || '加载中…' }}</pre>
                 <div class="muted hint">场景约束段（注入到提示词开头）</div>
-                <pre class="prompt-pre small">{{ promptInfo?.scene_block || '—' }}</pre>
+                <pre class="text-block prompt-pre small">{{ promptInfo?.scene_block || '—' }}</pre>
               </el-tab-pane>
 
               <el-tab-pane label="候选 Agent" name="candidates">
@@ -269,7 +277,7 @@
                   <el-table-column prop="name" label="占位符" width="160" />
                   <el-table-column prop="desc" label="含义" />
                 </el-table>
-                <pre class="prompt-pre">{{ template?.system_prompt_template || '加载中…' }}</pre>
+                <pre class="text-block prompt-pre">{{ template?.system_prompt_template || '加载中…' }}</pre>
                 <div class="muted hint">全局默认（backend/.env）</div>
                 <div v-if="template" class="env-list">
                   <el-tag v-for="(key, name) in template.env_keys" :key="name" size="small" type="info" class="kw">
@@ -308,6 +316,7 @@ import type {
   RouterSceneTestResult,
   RouterWarningCode,
 } from '@/types'
+import PageHeader from '@/components/PageHeader.vue'
 
 const scenes = ref<RouterSceneSummary[]>([])
 const selectedCode = ref('')
@@ -480,108 +489,121 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.notice {
-  margin-bottom: 12px;
-}
 .layout {
   display: flex;
   gap: 16px;
   align-items: flex-start;
 }
+
+/* 左侧场景列表：粘性定位，详情滚动时保持可见 */
 .scene-list {
   width: 280px;
   flex: 0 0 280px;
   position: sticky;
   top: 12px;
 }
+
 .scene-item {
   padding: 10px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  border: 1px solid transparent;
   margin-bottom: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--cs-radius-sm);
+  cursor: pointer;
 }
+
 .scene-item:hover {
-  background: #f5f7fa;
+  background: rgba(64, 158, 255, 0.04);
 }
+
 .scene-item.active {
-  background: #ecf5ff;
-  border-color: #c6e2ff;
+  background: rgba(64, 158, 255, 0.08);
+  border-color: rgba(64, 158, 255, 0.28);
+  box-shadow: inset 3px 0 0 var(--cs-brand);
 }
+
 .scene-row {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
 }
+
 .scene-name {
   font-weight: 600;
+  color: var(--cs-text-1);
 }
+
 .scene-meta {
-  font-size: 12px;
-  color: #909399;
   margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--cs-text-3);
 }
+
 .scene-tags {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
+
 .detail {
   flex: 1;
   min-width: 0;
 }
+
 .block {
   margin-bottom: 16px;
 }
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.card-header.wrap {
+
+.card-head.wrap {
   flex-wrap: wrap;
   gap: 8px;
 }
+
 .title-line {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
+
 .code {
   font-size: 12px;
 }
+
 .hash {
   font-size: 12px;
 }
+
 .warn {
   margin-bottom: 12px;
 }
+
 .warn-line {
   font-size: 12px;
   line-height: 1.7;
 }
+
 .src {
   margin-left: 6px;
 }
+
 .value {
   font-weight: 600;
 }
-.muted {
-  color: #909399;
-}
+
 .hint {
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
   margin: 4px 0;
 }
+
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
 }
+
 .clamp {
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -589,65 +611,75 @@ onMounted(async () => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
 .agent-name {
   font-weight: 600;
   margin-bottom: 4px;
 }
+
 .kw {
   margin: 0 4px 4px 0;
 }
+
 .example {
   font-size: 12px;
   line-height: 1.6;
 }
+
 .ph-table {
   margin-bottom: 12px;
 }
+
+/* 长文本块（提示词 / 模板）：可滚动，与全局 .text-block 叠加使用 */
 .prompt-pre {
-  margin: 8px 0 0;
+  margin-top: 8px;
   max-height: 420px;
   overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
   font-size: 12px;
   line-height: 1.6;
-  background: #f8f9fb;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
-  padding: 12px;
 }
+
 .prompt-pre.small {
   max-height: 180px;
 }
+
 .test-bar {
   display: flex;
   gap: 8px;
   max-width: 640px;
 }
+
 .result {
   margin-top: 12px;
 }
+
 .stats {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   margin: 12px 0;
 }
+
 .stat {
   min-width: 130px;
   padding: 12px 16px;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface-sub);
   text-align: center;
 }
+
 .stat-value {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.4;
+  color: var(--cs-text-1);
 }
+
 .env-list {
   margin-top: 8px;
 }
+
 @media (max-width: 900px) {
   .layout {
     flex-direction: column;

@@ -1,13 +1,17 @@
 <template>
-  <div>
+  <div class="page">
+    <PageHeader
+      title="知识库维护"
+      description="命名空间即检索隔离单元：一个库对应一个 namespace，可被多个场景的 Agent 复用；检索范围由 Agent 声明。"
+      :count="bases.length ? `${bases.length} 个库` : undefined"
+    >
+      <template #actions>
+        <el-button type="primary" @click="openBaseCreate">新建知识库</el-button>
+      </template>
+    </PageHeader>
+
     <!-- 知识库命名空间 -->
     <el-card>
-      <template #header>
-        <div class="head">
-          <b>知识库（命名空间）</b>
-          <el-button type="primary" plain @click="openBaseCreate">新建知识库</el-button>
-        </div>
-      </template>
       <el-table :data="bases" v-loading="basesLoading">
         <el-table-column prop="namespace" label="Namespace" width="180" />
         <el-table-column prop="display_name" label="名称" width="160" />
@@ -31,19 +35,17 @@
     </el-card>
 
     <!-- 当前知识库：文档 + 条目 + 检索 -->
-    <el-card style="margin-top: 16px" v-if="ns">
+    <el-card v-if="ns">
       <template #header>
-        <div class="head">
-          <b>文档 / 条目 · {{ ns }}</b>
-          <div>
-            <el-button type="primary" plain @click="openEntryCreate" v-if="isAdmin">+ 手工条目</el-button>
-          </div>
+        <div class="card-head">
+          <span class="card-head-title">文档 / 条目 · <span class="mono">{{ ns }}</span></span>
+          <el-button v-if="isAdmin" type="primary" plain @click="openEntryCreate">+ 手工条目</el-button>
         </div>
       </template>
 
       <DocumentUploader v-if="isAdmin" :namespace="ns" @uploaded="loadDocs" />
 
-      <div class="filters" style="margin-top: 12px">
+      <FilterBar style="margin-top: 12px" @search="loadDocs" @reset="resetDocFilters">
         <el-select v-model="docStatus" placeholder="状态" clearable style="width: 130px" @change="loadDocs">
           <el-option label="pending" value="pending" />
           <el-option label="processing" value="processing" />
@@ -54,7 +56,7 @@
           <el-option label="上传文档" value="upload" />
           <el-option label="手工条目" value="manual" />
         </el-select>
-      </div>
+      </FilterBar>
 
       <el-table :data="docs" v-loading="docsLoading" style="margin-top: 12px">
         <el-table-column prop="title" label="标题" min-width="180" />
@@ -93,17 +95,24 @@
     </el-card>
 
     <!-- 检索测试 -->
-    <el-card style="margin-top: 16px" v-if="ns">
-      <template #header><b>检索测试</b></template>
-      <div class="filters">
-        <el-input v-model="query" placeholder="输入检索问题" style="max-width: 360px" @keyup.enter="search" />
+    <el-card v-if="ns">
+      <template #header>
+        <div class="card-head">
+          <span class="card-head-title">检索测试</span>
+          <span class="card-head-hint">验证该库召回效果，不影响线上对话</span>
+        </div>
+      </template>
+      <FilterBar>
+        <el-input v-model="query" placeholder="输入检索问题" style="width: 360px" @keyup.enter="search" />
         <el-input-number v-model="topK" :min="1" :max="20" />
         <el-input-number v-model="minScore" :min="0" :max="1" :step="0.05" :precision="2" controls-position="right" style="width: 110px" />
         <el-tooltip content="高级检索使用 HyDE+MQE（依赖大模型）；关闭后为纯向量检索" placement="top">
           <span><el-switch v-model="advanced" active-text="高级检索" /></span>
         </el-tooltip>
-        <el-button type="primary" :loading="searching" @click="search">检索</el-button>
-      </div>
+        <template #actions>
+          <el-button type="primary" :loading="searching" @click="search">检索</el-button>
+        </template>
+      </FilterBar>
       <div v-if="searched" class="search-results">
         <el-empty v-if="!searchResults.length" description="未找到相关内容（可尝试关闭高级检索或调低相似度阈值）" />
         <div v-for="(r, i) in searchResults" :key="i" class="search-item">
@@ -153,18 +162,18 @@
     </el-dialog>
 
     <!-- 分块查看 -->
-    <el-dialog v-model="chunkDialog" title="已索引分块" width="700px">
+    <el-drawer v-model="chunkDrawer" title="已索引分块" size="60%">
       <div v-loading="chunkLoading" class="chunks">
         <div v-for="c in chunks" :key="c.id" class="chunk">
           <div class="chunk-meta">#{{ c.chunk_index ?? '-' }} · {{ c.id }}</div>
-          <div class="chunk-content">{{ c.content }}</div>
+          <div class="text-block">{{ c.content }}</div>
         </div>
         <el-empty v-if="!chunks.length && !chunkLoading" description="暂无分块（该文档向量可能已被清理）" />
         <div style="text-align: center; margin-top: 8px">
           <el-button v-if="nextOffset" size="small" @click="loadMoreChunks">加载更多</el-button>
         </div>
       </div>
-    </el-dialog>
+    </el-drawer>
   </div>
 </template>
 
@@ -188,6 +197,8 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import type { Chunk, DocumentItem, KnowledgeBase, SearchResult } from '@/types'
 import DocumentUploader from '@/components/DocumentUploader.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import FilterBar from '@/components/FilterBar.vue'
 
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.user?.role === 'admin')
@@ -291,6 +302,12 @@ async function loadDocs() {
 function statusType(s: string) {
   return ({ ready: 'success', failed: 'danger', processing: 'warning' } as any)[s] ?? 'info'
 }
+/** 重置文档筛选：清空条件后重查（与 FilterBar 的「重置」对应） */
+function resetDocFilters() {
+  docStatus.value = undefined
+  docKind.value = undefined
+  loadDocs()
+}
 async function removeDoc(row: DocumentItem) {
   await ElMessageBox.confirm(`确认删除「${row.title}」？将同时清理其向量。`, '提示', { type: 'warning' })
   try {
@@ -304,7 +321,7 @@ async function removeDoc(row: DocumentItem) {
 }
 
 // ---- 分块查看 ----
-const chunkDialog = ref(false)
+const chunkDrawer = ref(false)
 const chunkLoading = ref(false)
 const chunks = ref<Chunk[]>([])
 const nextOffset = ref<string | null>(null)
@@ -314,7 +331,7 @@ async function viewChunks(row: DocumentItem) {
   chunkDocId.value = row.id
   chunks.value = []
   nextOffset.value = null
-  chunkDialog.value = true
+  chunkDrawer.value = true
   await fetchChunks(false)
 }
 async function fetchChunks(append: boolean) {
@@ -416,52 +433,31 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.filters {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.result {
-  margin-top: 12px;
-  background: #f6f8fa;
-  padding: 12px;
-  max-height: 320px;
-  overflow: auto;
-}
 .chunks {
-  max-height: 60vh;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .chunk {
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin-bottom: 8px;
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-sm);
+  padding: 10px 12px;
+  background: var(--cs-surface);
 }
 .chunk-meta {
   font-size: 12px;
-  color: #909399;
-  margin-bottom: 4px;
-}
-.chunk-content {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 13px;
-  color: #303133;
+  color: var(--cs-text-3);
+  margin-bottom: 6px;
 }
 .search-results {
   margin-top: 12px;
 }
 .search-item {
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-sm);
   padding: 10px 12px;
   margin-bottom: 10px;
+  background: var(--cs-surface);
 }
 .search-item-head {
   display: flex;
@@ -471,7 +467,7 @@ onMounted(async () => {
 }
 .search-src {
   font-size: 13px;
-  color: #409eff;
+  color: var(--cs-brand);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -479,14 +475,14 @@ onMounted(async () => {
 }
 .search-heading {
   font-size: 12px;
-  color: #909399;
+  color: var(--cs-text-3);
 }
 .search-content {
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 13px;
   line-height: 1.6;
-  color: #303133;
+  color: var(--cs-text-1);
   max-height: 200px;
   overflow: auto;
 }
