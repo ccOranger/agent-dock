@@ -494,8 +494,14 @@ export const apiCannedScriptMatch = (query: string, sceneCode?: string | null) =
 export const apiMyMemories = (type?: string) =>
   unwrap(http.get<never, { data: { data: MemoryItem[] } }>('/memory/me', { params: { type } }))
 
-export const apiUserMemories = (userId: string, type?: string) =>
-  unwrap(http.get<never, { data: { data: MemoryItem[] } }>(`/memory/users/${userId}`, { params: { type } }))
+export const apiUserMemories = (userId: string, type?: string, limit?: number) =>
+  unwrap(
+    http.get<never, { data: { data: MemoryItem[] } }>(
+      // 访客主体形如 visitor:<uuid>，冒号必须编码后再进 path
+      `/memory/users/${encodeURIComponent(userId)}`,
+      { params: { type, limit } },
+    ),
+  )
 
 // ===== Admin：RBAC 角色与菜单权限 =====
 /** 可授权菜单模块清单（渲染读写矩阵的数据源，与前端菜单叶子 key 对齐） */

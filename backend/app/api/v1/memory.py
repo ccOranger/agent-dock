@@ -1,14 +1,29 @@
 """记忆接口（包装 MemoryTool + DB 归档查询）"""
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import current_customer, require_staff
-from app.core.exceptions import NotFound
+from app.core.exceptions import NotFound, ParamError
 from app.models.repositories import MemoryRepo
 from app.schemas.api import MemorySearchRequest, MemoryUpdateRequest
 from app.schemas.common import ApiResponse
 from app.services.memory_service import MemoryService
 
 router = APIRouter(prefix="/memory", tags=["memory"])
+
+
+def _validate_subject(subject: str) -> str:
+    """客户主体只接受 UUID 或 ``visitor:<UUID>``。
+
+    非法串直传会在仓储层 uuid.UUID() 抛 ValueError 变成 500，这里提前转成 400。
+    """
+    raw = subject[8:] if subject.startswith("visitor:") else subject
+    try:
+        uuid.UUID(raw)
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ParamError("客户 ID 格式不正确：需要客户 UUID，或访客用 visitor:<UUID>") from exc
+    return subject
 
 
 @router.get("/me", response_model=ApiResponse[list])
@@ -31,8 +46,13 @@ async def my_memories(type: str | None = None, user=Depends(current_customer)):
 
 
 @router.get("/users/{user_id}", response_model=ApiResponse[list])
-async def user_memories(user_id: str, type: str | None = None, user=Depends(require_staff)):
-    rows = await MemoryRepo.list_by_user(user_id, type)
+async def user_memories(
+    user_id: str,
+    type: str | None = None,
+    limit: int = Query(200, ge=1, le=500, description="返回条数上限"),
+    user=Depends(require_staff),
+):
+    rows = await MemoryRepo.list_by_user(_validate_subject(user_id), type, limit)
     return ApiResponse(
         data=[
             {

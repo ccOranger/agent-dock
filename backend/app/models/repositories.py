@@ -1569,12 +1569,22 @@ class MemoryRepo:
             return result.rowcount or 0
 
     @staticmethod
-    async def list_by_user(user_id: uuid.UUID | str, type_: str | None = None) -> list[Memory]:
+    async def list_by_user(
+        user_id: uuid.UUID | str, type_: str | None = None, limit: int = 200
+    ) -> list[Memory]:
+        """按隔离主体列出记忆：裸 UUID 查 user_id，``visitor:<uuid>`` 查 visitor_id。
+
+        嵌入渠道的匿名访客只写 visitor_id（user_id 为空），不带前缀就一条都查不到。
+        """
         async with SessionLocal() as db:
-            stmt = select(Memory).where(Memory.user_id == uuid.UUID(str(user_id)))
+            stmt = select(Memory).where(*MemoryRepo._actor_cond(user_id))
             if type_:
                 stmt = stmt.where(Memory.type == type_)
-            rows = (await db.execute(stmt.order_by(Memory.created_at.desc()))).scalars().all()
+            rows = (
+                await db.execute(
+                    stmt.order_by(Memory.created_at.desc()).limit(max(1, min(limit, 500)))
+                )
+            ).scalars().all()
             return list(rows)
 
     @staticmethod

@@ -1,14 +1,18 @@
 <template>
-  <div>
-    <el-card>
-      <template #header>
-        <div class="head">
-          <b>客户咨询信息</b>
-          <el-button type="success" plain :loading="exporting" @click="onExport">导出 CSV</el-button>
-        </div>
+  <div class="page">
+    <PageHeader
+      title="客户咨询信息"
+      description="全部会话记录：按状态 / 场景 / 路由 Agent / 时间筛选，查看完整对话并跳转链路追踪。"
+      :count="total"
+    >
+      <template #actions>
+        <el-button :loading="loading" @click="load">刷新</el-button>
+        <el-button type="success" plain :loading="exporting" @click="onExport">导出 CSV</el-button>
       </template>
+    </PageHeader>
 
-      <div class="filters">
+    <el-card>
+      <FilterBar :loading="loading" @search="reload" @reset="reset">
         <el-select v-model="filters.status" placeholder="状态" clearable style="width: 130px">
           <el-option label="进行中" value="active" />
           <el-option label="已关闭" value="closed" />
@@ -35,9 +39,7 @@
           style="width: 340px"
         />
         <el-input v-model="filters.user_id" placeholder="客户 ID（可选）" clearable style="width: 220px" />
-        <el-button type="primary" @click="reload">查询</el-button>
-        <el-button @click="reset">重置</el-button>
-      </div>
+      </FilterBar>
 
       <el-table :data="rows" v-loading="loading" style="margin-top: 16px">
         <el-table-column prop="id" label="会话 ID" width="200" show-overflow-tooltip>
@@ -73,15 +75,16 @@
         <el-table-column prop="created_at" label="创建时间" width="200">
           <template #default="{ row }">{{ fmt(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="openDetail(row)">查看</el-button>
+            <el-button link @click="openMemory(row)">记忆</el-button>
           </template>
         </el-table-column>
       </el-table>
 
       <el-pagination
-        style="margin-top: 16px; justify-content: flex-end"
+        class="pager"
         layout="total, prev, pager, next, sizes"
         :total="total"
         v-model:current-page="page"
@@ -128,6 +131,9 @@ import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { apiExportInquiries, apiInquiryDetail, apiListAgents, apiListInquiries, apiSceneOptions } from '@/api'
 import type { AgentInfo, ChatMessage, InquiryDetail, InquirySession, SceneOption } from '@/types'
+import { usePagedList } from '@/composables/usePagedList'
+import PageHeader from '@/components/PageHeader.vue'
+import FilterBar from '@/components/FilterBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -136,13 +142,12 @@ function fmt(v?: string | null) {
   return v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'
 }
 
-const rows = ref<InquirySession[]>([])
+const { rows, total, page, pageSize, loading, load: fetchPage, reload: reloadPage } =
+  usePagedList<InquirySession>((params, p, size) =>
+    apiListInquiries({ ...params, page: p, page_size: size } as any),
+  )
 const agents = ref<AgentInfo[]>([])
 const scenes = ref<SceneOption[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(20)
-const loading = ref(false)
 const exporting = ref(false)
 
 const filters = ref<{ status?: string; scene_code?: string; last_route_to?: string; user_id?: string }>({})
@@ -179,19 +184,11 @@ function buildParams() {
 }
 
 async function load() {
-  loading.value = true
-  try {
-    const data = await apiListInquiries({ ...buildParams(), page: page.value, page_size: pageSize.value } as any)
-    rows.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
+  return fetchPage(buildParams())
 }
 
 function reload() {
-  page.value = 1
-  load()
+  return reloadPage(buildParams())
 }
 
 function reset() {
@@ -217,6 +214,16 @@ async function openDetail(row: InquirySession) {
 function openTrace(m: ChatMessage) {
   if (!m.trace_id) return
   router.push({ path: '/traces', query: { trace: m.trace_id, session_id: current.value?.session.id } })
+}
+
+/** 跳记忆查看：登录客户用 user_id，匿名嵌入访客只能用 visitor: 前缀 */
+function openMemory(row: InquirySession) {
+  const subject = row.user_id || (row.visitor_id ? `visitor:${row.visitor_id}` : '')
+  if (!subject) {
+    ElMessage.warning('该会话没有客户标识，无法查看记忆')
+    return
+  }
+  router.push({ path: `/memory/${encodeURIComponent(subject)}` })
 }
 
 async function onExport() {
@@ -256,72 +263,72 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.pager {
+  margin-top: 16px;
+  justify-content: flex-end;
 }
-.filters {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+
+/* UUID 类长 ID：等宽 + 省略收尾，完整值由 show-overflow-tooltip 提示 */
 .mono {
-  font-family: Consolas, Menlo, monospace;
-  font-size: 12px;
-  color: #606266;
-  /* 超长 UUID 以省略号收尾，完整值由 show-overflow-tooltip 提示 */
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .conversation {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
 .detail-meta {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
-}
-.muted {
-  color: #909399;
   font-size: 12px;
 }
+
 .mono-id {
-  font-family: Consolas, Menlo, monospace;
   margin-left: auto;
 }
+
+/* 对话气泡：用户靠右淡蓝，客服靠左淡灰 */
 .msg {
   max-width: 85%;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: #f4f4f5;
+  padding: 10px 12px;
+  border-radius: var(--cs-radius-md);
+  background: var(--cs-surface-sub);
+  border: 1px solid var(--cs-border-light);
 }
+
 .msg.user {
   align-self: flex-end;
-  background: #ecf5ff;
+  background: rgba(64, 158, 255, 0.08);
+  border-color: rgba(64, 158, 255, 0.18);
 }
+
 .msg.assistant {
   align-self: flex-start;
 }
+
 .msg-meta {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   font-size: 12px;
-  color: #909399;
+  color: var(--cs-text-3);
 }
+
 .route {
-  color: #e6a23c;
+  color: var(--cs-warning);
 }
+
 .msg-content {
   white-space: pre-wrap;
   word-break: break-word;
-  color: #303133;
+  color: var(--cs-text-1);
 }
 </style>
