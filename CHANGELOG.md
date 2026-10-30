@@ -10,6 +10,10 @@
 
 ## [Unreleased]
 
+暂无未发布变更。
+
+## [0.2.1] - 2026-10-30
+
 ### ⚠️ 许可变更（破坏性）
 
 - **项目许可由 Apache-2.0 改为 CC BY-NC-SA 4.0**：核心依赖 `hello-agents` 的非商业条款无法与宽松许可共存，
@@ -19,6 +23,16 @@
   `backend/pyproject.toml` 的 `license` 改为 `CC-BY-NC-SA-4.0`（并移除 OSI Apache 分类器）；README、`NOTICE` 改为非商业口径。
 - **不涉及“回收已对外授权”**：仓库自创建起一直是私有，Apache-2.0 从未对外生效；v0.2.0 tag 也从未公开。
   后续使用者一律按新许可，修改后对外发行须继续采用同一许可；商业使用需另行取得书面授权。
+
+### 新增
+
+- **后台页面统一设计令牌与基座组件**：新增 `styles/theme.css`（`--cs-*` 设计令牌并覆盖 Element Plus 变量）、
+  `PageHeader` / `FilterBar` / `usePagedList` 三个基座件；16 个页面与 `AdminLayout` 迁到基座，
+  去掉页面内重复的卡片头、筛选栏、分页样板与硬编码色值；分页文案随语言包统一为「总数 N」「N/页」。
+- **记忆查询支持访客主体与关键词过滤**：`MemoryRepo.list_by_user` 改用 `_actor_cond`（裸 UUID 查 `user_id`、
+  `visitor:<uuid>` 查 `visitor_id`）并支持 `limit`；`/memory/users/{id}` 非法客户 ID 由 500 改为 400；
+  后台记忆页支持两种 ID 输入、关键词本地过滤、长内容折叠与复制；咨询列表新增「记忆」直达入口；
+  新增 8 个接口用例（`tests/test_memory_api.py`）。
 
 ### 合规与依赖
 
