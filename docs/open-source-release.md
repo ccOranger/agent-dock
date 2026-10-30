@@ -2,7 +2,7 @@
 
 > 目标：把当前仓库整理成"陌生人 30 分钟内能跑起来"的开源项目。
 > 关联文档：[产品定位](./positioning.md)、[开发清单](./development-checklist.md)。
-> 最近一次实检：**2026-10-30**（版本号已统一为 **0.2.0**；本地 `release.py check` 0 失败；`ruff check app tests` 通过；
+> 最近一次实检：**2026-10-30**（版本号已统一为 **0.2.1**，annotated tag `v0.2.1` → `fe9cea5` 已推送；本地 `release.py check` 0 失败 0 告警；`ruff check app tests` 通过；
 > `pytest -q --basetemp=.pytest_tmp` → 637 passed / 3 skipped；两端 `npm run build` 通过；CI 已加 `docker` / `audit` job；
 > 依赖许可证已扫描并入库：[third-party-licenses.md](third-party-licenses.md)；**同日项目整体改为 CC BY-NC-SA 4.0（非商业）**；
 > 66 个 Markdown 内链 0 坏链）。
@@ -14,7 +14,7 @@
 |---|---|
 | 受众 | 能自己跑 Docker 的技术型团队 |
 | 首次体验 | 克隆 → `cp backend/.env.example .env` → `docker compose up` → 打开管理台 → 用演示数据对话 |
-| 版本 | v0.2.0，明确标注"早期版本，接口可能变化" |
+| 版本 | v0.2.1，明确标注"早期版本，接口可能变化" |
 | 渠道 | GitHub（主）+ Gitee（镜像）+ 2–3 篇技术文章 |
 | 成功标准 | 10 个真实部署、3 个外部 issue、1 篇社区转载 |
 
@@ -27,7 +27,7 @@
 | B3 | ~~CI 缺镜像构建~~ **已补** | `ci.yml` 新增 `docker` job：backend / web 两个镜像 `push: false` 构建，分层缓存走 gha 且各用一个 scope；PR 上就能暴露 Dockerfile 与前端产物问题（待首次 Actions 运行确认） |
 | B4 | **依赖许可证与漏洞扫描** | **已处置：`hello-agents` 的 CC BY-NC-SA 4.0 无法与宽松许可共存，项目整体已改为同一许可（2026-10-30，方案 ③）** | 2026-10-29 新增 `scripts/license_report.py` 与 [第三方许可证清单](third-party-licenses.md)：Python 188 个发行版 + Node 274 个包（生产 87 个），除 `hello-agents 0.2.9` 外全部为宽松许可，处置见 §2。CI 新增 `audit` job（`pip-audit` + `npm audit --omit=dev` + 许可证白名单，目前观察模式）。`npm audit --omit=dev` **0 告警**；全量 6 项均在 devDependencies（`vitest` 2→5 / `vite` 5→8 大版本），已记入 `SECURITY.md` |
 | B5 | ~~`docs/architecture.md` 缺失~~ **已补** | 新增 [架构说明](architecture.md)：组件拓扑、启动关闭、一轮对话链路、场景路由、上下文工程、记忆生命周期、RAG、MCP、鉴权限流、追踪模型、数据层、前端、扩展点、明确边界；README 文档表已挂链，`release.py` 必备文件清单已纳入 |
-| B6 | **Release 实体未发布** | tag `v0.2.0` 已重打进发布提交（annotated，含许可证清单与 NOTICE 声明）；[Release Notes 正文](release-notes/v0.2.0.md) 已备好可直接粘贴；剩下的是 GitHub 网页动作：建 Release、置顶路线图 issue、开 Discussions |
+| B6 | **Release 实体未发布** | tag `v0.2.1` 已打在发布提交 `fe9cea5`（annotated，含许可证清单与 NOTICE 声明）；[Release Notes 正文](release-notes/v0.2.1.md) 已按许可变更重备（破坏性变更置顶）；剩下的是 GitHub 网页动作：建 Release、置顶路线图 issue、开 Discussions |
 
 > 建议顺序：B1 → B4 → 更新本文件 → B2（转公开）→ B6（发 Release）。转公开之后再做 B6 才有效。
 
@@ -118,7 +118,7 @@
 - [x] GitHub Actions：backend job（Python 3.12，ruff + pytest）、frontend job（Node 20，矩阵构建两端）、docker job（backend / web 两个镜像 `push: false`，待首次运行确认）。
 - [x] 版本与锁文件：`requirements.txt` 版本策略、仓库根 `package-lock.json`（npm workspaces）入库；`python scripts/release.py check` 校验六处版本一致。
 - [x] 发布流程脚本：`scripts/release.py {check,bundle,tag}`（离线 bundle + 校验和 + 打 tag）。
-- [ ] Release Notes 正式发布：正文已备（[release-notes/v0.2.0.md](release-notes/v0.2.0.md)，含定位、本版内容、镜像构建、升级与已知限制，可直接粘贴），GitHub 侧尚未发布。
+- [ ] Release Notes 正式发布：正文已备（[release-notes/v0.2.1.md](release-notes/v0.2.1.md)，许可变更置顶，含本版内容、升级与已知限制，可直接粘贴），GitHub 侧尚未发布。
 
 ## 9. 发布物料
 
@@ -196,4 +196,4 @@ python scripts/release.py bundle
 > 不要用删除/重建 `main` 的方式回滚，历史必须保持快进一致。
 
 GitHub 网页端（本地无法代替）：Settings → 转公开 / 转移归属；Actions 勾选 docker job 首次运行；
-Releases 用 [release-notes/v0.2.0.md](release-notes/v0.2.0.md) 作正文（依据 CHANGELOG 的 `[0.2.0]` 段落编写）；新建并置顶路线图 issue；开启 Discussions。
+Releases 用 [release-notes/v0.2.1.md](release-notes/v0.2.1.md) 作正文（依据 CHANGELOG 的 `[0.2.1]` 段落编写；**许可变更是破坏性变更，必须留在正文最前**）；新建并置顶路线图 issue；开启 Discussions。

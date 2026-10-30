@@ -48,7 +48,8 @@
 - `SECURITY.md`：支持版本改为 0.2.x；新增「依赖漏洞与许可证」段 —— `npm audit --omit=dev` **0 告警**，
   全量 6 项（2 critical / 1 high / 3 moderate）均在 devDependencies 的 `vitest` 2→5、`vite` 5→8 升级链上。
 - **Release Notes 正文**：新增 [docs/release-notes/v0.2.0.md](docs/release-notes/v0.2.0.md)，
-  含定位、本版内容、镜像构建、升级与已知限制，可直接粘贴为 GitHub Release 正文。
+  含定位、本版内容、镜像构建、升级与已知限制，可直接粘贴为 GitHub Release 正文；
+  本版另备 [v0.2.1.md](docs/release-notes/v0.2.1.md)，许可变更置顶，作为 GitHub Release 正文当前版本。
 - **分支策略收敛为单 `main` + tag**：`release/v0.2.0`（原 `release/v0.1.0`）本地与远端均已删除，
   远端 `refs/heads` 只剩 `main`；发布靠 annotated tag，不再拉发布分支（避免 `main`/`release` 双写不同步），
   规则与回滚方式见 [发布清单 §13](docs/open-source-release.md)。
