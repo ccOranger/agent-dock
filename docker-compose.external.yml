@@ -1,6 +1,11 @@
 # 部署形态：宿主机已有 PostgreSQL / Redis / Qdrant / Nginx，只用 Compose 跑后端。
 #   docker compose -f docker-compose.external.yml up -d --build backend
 #
+# 镜像也可以不在服务器上构建（本地或 CI 打好再交付）：
+#   先在根 .env 设 BACKEND_IMAGE=<仓库>/agentdock-backend:0.3.0，
+#   服务器上 docker compose -f docker-compose.external.yml pull backend
+#               && up -d --no-build backend。命令与离线 save/load 路线见 docs/deployment.md §4.3。
+#
 # 与基础编排互斥：**不要** `-f docker-compose.yml -f docker-compose.external.yml` 叠加使用。
 # 本文件是自包含的（只定义 backend 一个服务），这样 `up` 绝对不会把 postgres/qdrant/redis
 # 容器带起来——否则会出现「容器里一套库、宿主机一套库」的双份数据假象。
@@ -23,6 +28,10 @@ x-logging: &default-logging
 
 services:
   backend:
+    # 镜像名由 BACKEND_IMAGE 控制：不设时就是本地名（本地构建、本地跑）；
+    # 设成仓库地址（如 registry.cn-hangzhou.aliyuncs.com/<命名空间>/agentdock-backend:0.3.0）后，
+    # 服务器可用 pull + up -d --no-build 直接拉取启动（见 docs/deployment.md §4.3）。
+    image: ${BACKEND_IMAGE:-smart-cs-backend:local}
     build:
       context: .
       dockerfile: docker/backend.Dockerfile

@@ -248,6 +248,74 @@ curl -s  https://cs.example.com/api/v1/admin/custom-tools -o /dev/null -w '%{htt
   命名卷里的旧数据还在），再把容器里的数据 `pg_dump` → 导入宿主机 PG、Qdrant 快照导入宿主机实例，才能改 URL。
   只改 `.env` 里的地址不会自动搬迁数据，表现为「升级后后台登录不进去 / 知识库空了」。
 
+### 4.3 本地（或 CI）打镜像，服务器拉取启动
+
+适用于服务器不想装 Node / 不便在服务器上拉 pip 依赖、或本机构建走代理更快。两条路线只改变
+**backend 镜像的交付方式**；§4.2 的建库与迁移一步不变（镜像里带 `scripts/migrations`，升级后仍要在服务器跑一次
+`run --rm backend python -m app.migrate`）。
+
+前提：本机 Docker 引擎产出的就是 `linux/amd64`（`docker version --format "{{.Server.Os}}/{{.Server.Arch}}"`），与通用 x86
+服务器一致；服务器是 ARM 时改用 `docker buildx build --platform linux/arm64`（走 QEMU，构建会明显变慢）。
+镜像名统一由根 `.env` 的 **`BACKEND_IMAGE`** 控制（不设则为本地名 `smart-cs-backend:local`）。
+
+**路线 A：私有镜像仓库**
+
+```powershell
+# 本地（仓库根目录，构建上下文必须是根，Dockerfile 里引用了 backend/ 与 scripts/）
+docker build -f docker/backend.Dockerfile -t <registry>/<ns>/agentdock-backend:0.3.0 .
+docker push <registry>/<ns>/agentdock-backend:0.3.0
+```
+
+```bash
+# 服务器
+docker login <registry>
+echo 'BACKEND_IMAGE=<registry>/<ns>/agentdock-backend:0.3.0' >> .env
+docker compose -f docker-compose.external.yml pull backend
+docker compose -f docker-compose.external.yml up -d --no-build backend
+```
+
+- **仓库必须私有**：`backend.Dockerfile` 把整个 `backend/` 拷进镜像，镜像就是源码交付物（`.dockerignore` 只排掉
+  `.env`、`backend/data/`、`backend/memory_data/`、`node_modules/`、`dist/`、`docs/`，库代码全在里面）；
+  Docker Hub 新建仓库默认 public，推上去就撤不回来。项目许可为 CC BY-NC-SA 4.0，对外不可商用。
+- 国内服务器从 Docker Hub 拉基础层经常超时：优先用阿里 ACR 个人版（免费）或自建 Harbor；GHCR 需要 Classic
+  PAT（`write:packages` + `read:packages`），`docker login ghcr.io` 的用户名是 GitHub 账号名。
+- tag 用发布号（`0.3.0`）而不是只用 `latest`：回滚就是改 `BACKEND_IMAGE` 指向旧 tag 再 `up -d --no-build`。
+
+**路线 B：不经公网仓库，直接传 tar**
+
+```powershell
+docker build -f docker/backend.Dockerfile -t agentdock-backend:0.3.0 .
+docker save -o backend-0.3.0.tar agentdock-backend:0.3.0        # 约 1.5 GB；PowerShell 无 gzip，要压缩用 7-Zip/WSL
+scp backend-0.3.0.tar user@server:/tmp/
+```
+
+```bash
+docker load -i /tmp/backend-0.3.0.tar
+echo 'BACKEND_IMAGE=agentdock-backend:0.3.0' >> .env    # 不写的话 compose 去找默认的 smart-cs-backend:local
+docker compose -f docker-compose.external.yml up -d --no-build backend
+```
+
+两侧用 `sha256sum backend-0.3.0.tar` 对一下。`scripts/release.py bundle` 是给「全栈离线包」写的（会连
+postgres/qdrant/redis/web 一起 save，并生成带 web 段的 `docker-compose.offline.yml`），与本形态不匹配，只要
+backend 就用上面的 save/load。
+
+**前端静态要单独带上**（本形态下 dist 不在镜像里）：
+
+```powershell
+npm ci; npm run build -w frontend
+VITE_BASE=/admin/ npm run build -w admin-frontend
+scp -r frontend/dist/*     user@server:/tmp/web/
+scp -r admin-frontend/dist/* user@server:/tmp/web/admin/
+```
+
+```bash
+sudo rsync -a --delete /tmp/web/ /srv/smart-cs/web/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+> 服务器上能 `git pull` 且有 Node 时，§4.2 第 5 步在服务器本地构建更省事。两条路线不要混用：
+> 一旦出现「镜像是 A 版本、静态是 B 版本」，后台会报接口字段不存在，而不是样式错乱。
+
 ## 5. 升级与回滚
 
 schema 升级走 `python -m app.migrate`（版本化增量迁移），不要用 `init_db.py` 硬凑，更不要在生产跑 `rebuild_and_seed.py`。
