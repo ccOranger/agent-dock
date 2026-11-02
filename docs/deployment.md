@@ -189,9 +189,12 @@ sudo -u postgres psql -d cs_db -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"   # 
 # 建表（空库时 app.migrate 直接用 scripts/init_db.sql 建到最新结构）
 docker compose -f docker-compose.external.yml run --rm backend python -m app.migrate
 
-# 管理员（密码留空则随机生成且只打印一次）
-docker compose -f docker-compose.external.yml run --rm backend python -m app.setup --env-file ../.env
+# 初始化管理员：SEED_DEMO=false 时只建管理员，SEED_ADMIN_PASSWORD 留空则随机生成且只打印一次
+docker compose -f docker-compose.external.yml run --rm backend python ../scripts/seed_data.py
 ```
+
+> 一次性命令里**不要**用 `python -m app.setup --env-file ../.env`：`.env` 是以环境变量注入容器的，
+> 容器内并没有这个文件。需要非交互建管理员可用 `run --rm backend python -m app.setup --username admin --password '...'`。
 
 **4) 起后端**（数据目录先给 uid 1000 属主，容器内非 root 运行）：
 
