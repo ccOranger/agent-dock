@@ -27,6 +27,14 @@
     动态 Agent 绑定校验允许已填源码的动态工具（绑定时即预编译一次，避免运行时静默失败）。
   - 前端：`CustomToolsView.vue` 增加来源列与源码编辑器（示例模板填入、Tab 补 4 空格、校验/试运行结果回显）；
     `AgentList.vue` 绑定候选提示文案同步。
+- **新部署形态：复用宿主机已有的 PostgreSQL / Redis / Qdrant / Nginx**（针对这些中间件已自行安装并运维的服务器）：
+  新增自包含编排 `docker-compose.external.yml`（只定义 backend，`network_mode: host` 使中间件无需改监听地址，
+  并把 uvicorn 覆盖为 `--host 127.0.0.1` 避免 host 网络下 8000 外泄），以及宿主机反代模板
+  `docker/nginx.host.example.conf`（两端静态直托 + `/api`、`/health` 反代，与容器内 `docker/nginx.conf` 同行为）。
+  配套 [docs/deployment.md](docs/deployment.md) §4.2：硬前提（PG ≥ 15 + `pg_trgm`；服务端 Qdrant 对齐已验证的 v1.12.4，
+  因依赖钉了 `qdrant-client<1.10`；Redis 共用实例建议独立 db index）、建库/迁移/管理员一次性命令、
+  静态产物部署步骤（admin 必须 `VITE_BASE=/admin/` 构建）、客户端 IP 取信验收，以及本形态下
+  `scripts/backup.sh` 不可直接使用的替代取数方式。
 
 ### 修复
 

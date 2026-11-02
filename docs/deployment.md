@@ -11,6 +11,7 @@
 | 单机 Docker Compose | 演示、内网试用 | `docker-compose.yml`：postgres / qdrant / redis / backend / web |
 | 生产叠加 | 对外提供服务的单机 | 基础编排 + `docker-compose.prod.yml`：Caddy HTTPS、bind mount、资源限制、一次性初始化 |
 | 已有反向代理 | 宿主机已跑 Nginx/Traefik | 基础编排 + 外层代理转发到 web，注意端口暴露与 XFF |
+| 复用宿主机中间件 | 服务器已装 PostgreSQL/Redis/Qdrant/Nginx | `docker-compose.external.yml`：只跑 backend 一个容器，两端静态由宿主机 Nginx 托管（见 §4.2） |
 
 ## 2. 单机 Docker Compose（基础）
 
@@ -94,6 +95,8 @@ $COMPOSE logs -f caddy
 
 ## 4. 已有反向代理（不用 Caddy）
 
+### 4.1 中间件仍用编排内置，只把 web 挂到外层代理下
+
 如果宿主机已有 Nginx/Traefik 并负责证书：
 
 1. **不要直接暴露 8080**。基础编排的 `web.ports` 默认发布到所有网卡，绕过外层代理后可伪造 `X-Forwarded-For`。加一个 override 文件绑定回环：
@@ -132,6 +135,116 @@ $COMPOSE logs -f caddy
 
 4. 云负载均衡再加一层时，需按实际链路重新确认 `TRUSTED_PROXIES` 与各层 XFF 追加规则，不能照抄。
 
+### 4.2 连中间件都不起容器：复用宿主机的 PostgreSQL / Redis / Qdrant + Nginx
+
+适用于服务器已自行安装并运维这四个服务的形态。用 `docker-compose.external.yml`（**自包含**，只定义 backend）：
+
+> 不要把两个文件叠在一起用：`-f docker-compose.yml -f docker-compose.external.yml` 会把 postgres/qdrant/redis
+> 容器重新带起来，变成「容器里一套数据、宿主机上另一套数据」。正确写法始终只带一个文件。
+
+**1) 先确认已有服务能被应用接受**（都是只读探测）：
+
+```bash
+# PostgreSQL 必须 ≥ 15：schema 用了 UNIQUE NULLS NOT DISTINCT（`scripts/init_db.sh` 注释写的 PG13+ 不准确）
+# 且需要 pg_trgm（不依赖 pgvector：向量都在 Qdrant，PG 只用 pg_trgm 做模糊匹配）
+psql -U postgres -tc "show server_version;"
+psql -U postgres -tc "select name from pg_available_extensions where name='pg_trgm';"
+
+# Qdrant 服务端版本：应用钉了 qdrant-client>=1.9,<1.10（hello-agents 0.2.9 要 import SearchRequest），
+# 官方编排的服务端是 v1.12.4（已验证区间）；与它偏差较大时先在预发环境验证向量检索能命中再上生产
+curl -s http://127.0.0.1:6333/ | head -c 200
+
+# Redis：应用只写 `rl:chat:*` 限流键（无 flush），但共用实例建议给独立 db index；
+# requirepass 的密码含 @ : / 时必须 URL 编码
+redis-cli info server | grep redis_version
+```
+
+Neo4j 不需要（`MEMORY_TYPES` 默认不含 `semantic`）；如需语义记忆再单独补。
+
+**2) 根 `.env`**：backend 容器走 `network_mode: host`，所以**中间件不用改监听**，`.env` 里直接写回环地址：
+
+```ini
+APP_ENV=production
+JWT_SECRET=<openssl rand -base64 48>
+DATA_ROOT=/srv/smart-cs
+DATABASE_URL=postgresql+asyncpg://cs_user:<强密码>@127.0.0.1:5432/cs_db
+REDIS_URL=redis://:<requirepass密码>@127.0.0.1:6379/7
+QDRANT_URL=http://127.0.0.1:6333
+QDRANT_API_KEY=<若有>
+TRUSTED_PROXIES=127.0.0.1
+ALLOWED_ORIGINS=https://cs.example.com
+```
+
+> `TRUSTED_PROXIES` 在 `docker-compose.external.yml` 里已写死 `127.0.0.1`（不继承基础编排的 `172.28.0.10/32`）；
+> 反代与后端不同机时改反代所在机器的 IP/CIDR。`API_DOCS_ENABLED` 该文件默认 `false`。
+
+**3) 建库与初始化**（首次部署才需要；存量库直接跳到 §5 升级流程）：
+
+```bash
+# 建用户/库（或用 psql 手工建，注意需是 PostgreSQL ≥ 15 的那个集群）
+sudo -u postgres psql -c "CREATE USER cs_user WITH PASSWORD '<强密码>';"
+sudo -u postgres psql -c "CREATE DATABASE cs_db OWNER cs_user;"
+sudo -u postgres psql -d cs_db -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"   # 需超管执行
+
+# 建表（空库时 app.migrate 直接用 scripts/init_db.sql 建到最新结构）
+docker compose -f docker-compose.external.yml run --rm backend python -m app.migrate
+
+# 管理员（密码留空则随机生成且只打印一次）
+docker compose -f docker-compose.external.yml run --rm backend python -m app.setup --env-file ../.env
+```
+
+**4) 起后端**（数据目录先给 uid 1000 属主，容器内非 root 运行）：
+
+```bash
+sudo mkdir -p $DATA_ROOT/backenddata/knowledge_bases $DATA_ROOT/backenddata/doc_archives $DATA_ROOT/memorydata
+sudo chown -R 1000:1000 $DATA_ROOT/backenddata $DATA_ROOT/memorydata
+docker compose -f docker-compose.external.yml up -d --build backend
+docker compose -f docker-compose.external.yml logs -f backend    # 看「[自检] 数据库 / Redis / Qdrant / 模型」
+```
+
+该文件把 uvicorn 覆盖为 `--host 127.0.0.1`：host 网络下沿用镜像默认的 `0.0.0.0` 会把 8000 直接挂到公网网卡。
+端口被占先查：`ss -lntp | grep ':8000'`。
+
+**5) 前端静态交给宿主机 Nginx**（不构建 web 容器）：
+
+```bash
+npm ci
+npm run build -w frontend                                  # → frontend/dist/*
+VITE_BASE=/admin/ npm run build -w admin-frontend          # → admin-frontend/dist/*
+sudo mkdir -p /srv/smart-cs/web/admin
+sudo rsync -a --delete frontend/dist/ /srv/smart-cs/web/
+sudo rsync -a --delete admin-frontend/dist/ /srv/smart-cs/web/admin/
+```
+
+站点配置以 [docker/nginx.host.example.conf](../docker/nginx.host.example.conf) 为起点（与容器内 `docker/nginx.conf`
+同源同行为：`/api/` 不缓冲供 SSE、`= /health` 直达后端、`/admin/` 与 `/` 各自 SPA 回退、`client_max_body_size 25m`）。
+**admin 必须带 `VITE_BASE=/admin/` 构建**，否则资源与路由前缀全部错位。
+
+**6) 验收**：
+
+```bash
+curl -fsS http://127.0.0.1:8000/health          # 后端直达
+curl -fsS https://cs.example.com/health          # 经 nginx
+curl -fsS https://cs.example.com/admin/          # 后台静态
+curl -s  https://cs.example.com/api/v1/admin/custom-tools -o /dev/null -w '%{http_code}\n'   # 401/403 = 路由已在
+```
+
+客户端 IP 取信是否正确，别看 `docker compose ps`，看存下来的值：登录后台做一次写操作后
+`psql -d cs_db -c "select ip, action, created_at from audit_logs order by created_at desc limit 3;"`
+——`ip` 应是浏览器侧的真实 IP；若是 `127.0.0.1` 则 nginx 没下发 XFF 或 `TRUSTED_PROXIES` 不对
+（`app/utils/request.py::client_ip` 只在直连对端命中白名单时才取 XFF 最左值；这一步搞错会让登录限流把
+整台反代当同一个主体，错误密码 20 次锁定全站）。
+
+**本形态与主流程的两点差异**（容易踩）：
+
+- **备份脚本不能用**：`scripts/backup.sh` 写死了 `docker compose exec postgres pg_dump` 与
+  `docker compose cp qdrant:/qdrant/snapshots/...`，没有这两个容器时会在第 1、2 步失败。本形态请改成宿主机命令：
+  `pg_dump -U cs_user -d cs_db --no-owner --format=custom -f postgres.dump`、`redis-cli -a <pwd> BGSAVE` 后复制 RDB、
+  Qdrant 快照仍可用 backend 调 API 创建（取文件从 Qdrant 自己的数据目录拿），`backenddata`/`memorydata` 直接 `rsync`。
+- **已有容器要收敛**：若这台机器之前用基础编排跑过，先 `docker compose -f docker-compose.yml down` （**不加 `-v`**，
+  命名卷里的旧数据还在），再把容器里的数据 `pg_dump` → 导入宿主机 PG、Qdrant 快照导入宿主机实例，才能改 URL。
+  只改 `.env` 里的地址不会自动搬迁数据，表现为「升级后后台登录不进去 / 知识库空了」。
+
 ## 5. 升级与回滚
 
 schema 升级走 `python -m app.migrate`（版本化增量迁移），不要用 `init_db.py` 硬凑，更不要在生产跑 `rebuild_and_seed.py`。
@@ -169,6 +282,9 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/v1/admin/cust
 - **schema 只向前**：迁移不写回滚脚本，回滚镜像版本不等于回滚 schema。跨版本回退需要 `pg_restore` 到升级前的备份，先在预发环境演练。
 - `APP_ENV=production` 时 `rebuild_and_seed.py` 会直接拒绝执行（`--force` 可绕过，但会 DROP 全部业务表）。
 - 升级前确认已备份，备份产物至少包含 `postgres.dump` 与 `qdrant-*.snapshot`。
+- **复用宿主机中间件的形态（§4.2）不涉及中间件升级**：只需
+  `docker compose -f docker-compose.external.yml up -d --build backend`，前端把新的 `dist` 拷进 `/srv/smart-cs/web`（admin 进 `web/admin`）后
+  `sudo nginx -t && sudo systemctl reload nginx`；上述第 1、3、5 步（备份与迁移）仍要跑，但备份得用宿主机命令取数。
 
 ## 6. 备份与恢复
 

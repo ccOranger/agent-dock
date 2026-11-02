@@ -1,0 +1,57 @@
+# 部署形态：宿主机已有 PostgreSQL / Redis / Qdrant / Nginx，只用 Compose 跑后端。
+#   docker compose -f docker-compose.external.yml up -d --build backend
+#
+# 与基础编排互斥：**不要** `-f docker-compose.yml -f docker-compose.external.yml` 叠加使用。
+# 本文件是自包含的（只定义 backend 一个服务），这样 `up` 绝对不会把 postgres/qdrant/redis
+# 容器带起来——否则会出现「容器里一套库、宿主机一套库」的双份数据假象。
+# 详见 docs/deployment.md §4.2。
+#
+# 需要 Compose v2.24+（env_file 的 required 语法）。
+#
+# 前置（仓库根 .env）：
+#   DATABASE_URL / REDIS_URL / QDRANT_URL 全部写 **127.0.0.1**（backend 用 host 网络，
+#   容器内访问宿主机回环即可，不需要改这三个中间件的监听地址）；
+#   JWT_SECRET 强随机、APP_ENV=production、DATA_ROOT（默认 /srv/smart-cs）。
+
+name: smart-cs
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    # 宿主机中间件默认只监听 127.0.0.1；用 host 网络就无需为了容器去改 PG/Redis 的 bind。
+    network_mode: host
+    # 镜像入口在「收到参数」时直接执行参数，因此这里借 command 把 uvicorn 绑到回环——
+    # host 网络下若沿用镜像默认的 --host 0.0.0.0，8000 会直接暴露到公网网卡。
+    command: ["sh", "-c", "exec uvicorn app.main:app --host 127.0.0.1 --port ${APP_PORT:-8000}"]
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      JWT_SECRET: ${JWT_SECRET:?未设置 JWT_SECRET：请在仓库根 .env 填入强随机值（如 openssl rand -base64 48）}
+      SEED_DEMO: ${SEED_DEMO:-false}
+      # 建表/迁移/种子改用一次性命令（docs/deployment.md §4.2 第 4 步），不依赖启动钩子
+      INIT_ON_START: "false"
+      # 不对外暴露 /docs、/redoc、/openapi.json
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+      # 本形态下反代与后端同机、只经回环，所以写死 127.0.0.1（不从 .env 继承基础编排的 172.28.0.10/32）。
+      # 若 nginx 与后端不在同一台机器，改成反代所在机器的 IP/CIDR。
+      TRUSTED_PROXIES: "127.0.0.1"
+      # 注意这里写的是**容器内路径**（宿主机目录由下面 volumes 映射到这个位置）
+      RAG_KB_ROOT: /app/backend/data/knowledge_bases
+      RAG_DOC_ARCHIVE_ROOT: /app/backend/data/doc_archives
+    volumes:
+      # backend 以 uid 1000 运行，首次创建的目录要先 chown 1000:1000
+      - ${DATA_ROOT:-/srv/smart-cs}/backenddata:/app/backend/data
+      # hello-agents 记忆的 SQLite 落盘位置
+      - ${DATA_ROOT:-/srv/smart-cs}/memorydata:/app/backend/memory_data
+    restart: unless-stopped
+    logging: *default-logging
