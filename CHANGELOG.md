@@ -8,7 +8,7 @@
   `version` 必须与本文件顶部「最新版本」一致，`python scripts/release.py check` 会强制校验。
 - 每项能力的落地细节（背景、契约、文件、验证、边界）见 [docs/updates/](docs/updates/README.md)，本文件只做面向使用者的摘要。
 
-## [Unreleased]
+## [0.3.0] - 2026-11-02
 
 ### 新增
 
