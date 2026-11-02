@@ -480,7 +480,7 @@ export interface MCPServerToolsResult {
   error?: string
 }
 
-// ===== 自定义工具（实现来自代码目录，后台登记/开关）=====
+// ===== 自定义工具（代码目录 / 后台在线源码两种来源）=====
 export interface CustomToolSpec {
   name: string
   description: string
@@ -488,6 +488,36 @@ export interface CustomToolSpec {
   registered: boolean
   enabled: boolean
   display_description?: string | null
+  /** code=代码目录托管（仅能登记/开关）；dynamic=后台源码托管（可编辑/试运行/删除） */
+  source: 'code' | 'dynamic'
+  has_code: boolean
+  code_updated_at?: string | null
+}
+
+/** 动态工具源码保存/校验前的元信息回显 */
+export interface CustomToolValidateResult {
+  ok: boolean
+  errors: string[]
+  name?: string
+  description?: string
+  parameters?: Record<string, unknown>
+  timeout?: number | null
+}
+
+export interface CustomToolCodeDetail {
+  name: string
+  code: string
+  description?: string | null
+  enabled: boolean
+  parameters: Record<string, unknown>
+  code_sha256?: string
+  code_updated_at?: string | null
+}
+
+export interface CustomToolTestRunResult {
+  ok: boolean
+  result?: unknown
+  error?: string
 }
 
 export interface DynamicAgentPayload {

@@ -36,6 +36,7 @@
 | U24 | 评测与回归 | 用例集进 Git + 真实 HTTP 链路执行器、服务端链路回读、分母纪律与用例集指纹、基线 diff 与退化退出码、`eval_runs` 运行记录（schema v8） | [24-eval-regression.md](24-eval-regression.md) |
 | U25 | 数据分析（成效指标 + 请求量） | 新菜单 `analytics` + `/admin/analytics/outcomes`：全量三率 + 每日请求量（日聚合，可对账）与链路三率（traces，标采样口径），空数据不伪装 0%；并入原用量报表的日统计、移除 token 展示与该页，零 schema 变更 | [25-analytics-outcomes.md](25-analytics-outcomes.md) |
 | U26 | 后台 RBAC（角色 × 菜单读写矩阵） | 16 个菜单模块 × `read`/`write` 两级授权：`roles` / `user_roles` / `role_permissions` 三表（schema v10）、`MENU_MODULES` 单一事实源、`require_perm` + 前端 `meta.perm` 同源、admin 旁路、坐席默认授权不回退、零 DDL 扩展新模块 | [26-rbac-menu-matrix.md](26-rbac-menu-matrix.md) |
+| U27 | 自定义工具动态加载 | 工具源码存 `tools.config.code`，后台在线写 Python + AST 白名单安全校验 + 受限 builtins 编译 + 指纹缓存，保存即下一轮生效（免重启）；与代码目录工具同一装配入口（同名以代码为准），新增 5 个管理端点与编辑器/试运行 UI，零 DDL | [27-dynamic-custom-tools.md](27-dynamic-custom-tools.md) |
 
 ## 与三份主文档的关系
 

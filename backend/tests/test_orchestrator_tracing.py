@@ -79,7 +79,7 @@ class FakeAgent:
         self.llm_model = llm_model
         self._tools = list(tools)
 
-    def build(self, mcp_configs=None):
+    def build(self, mcp_configs=None, custom_configs=None):
         return type("S", (), {"tool_registry": FakeRegistry(self._tools), "enable_tool_calling": False})()
 
 

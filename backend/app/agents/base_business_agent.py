@@ -47,16 +47,24 @@ class BaseBusinessAgent(ABC):
     def __init__(self, user_id: str, session_id: str | None = None):
         self.user_id = user_id
         self.session_id = session_id
-        # build_tools 中成功注册的代码自定义工具名（供系统提示“必须调用工具”约束纳入）
+        # build_tools 中成功注册的自定义工具名（代码目录 + 动态源码，供系统提示“必须调用工具”约束纳入）
         self.registered_custom_tools: list[str] = []
+        # 动态自定义工具的源码配置（由 build() 在主循环预取后注入，build_tools 读取）
+        self.custom_configs: dict[str, dict] = {}
 
     @abstractmethod
     def build_tools(self, registry: ToolRegistry) -> None:
         """每个业务 Agent 独立实现自己的工具装配"""
         ...
 
-    def build(self, mcp_configs: dict[str, dict | None] | None = None) -> SimpleAgent:
+    def build(
+        self,
+        mcp_configs: dict[str, dict | None] | None = None,
+        custom_configs: dict[str, dict] | None = None,
+    ) -> SimpleAgent:
         registry = ToolRegistry()
+        # 动态自定义工具需访问 DB 取源码，同样必须在主 event loop 预取后传进来
+        self.custom_configs = custom_configs or {}
 
         # 1. 业务专属工具
         self.build_tools(registry)

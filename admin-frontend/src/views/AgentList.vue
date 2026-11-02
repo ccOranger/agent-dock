@@ -204,7 +204,7 @@
           自定义工具
           <el-tooltip
             placement="top"
-            content="代码开发并在「自定义工具」页登记启用后可绑定；仅动态 Agent 支持。实现来自代码，后台不可编辑其逻辑。"
+            content="候选来自「自定义工具」页已登记且启用的项：代码目录工具与后台在线写源码的动态工具均可绑定。"
           >
             <span class="q-help">?</span>
           </el-tooltip>

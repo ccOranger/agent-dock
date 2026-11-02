@@ -1,5 +1,9 @@
 """管理接口：Agent（代码 + 动态）/ MCP 工具 / 指标"""
 import asyncio
+import inspect
+import json
+import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -11,8 +15,12 @@ from app.core.exceptions import Conflict, NotFound, ParamError
 from app.models.repositories import AgentRepo, AuditRepo, KnowledgeBaseRepo, ToolRepo
 from app.schemas.api import (
     AgentToggleRequest,
+    CustomToolCodeUpdate,
+    CustomToolDynamicCreate,
     CustomToolRegister,
+    CustomToolTestRunRequest,
     CustomToolToggle,
+    CustomToolValidateRequest,
     DynamicAgentCreate,
     DynamicAgentUpdate,
     MCPServerCreate,
@@ -21,7 +29,9 @@ from app.schemas.api import (
 from app.schemas.common import ApiResponse
 from app.schemas.scene import DEFAULT_ASSISTANT_NAME
 from app.services.quota_service import KIND_AGENT, create_guard
-from app.tools import custom_catalog
+from app.tools import custom_catalog, tool_code_loader
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -375,11 +385,11 @@ async def list_mcp_server_tools(server_id: str, user=Depends(require_staff)):
 # ===== 自定义工具管理（实现来自代码目录，后台登记/开关）=====
 @router.get("/custom-tools", response_model=ApiResponse[list])
 async def list_custom_tools(user=Depends(require_staff)):
-    """扫描代码目录列出自定义工具，并标注其在 tools 表的登记/启用状态（含覆盖显示描述）。"""
+    """自定义工具清单：代码目录工具 + 后台写源码的动态工具，并标注登记/启用状态。"""
     registered = {r.name: r for r in await ToolRepo.list_by_type("custom")}
     data = []
     for spec in custom_catalog.list_specs():
-        row = registered.get(spec["name"])
+        row = registered.pop(spec["name"], None)
         cfg = (row.config or {}) if row else {}
         data.append(
             {
@@ -389,8 +399,31 @@ async def list_custom_tools(user=Depends(require_staff)):
                 "registered": row is not None,
                 "enabled": bool(row.enabled) if row else False,
                 "display_description": cfg.get("description"),
+                # source: code=代码目录托管（只能开关）；dynamic=后台源码托管（可编辑/删除）
+                "source": "code",
+                "has_code": False,
+                "code_updated_at": None,
             }
         )
+    # 剩下的都是 DB 里带源码的动态工具（旧行无 code 不展示，避免与代码目录混淆）
+    for row in registered.values():
+        cfg = row.config or {}
+        if not cfg.get("code"):
+            continue
+        data.append(
+            {
+                "name": row.name,
+                "description": (row.schema_ or {}).get("description") or cfg.get("description") or row.name,
+                "parameters": row.schema_ or {},
+                "registered": True,
+                "enabled": bool(row.enabled),
+                "display_description": cfg.get("description"),
+                "source": "dynamic",
+                "has_code": True,
+                "code_updated_at": cfg.get("code_updated_at"),
+            }
+        )
+    data.sort(key=lambda d: (d["source"] != "code", d["name"]))
     return ApiResponse(data=data)
 
 
@@ -414,6 +447,137 @@ async def register_custom_tool(body: CustomToolRegister, user=Depends(require_pe
     return ApiResponse(data={"name": row.name})
 
 
+# ===== 动态自定义工具（方案 A：后台在线编写源码，无需重启）=====
+@router.post("/custom-tools/dynamic", response_model=ApiResponse[dict])
+async def create_dynamic_custom_tool(
+    body: CustomToolDynamicCreate, user=Depends(require_perm("custom-tools", "write"))
+):
+    """新建动态自定义工具：先安全校验 + 编译，全部通过才落库（存 config.code）。"""
+    if custom_catalog.exists(body.name):
+        raise Conflict(f"名称已由代码目录工具提供，请换个名字: {body.name}")
+    if await _get_custom_row(body.name) is not None:
+        raise Conflict(f"自定义工具已存在: {body.name}")
+    if await ToolRepo.get_by_name(body.name) is not None:
+        raise Conflict(f"名称已被 MCP 工具占用: {body.name}")
+    meta, errors = _compile_dynamic_or_400(body.code, body.name)
+    config: dict = {"source": "dynamic", "code": body.code, **_code_stamp(body.code)}
+    if body.description:
+        config["description"] = body.description
+    row = await ToolRepo.create_custom(
+        name=body.name,
+        schema_={**meta["parameters"], "description": meta["description"]},
+        config=config,
+        enabled=body.enabled,
+    )
+    await AuditRepo.write(
+        action="admin.custom_tool.dynamic_create", user_id=str(user.id), target_type="tool", target_id=row.name
+    )
+    return ApiResponse(data={"name": row.name, "description": meta["description"]})
+
+
+@router.get("/custom-tools/{name}/code", response_model=ApiResponse[dict])
+async def get_dynamic_custom_tool_code(name: str, user=Depends(require_staff)):
+    """取动态工具的当前源码与元信息（供后台编辑器回显）。"""
+    row = await _get_custom_row(name)
+    cfg = (row.config or {}) if row else {}
+    if row is None or not cfg.get("code"):
+        raise NotFound("该工具不是动态源码工具（代码目录工具无可编辑源码）")
+    return ApiResponse(
+        data={
+            "name": row.name,
+            "code": cfg.get("code"),
+            "description": cfg.get("description"),
+            "enabled": bool(row.enabled),
+            "parameters": row.schema_ or {},
+            **_code_stamp(cfg.get("code") or ""),
+        }
+    )
+
+
+@router.put("/custom-tools/{name}/code", response_model=ApiResponse[dict])
+async def update_dynamic_custom_tool_code(
+    name: str, body: CustomToolCodeUpdate, user=Depends(require_perm("custom-tools", "write"))
+):
+    """更新动态工具源码：编译失败保持旧版可用，成功则下一轮对话即时生效（靠指纹重编译）。"""
+    row = await _get_custom_row(name)
+    cfg = (row.config or {}) if row else {}
+    if row is None or not cfg.get("code"):
+        raise NotFound("动态自定义工具不存在（代码目录工具不可在线改源码）")
+    meta, errors = _compile_dynamic_or_400(body.code, name)
+    new_cfg: dict = {**cfg, "source": "dynamic", "code": body.code, **_code_stamp(body.code)}
+    if body.description is not None:
+        # 空串=清除覆盖，回到用代码里的 description
+        if body.description.strip():
+            new_cfg["description"] = body.description
+        else:
+            new_cfg.pop("description", None)
+    await ToolRepo.update(
+        row.id, config=new_cfg, schema_={**meta["parameters"], "description": meta["description"]}
+    )
+    await AuditRepo.write(
+        action="admin.custom_tool.dynamic_update", user_id=str(user.id), target_type="tool", target_id=name
+    )
+    return ApiResponse(data={"name": name, "description": meta["description"]})
+
+
+@router.post("/custom-tools/validate", response_model=ApiResponse[dict])
+async def validate_dynamic_custom_tool_code(
+    body: CustomToolValidateRequest, user=Depends(require_perm("custom-tools", "write"))
+):
+    """只校验不入库：返回安全/编译错误明细与解析出的工具元信息（编辑器实时检查）。"""
+    cls, errors = tool_code_loader.compile_tool(body.code, expected_name=body.name or None)
+    if cls is None:
+        return ApiResponse(data={"ok": False, "errors": errors})
+    return ApiResponse(
+        data={
+            "ok": True,
+            "errors": [],
+            "name": cls.name,
+            "description": cls.description,
+            "parameters": cls.parameters,
+            "timeout": getattr(cls, "timeout", None),
+        }
+    )
+
+
+@router.post("/custom-tools/test-run", response_model=ApiResponse[dict])
+async def test_run_dynamic_custom_tool(
+    body: CustomToolTestRunRequest, user=Depends(require_perm("custom-tools", "write"))
+):
+    """试运行：用给定入参实际执行一次，结果回显（不影响已登记版本）。
+
+    风险提醒：试运行会产生真实副作用（建单/改单类工具会写数据），因此
+    使用独立的测试身份 user_id=admin-test:<操作员id>，便于事后追溯。
+    """
+    code = body.code
+    if not code:
+        row = await _get_custom_row(body.name)
+        code = ((row.config or {}).get("code") if row else None) or ""
+        if not code:
+            raise NotFound("未提供源码且该名称无已登记动态工具")
+    cls, errors = tool_code_loader.compile_tool(code, expected_name=body.name)
+    if cls is None:
+        raise ParamError("代码校验未通过：" + "；".join(errors))
+    tool = cls()
+    declared = {p.name for p in tool.get_parameters()}
+    args = dict(body.args or {})
+    for key in ("user_id", "session_id"):
+        if key in declared and not args.get(key):
+            args[key] = f"admin-test:{user.id}" if key == "user_id" else "admin-test"
+    try:
+        if inspect.iscoroutinefunction(tool.run):
+            result = await asyncio.wait_for(tool.run(**args), timeout=body.timeout_seconds)
+        else:
+            # 同步写法（少见）：丢到线程避免阻塞后台接口本身
+            result = await asyncio.to_thread(tool.run, args)
+    except TimeoutError:
+        raise ParamError(f"试运行超时（{body.timeout_seconds}s），请检查工具是否在做耗时网络调用") from None
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(f"动态工具试运行失败: {body.name}")
+        return ApiResponse(data={"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+    return ApiResponse(data={"ok": True, "result": _json_safe(result)})
+
+
 @router.patch("/custom-tools/{name}/toggle", response_model=ApiResponse)
 async def toggle_custom_tool(name: str, body: CustomToolToggle, user=Depends(require_perm("custom-tools", "write"))):
     row = await _get_custom_row(name)
@@ -435,6 +599,8 @@ async def delete_custom_tool(name: str, user=Depends(require_perm("custom-tools"
         if name in (agent.custom_tool_names or []):
             raise ParamError(f"自定义工具被 Agent 引用，无法删除: {agent.name}")
     await ToolRepo.delete(row.id)
+    # 动态工具同步释放编译缓存，避免已删工具的对象长期驻留
+    tool_code_loader.invalidate(name)
     await AuditRepo.write(
         action="admin.custom_tool.delete", user_id=str(user.id), target_type="tool", target_id=name
     )
@@ -505,20 +671,57 @@ def _dynamic_registered_tools(meta) -> list[str]:
 
 
 async def _validate_custom_tool_bindings(names: list[str]) -> None:
-    """校验绑定的自定义工具均已登记（tools type=custom）、启用，且仍在代码目录中。"""
+    """校验绑定的自定义工具均可用：代码目录工具或已填源码的动态工具，且已登记启用。"""
     if not names:
         return
-    # 先做纯内存的代码目录校验，避免未知名也去查库
-    for n in names:
-        if not custom_catalog.exists(n):
-            raise ParamError(f"自定义工具不在代码目录: {n}")
     registered = {r.name: r for r in await ToolRepo.list_by_type("custom")}
     for n in names:
+        in_code_catalog = custom_catalog.exists(n)
         row = registered.get(n)
+        if not in_code_catalog:
+            # 不在代码目录 → 只允许带源码且编译可用的动态工具
+            cfg = (row.config or {}) if row else {}
+            if not cfg.get("code"):
+                raise ParamError(f"自定义工具不存在（既不在代码目录，也无动态源码）: {n}")
+            cls, errors = tool_code_loader.get_compiled_class(n, cfg["code"])
+            if cls is None:
+                raise ParamError(f"自定义工具源码不可用: {n}（{'；'.join(errors)}）")
         if row is None:
             raise ParamError(f"自定义工具未登记: {n}")
         if not row.enabled:
             raise ParamError(f"自定义工具已禁用: {n}")
+
+
+def _compile_dynamic_or_400(code: str, name: str) -> tuple[dict, list[str]]:
+    """保存前的强校验：安全 + 编译 + 类内 name 一致性，失败直接 400 明细。
+
+    返回 (元信息, 错误列表)；错误列表始终为空（非空已抛异常），便于调用方统一书写。
+    """
+    cls, errors = tool_code_loader.compile_tool(code, expected_name=name)
+    if cls is None:
+        raise ParamError("代码校验未通过：" + "；".join(errors))
+    meta = {
+        "name": cls.name,
+        "description": cls.description,
+        "parameters": cls.parameters or {},
+    }
+    return meta, []
+
+
+def _code_stamp(code: str) -> dict:
+    """随源码一起存入 config 的审计位：指纹 + 保存时间，供后台展示“改动是否已生效”。"""
+    return {
+        "code_sha256": tool_code_loader.fingerprint(code)[:16] if code else "",
+        "code_updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+
+
+def _json_safe(value):
+    """把工具返回值收敛为可 JSON 序列化的结构（datetime/Decimal 等转字符串）。"""
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _build_mcp_config(body: MCPServerCreate) -> dict:

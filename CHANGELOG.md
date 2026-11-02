@@ -10,7 +10,23 @@
 
 ## [Unreleased]
 
-暂无未发布变更。
+### 新增
+
+- **自定义工具动态加载（后台在线写源码，免重启）**：新增 `dynamic` 来源的自定义工具——Python 源码存于
+  `tools.config.code`，后台「自定义工具」页可直接新建/编辑源码、一键校验与试运行，保存后下一轮对话即生效，
+  不再需要改代码目录 + 重启后端。零 DDL（仍是 `tools` 表 `type=custom`）；与代码目录工具走同一个装配入口
+  `custom_loader.register_custom_tools()`，**同名时以代码目录为准**，存量工具零回归。详见
+  [docs/updates/27-dynamic-custom-tools.md](docs/updates/27-dynamic-custom-tools.md)。
+  - 安全：`tool_security.py` 做 AST 白名单/黑名单（import 只允许白名单标准库与 `httpx/numpy/pandas`，禁
+    `open/exec/eval/getattr` 与 `__globals__` 类逃逸），`tool_code_loader.py` 再用受限 builtins 的命名空间编译，
+    运行期 `import` 走同一套白名单守卫（AST 漏网的拼接导入也拦得住）；写操作限 `custom-tools: write` 并全部
+    落审计。运行超时/异常隔离复用 `_execute_tool`（可选 `timeout` 上限 120s，回投主循环与直调两条路径同口径）。
+  - 性能：按（工具名, 源码指纹）缓存编译结果，同一轮对话不重复编译；编译失败不覆盖已缓存的可用版本。
+  - 接口：新增 `POST /custom-tools/dynamic`、`GET|PUT /custom-tools/{name}/code`、`POST /custom-tools/validate`、
+    `POST /custom-tools/test-run`；`GET /custom-tools` 返回体新增 `source`/`has_code`/`code_updated_at`；
+    动态 Agent 绑定校验允许已填源码的动态工具（绑定时即预编译一次，避免运行时静默失败）。
+  - 前端：`CustomToolsView.vue` 增加来源列与源码编辑器（示例模板填入、Tab 补 4 空格、校验/试运行结果回显）；
+    `AgentList.vue` 绑定候选提示文案同步。
 
 ## [0.2.1] - 2026-10-30
 

@@ -7,6 +7,8 @@
 - 新增工具：实现 BaseTool 子类，并在 _TOOL_CLASSES 中补一行。
 - 所有工具均为无参构造（会话上下文 user_id/session_id 由 orchestrator 执行时按参数
   声明自动注入），故 build() 直接 cls() 实例化。
+- 本模块只托管「代码目录工具」；后台在线编写源码的动态工具走 tool_code_loader，
+  两者由 custom_loader.register_custom_tools 统一装配（同名时代码目录优先）。
 """
 from app.tools.custom.base import BaseTool
 from app.tools.custom.echo_tool import EchoTool
@@ -52,6 +54,21 @@ def build(name: str) -> BaseTool | None:
     """按名实例化目录中的工具；未登记返回 None。"""
     cls = CATALOG.get(name)
     return cls() if cls is not None else None
+
+
+def spec_of(name: str) -> dict:
+    """按名取单个工具的元信息；未登记返回 ok=False（与 tool_code_loader.preview 同构）。"""
+    cls = CATALOG.get(name)
+    if cls is None:
+        return {"ok": False, "errors": [f"工具不在代码目录: {name}"]}
+    return {
+        "ok": True,
+        "errors": [],
+        "name": cls.name,
+        "description": cls.description or "",
+        "parameters": cls.parameters or {},
+        "timeout": getattr(cls, "timeout", None),
+    }
 
 
 def list_specs() -> list[dict]:

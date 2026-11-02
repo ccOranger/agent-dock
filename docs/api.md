@@ -274,16 +274,31 @@ GET    /api/v1/admin/router            # 基本档案：职责/模型/意图上�
 GET    /api/v1/admin/router/prompt     # 当前生效提示词预览（按生效清单实时渲染）+ 每个候选 Agent 的线索与实际注入部分
 ```
 
-## Admin · Custom Tools（代码自定义工具登记，require_admin 写 / require_staff 读）
+## Admin · Custom Tools（自定义工具：代码目录登记 + 后台在线源码）
 
-（[U10](updates/10-custom-tool-management.md)）
+（[U10](updates/10-custom-tool-management.md)、[U27](updates/27-dynamic-custom-tools.md)）写操作需 `custom-tools: write`，读需 staff。
 
 ```
-GET    /api/v1/admin/custom-tools            # 扫描代码目录列出工具（含 registered/enabled/覆盖描述）
-POST   /api/v1/admin/custom-tools            # 登记到 tools 表 type=custom（不在目录→1001；重名/MCP 占用→3002）
-PATCH  /api/v1/admin/custom-tools/{name}/toggle  # 启用/禁用（body: enabled）
-DELETE /api/v1/admin/custom-tools/{name}     # 取消登记（被动态 Agent 引用→1001）
+GET    /api/v1/admin/custom-tools                 # 两来源合并列表（含 registered/enabled/覆盖描述/source/has_code/code_updated_at）
+POST   /api/v1/admin/custom-tools                 # 登记代码目录工具到 tools 表 type=custom（不在目录→1001；重名/MCP 占用→3002）
+PATCH  /api/v1/admin/custom-tools/{name}/toggle    # 启用/禁用（body: enabled）
+DELETE /api/v1/admin/custom-tools/{name}          # 取消登记/删除动态工具（被动态 Agent 引用→1001；同时释放编译缓存）
 ```
+
+动态工具（源码存 `tools.config.code`，保存即下一轮对话生效，**免重启**）：
+
+```
+POST   /api/v1/admin/custom-tools/dynamic          # 新建：AST 安全校验 + 编译通过才落库（失败→1001逐条明细；与代码目录/MCP 重名→3002）
+GET    /api/v1/admin/custom-tools/{name}/code       # 取源码供编辑器回显（非动态工具→3001）
+PUT    /api/v1/admin/custom-tools/{name}/code       # 整份替换源码并重编译（代码目录工具→3001）
+POST   /api/v1/admin/custom-tools/validate         # 只校验不入库，返回错误明细 + 解析出的 name/description/parameters
+POST   /api/v1/admin/custom-tools/test-run          # 用给定入参真实执行一次（默认 10s、上限 60s；身份 admin-test:<操作员id>）
+```
+
+安全与写法约束：工具类必须继承 `BaseTool`（系统已注入命名空间，**无需也不能 import**）、声明
+`name`（与登记名一致）/ `description` / `parameters`（JSON Schema）并实现 `async def run`；import 只允许
+白名单标准库与 `httpx/numpy/pandas`；禁用 `open/exec/eval/getattr` 等内建与 `__globals__` 类 dunder 访问；
+源码 ≤ 400 行；可选 `timeout` 属性上限 120s。详见 [U27](updates/27-dynamic-custom-tools.md)。
 
 ## Admin · Canned Scripts（高频固定话术，require_admin 写 / require_staff 读）
 

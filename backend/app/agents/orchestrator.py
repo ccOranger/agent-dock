@@ -133,10 +133,15 @@ def _execute_tool(
 
     try:
         if inspect.iscoroutinefunction(tool.run):
+            timeout = getattr(tool, "timeout", None) or _DEFAULT_TOOL_TIMEOUT
             if loop is None:
-                result = asyncio.run(tool.run(**args))
+                # 无主循环可回投（单测/脚本直调）：同样要上硬超时，否则工具声明的
+                # timeout 在这条路径上会被静默忽略，一直等到自己跑完。
+                try:
+                    result = asyncio.run(asyncio.wait_for(tool.run(**args), timeout))
+                except TimeoutError:
+                    raise TimeoutError(f"工具 {tool_name} 执行超时（{timeout}s），已取消") from None
             else:
-                timeout = getattr(tool, "timeout", None) or _DEFAULT_TOOL_TIMEOUT
                 future = asyncio.run_coroutine_threadsafe(tool.run(**args), loop)
                 try:
                     result = future.result(timeout)
@@ -754,7 +759,7 @@ class Orchestrator:
         intent_index: int = 0,
         runtime=None,
     ) -> AsyncIterator[dict]:
-        """构建并流式执行单个业务 Agent（含 MCP 预取与上下文工程）。"""
+        """构建并流式执行单个业务 Agent（含 MCP / 动态工具预取与上下文工程）。"""
         agent_name = getattr(business_agent, "name", "?")
         yield {"type": "status", "data": {"stage": "preparing", "text": "正在连接工具与检索知识库…"}}
         # ---- 在主 event loop 上预取 MCP 配置（避免 build() 跨循环访问 DB）----
@@ -766,6 +771,17 @@ class Orchestrator:
             if collector:
                 for name in business_agent.mcp_tools:
                     collector.add_unique("mcp_server_names", name)
+
+        # ---- 同样在主循环预取「动态自定义工具」源码（后台写的 config.code）----
+        # 代码目录工具不产生 DB 访问；预取失败也不能影响对话，异常在此兜住降级为空配置。
+        custom_configs: dict[str, dict] = {}
+        if getattr(business_agent, "custom_tool_names", None):
+            from app.tools.custom_loader import fetch_dynamic_configs
+
+            try:
+                custom_configs = await fetch_dynamic_configs(business_agent.custom_tool_names)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"⚠️ 动态自定义工具配置预取失败，本轮仅装配代码目录工具: {exc}")
 
         # ---- 上下文工程 ----
         # 多意图共享同一 query：按 (用户, query, 命名空间) 缓存，第二个意图不再重复检索
@@ -788,7 +804,7 @@ class Orchestrator:
         # （MCP 配置已在上面于主循环预取，build 不再触碰 DB，可安全跨线程）
         # 每个意图新建 SimpleAgent 实例，避免多意图共享 _history 相互污染
         build_started_ms = collector.now_ms() if collector else 0
-        simple_agent = await asyncio.to_thread(business_agent.build, mcp_configs)
+        simple_agent = await asyncio.to_thread(business_agent.build, mcp_configs, custom_configs)
         if collector:
             registry = getattr(simple_agent, "tool_registry", None)
             # available_tools = 模型本轮真正能调的工具（含 MCP 展开后的独立工具）；

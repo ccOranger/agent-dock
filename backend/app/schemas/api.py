@@ -252,6 +252,46 @@ class CustomToolRegister(BaseModel):
     enabled: bool = True
 
 
+class CustomToolDynamicCreate(BaseModel):
+    """新建一个后台在线编写源码的动态自定义工具（方案 A）。
+
+    与 CustomToolRegister 的区别：实现不再来自代码目录，而由 code 提供；
+    name/description/parameters 以代码里的类属性为权威（服务端编译后回写），
+    请求体的 name 仅作为登记名与工具类 name 做一致性校验。
+    """
+
+    name: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$")
+    code: str = Field(min_length=1, max_length=60_000)
+    description: str | None = Field(default=None, max_length=512)  # 后台展示用覆盖描述
+    enabled: bool = True
+
+
+class CustomToolCodeUpdate(BaseModel):
+    """更新动态工具的源码（整份替换）；同样要过安全校验与编译。"""
+
+    code: str = Field(min_length=1, max_length=60_000)
+    description: str | None = Field(default=None, max_length=512)
+
+
+class CustomToolValidateRequest(BaseModel):
+    """仅校验源码（不入库）：返回安全/编译错误与解析出的工具元信息。"""
+
+    code: str = Field(min_length=1, max_length=60_000)
+    name: str | None = Field(default=None, max_length=64)  # 传了则校验类内 name 一致性
+
+
+class CustomToolTestRunRequest(BaseModel):
+    """试运行：用给定入参执行一次工具，校验返回值形状（不影响已登记版本）。
+
+    code 留空则用该 name 已登记的源码；args 按工具 parameters 传入。
+    """
+
+    name: str = Field(min_length=1, max_length=64)
+    code: str | None = Field(default=None, max_length=60_000)
+    args: dict = Field(default_factory=dict)
+    timeout_seconds: int = Field(default=10, ge=1, le=60)
+
+
 class CustomToolToggle(BaseModel):
     enabled: bool
 

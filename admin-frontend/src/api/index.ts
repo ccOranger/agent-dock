@@ -6,7 +6,10 @@ import type {
   CannedScript,
   CannedScriptPayload,
   ChunkList,
+  CustomToolCodeDetail,
   CustomToolSpec,
+  CustomToolTestRunResult,
+  CustomToolValidateResult,
   DynamicAgentPayload,
   DocumentItem,
   InquiryDetail,
@@ -444,6 +447,28 @@ export const apiToggleCustomTool = (name: string, enabled: boolean) =>
   http.patch(`/admin/custom-tools/${name}/toggle`, { enabled })
 
 export const apiDeleteCustomTool = (name: string) => http.delete(`/admin/custom-tools/${name}`)
+
+// ===== Admin：动态自定义工具（后台在线写源码，保存即生效）=====
+export const apiCreateDynamicCustomTool = (body: {
+  name: string
+  code: string
+  description?: string
+  enabled?: boolean
+}) => unwrap(http.post<never, { data: { data: { name: string } } }>('/admin/custom-tools/dynamic', body))
+
+export const apiGetCustomToolCode = (name: string) =>
+  unwrap(http.get<never, { data: { data: CustomToolCodeDetail } }>(`/admin/custom-tools/${name}/code`))
+
+export const apiUpdateCustomToolCode = (name: string, body: { code: string; description?: string | null }) =>
+  unwrap(http.put<never, { data: { data: { name: string } } }>(`/admin/custom-tools/${name}/code`, body))
+
+export const apiValidateCustomToolCode = (body: { code: string; name?: string }) =>
+  unwrap(
+    http.post<never, { data: { data: CustomToolValidateResult } }>('/admin/custom-tools/validate', body),
+  )
+
+export const apiTestRunCustomTool = (body: { name: string; code?: string; args?: Record<string, unknown> }) =>
+  unwrap(http.post<never, { data: { data: CustomToolTestRunResult } }>('/admin/custom-tools/test-run', body))
 
 // ===== Admin：高频固定话术 =====
 /** 不传 sceneCode 返回全量；传了只返回该场景生效的全局行 + 场景覆盖行 */

@@ -3,7 +3,8 @@ DynamicBusinessAgent：由管理后台在 DB 中配置的动态业务 Agent
 
 与代码注册的 Agent（KnowledgeAgent/OrderAgent/...）不同：
 - 定义（system_prompt / 模型 / rag_namespace / MCP 绑定）全部来自 agents 表
-- 无进程内自定义 Python 工具，能力边界 = prompt + memory/rag + 所绑定的 MCP 工具
+- 能力边界 = prompt + memory/rag + 所绑定的 MCP 工具 + 自定义工具
+  （自定义工具可以是代码目录里预先写好的，也可以是后台在线写源码的动态工具）
 - 按需求默认挂载 memory 工具（与所有代码 Agent 保持一致）
 """
 from hello_agents.tools import ToolRegistry
@@ -36,5 +37,8 @@ class DynamicBusinessAgent(BaseBusinessAgent):
         primary = self.rag_namespace or (self.rag_namespaces[0] if self.rag_namespaces else None)
         if primary:
             registry.register_tool(get_rag_tool(primary))
-        # 代码自定义工具：按名从代码目录实例化并注册（会话上下文参数由执行时自动注入）。
-        self.registered_custom_tools = register_custom_tools(registry, self.custom_tool_names)
+        # 自定义工具：代码目录工具直接实例化；后台在线编写源码的动态工具按预取的
+        # config.code 安全编译后实例化（会话上下文参数仍由执行时自动注入）。
+        self.registered_custom_tools = register_custom_tools(
+            registry, self.custom_tool_names, self.custom_configs
+        )
