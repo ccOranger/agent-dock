@@ -28,6 +28,13 @@
   - 前端：`CustomToolsView.vue` 增加来源列与源码编辑器（示例模板填入、Tab 补 4 空格、校验/试运行结果回显）；
     `AgentList.vue` 绑定候选提示文案同步。
 
+### 修复
+
+- **部署文档升级路径校正**：`docs/deployment.md` §5 的健康检查命令原写 `http://127.0.0.1:8080/api/health`，
+  但该路径在后端不存在（对外探针是 `/health`，见 `docker/nginx.conf`），按原文执行会 404 误判为升级失败；
+  同时补一步「用新增路由探活确认新代码已生效」。U27 上线注意事项记于
+  [docs/updates/27-dynamic-custom-tools.md](docs/updates/27-dynamic-custom-tools.md) §8（零 DDL、零新增环境变量）。
+
 ## [0.2.1] - 2026-10-30
 
 ### ⚠️ 许可变更（破坏性）

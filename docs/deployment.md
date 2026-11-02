@@ -157,8 +157,11 @@ $COMPOSE run --rm backend python -m app.migrate
 # 6) 重建镜像与容器
 $COMPOSE up -d --build
 
-# 7) 健康检查
-curl -fsS http://127.0.0.1:8080/api/health
+# 7) 健康检查（对外路径是 /health；/api/health 不存在，会 404）
+curl -fsS http://127.0.0.1:8080/health
+
+# 8) 确认新代码已生效（/health 不回版本号，用路由探活）
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/v1/admin/custom-tools   # 401/403=已上新代码，404=还在跑旧镜像
 ```
 
 - 升级期间 `INIT_ON_START` 保持 `false`：`init_db.sql` 只负责空库建表，存量库版本由迁移推进。
