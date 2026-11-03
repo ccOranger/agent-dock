@@ -1,0 +1,50 @@
+# 服务器端运行文件：只需要这个 compose 文件 + .env + 已推送到 ACR 的镜像。
+# 不需要 Dockerfile，也不需要源码；Dockerfile 已在本机构建镜像时使用过。
+#
+# 用法：
+#   docker compose -f docker-compose.server.yml pull backend
+#   docker compose -f docker-compose.server.yml up -d --no-build backend
+#
+# 首次部署（空库）：
+#   docker compose -f docker-compose.server.yml run --rm backend python -m app.migrate
+#   docker compose -f docker-compose.server.yml run --rm backend python ../scripts/seed_data.py
+#
+# 前置（根 .env）：
+#   BACKEND_IMAGE=registry.cn-hangzhou.aliyuncs.com/your-namespace/agentdock-backend:0.3.0
+#   DATABASE_URL / REDIS_URL / QDRANT_URL 指向 127.0.0.1（host 网络访问宿主机中间件）
+#   JWT_SECRET、LLM_*、EMBED_*、DATA_ROOT 等按生产环境填写
+
+name: smart-cs
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  backend:
+    # 只用 ACR 镜像，不在服务器构建
+    image: ${BACKEND_IMAGE:?请在根 .env 设置 BACKEND_IMAGE，例如 registry.cn-hangzhou.aliyuncs.com/your-namespace/agentdock-backend:0.3.0}
+    env_file:
+      - path: .env
+        required: false
+    # 宿主机中间件监听 127.0.0.1 时，host 网络可直接访问
+    network_mode: host
+    # host 网络下绑回环，避免 8000 暴露到公网；对外由 Nginx 转发
+    command: ["sh", "-c", "exec uvicorn app.main:app --host 127.0.0.1 --port ${APP_PORT:-8000}"]
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      JWT_SECRET: ${JWT_SECRET:?未设置 JWT_SECRET：请在根 .env 填入强随机值}
+      SEED_DEMO: ${SEED_DEMO:-false}
+      # 正常启动不做建表/种子；首次部署用上面的 run --rm 命令
+      INIT_ON_START: "false"
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+      TRUSTED_PROXIES: "127.0.0.1"
+      RAG_KB_ROOT: /app/backend/data/knowledge_bases
+      RAG_DOC_ARCHIVE_ROOT: /app/backend/data/doc_archives
+    volumes:
+      - ${DATA_ROOT:-/srv/smart-cs}/backenddata:/app/backend/data
+      - ${DATA_ROOT:-/srv/smart-cs}/memorydata:/app/backend/memory_data
+    restart: unless-stopped
+    logging: *default-logging
