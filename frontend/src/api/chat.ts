@@ -1,6 +1,6 @@
 import { streamSSE, type SSEEvent } from '@shared'
 
-import { getToken } from './http'
+import { API_BASE, getToken } from './http'
 
 export type { SSEEvent }
 
@@ -17,7 +17,7 @@ export function streamChat(
   sceneCode?: string | null,
 ): AbortController {
   return streamSSE({
-    url: '/api/v1/chat/stream',
+    url: `${API_BASE}/chat/stream`,
     token: getToken(),
     body: {
       session_id: sessionId,

@@ -6,6 +6,8 @@ import vue from '@vitejs/plugin-vue'
 const apiTarget = process.env.VITE_API_TARGET || 'http://localhost:8000'
 
 export default defineConfig({
+  // 默认部署在域名根路径；部署到 /smart-cs/ 等子路径时构建加 VITE_BASE=/smart-cs/
+  base: process.env.VITE_BASE || '/',
   plugins: [vue()],
   resolve: {
     alias: {

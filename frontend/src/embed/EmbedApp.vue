@@ -60,6 +60,8 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { streamSSE } from '@shared'
 
+import { API_BASE } from '@/api/http'
+
 interface WidgetConfig {
   title: string
   welcome: string
@@ -175,7 +177,7 @@ async function pollOnce() {
       session_id: string
       status: string
       messages: Array<{ id: string; role: string; content: string; sender_type?: string; routed_to?: string }>
-    }>(`/api/v1/chat/poll?${q.toString()}`, { headers })
+    }>(`${API_BASE}/chat/poll?${q.toString()}`, { headers })
     if (res.messages.length) pollCursor = res.messages[res.messages.length - 1].id
     for (const m of res.messages) {
       if (m.role === 'assistant' && (m.sender_type === 'staff' || m.routed_to === 'staff')) {
@@ -254,7 +256,7 @@ async function init() {
   }
   try {
     const info = await requestJSON<PublicScene>(
-      `/api/v1/public/scenes/${encodeURIComponent(sceneCode)}`,
+      `${API_BASE}/public/scenes/${encodeURIComponent(sceneCode)}`,
       integrationCode ? { headers: { 'X-Integration-Code': integrationCode } } : undefined,
     )
     scene.value = info
@@ -273,7 +275,7 @@ async function init() {
         if (info.publish_key) headers['X-Publish-Key'] = info.publish_key
         if (integrationCode) headers['X-Integration-Code'] = integrationCode
         const issued = await requestJSON<VisitorIssued>(
-          `/api/v1/public/scenes/${encodeURIComponent(sceneCode)}/visitors`,
+          `${API_BASE}/public/scenes/${encodeURIComponent(sceneCode)}/visitors`,
           { method: 'POST', headers },
         )
         visitorId.value = issued.visitor_id
@@ -324,7 +326,7 @@ function send() {
 
   const info = scene.value
   const ctrl = streamSSE({
-    url: `/api/v1/chat/stream?scene_code=${encodeURIComponent(sceneCode)}`,
+    url: `${API_BASE}/chat/stream?scene_code=${encodeURIComponent(sceneCode)}`,
     token: customerToken || undefined,
     headers: {
       'X-Scene-Code': sceneCode,

@@ -1044,9 +1044,14 @@ const widgetAttrs = computed(() => {
   return attrs.join(' ')
 })
 
-/** API 基址：生产同域由 Caddy 反代，开发由 Vite 的 /api 代理转发到后端。 */
+/** API 基址：优先 VITE_API_BASE（含 /api/v1），否则用 VITE_API_BASE_URL + /api/v1。 */
 const apiBase = computed(() => {
   const env = import.meta.env as Record<string, string | undefined>
+  const configured = env.VITE_API_BASE
+  if (configured) {
+    if (/^https?:\/\//i.test(configured)) return configured.replace(/\/$/, '')
+    return `${window.location.origin}${configured.startsWith('/') ? '' : '/'}${configured}`.replace(/\/$/, '')
+  }
   const raw = env.VITE_API_BASE_URL || window.location.origin
   return `${String(raw).replace(/\/$/, '')}/api/v1`
 })

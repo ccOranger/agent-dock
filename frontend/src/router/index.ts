@@ -10,7 +10,8 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  // 与 Vite base 保持一致：部署到 /smart-cs/ 时自动使用 /smart-cs/ 作为路由前缀
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
 
