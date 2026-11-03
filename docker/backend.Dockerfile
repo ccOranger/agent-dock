@@ -6,6 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# 国内构建可传 --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
 WORKDIR /app
 
 # 非 root 运行；数据目录先在镜像内建好并授权，命名卷首次挂载会继承此属主
@@ -15,7 +18,7 @@ RUN adduser --disabled-password --gecos "" appuser \
 
 # 依赖单独一层：requirements.txt 未变化时可复用构建缓存
 COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r /app/backend/requirements.txt
 
 COPY backend/ /app/backend/
 COPY scripts/seed_data.py scripts/init_db.py scripts/init_db.sql /app/scripts/

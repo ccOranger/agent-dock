@@ -9,7 +9,13 @@ docs
 **/__pycache__
 backend/.venv
 backend/.env
+backend/.env.*
 .env
+.env.*
 backend/.pytest_cache
+backend/.pytest_tmp
+backend/.pytest_bt
+backend/.ruff_cache
+backend/tests
 backend/data
 backend/memory_data
