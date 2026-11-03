@@ -160,7 +160,11 @@ async def read_db_version(conn: asyncpg.Connection) -> str | None:
     迁移表可能尚未创建（空库或刚建库），此时按"无增量记录"处理，
     避免调用方必须先建表才能读版本。
     """
-    meta = await conn.fetchval("SELECT value FROM schema_meta WHERE key = 'version'")
+    # 空库/刚建库时 schema_meta 还不存在，必须先探测再查询；
+    # 否则 asyncpg 会直接抛 UndefinedTableError，走不到 init_db.sql 基线初始化。
+    meta = None
+    if await _schema_meta_exists(conn):
+        meta = await conn.fetchval("SELECT value FROM schema_meta WHERE key = 'version'")
     has_table = await conn.fetchval(
         "SELECT 1 FROM information_schema.tables "
         "WHERE table_schema = current_schema() AND table_name = 'schema_migrations'"

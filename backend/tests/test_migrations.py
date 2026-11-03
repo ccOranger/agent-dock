@@ -137,6 +137,21 @@ def test_plan_all_pending_on_empty_db() -> None:
     assert bootstrap == []
 
 
+class _EmptySchemaConn:
+    """模拟空库：schema_meta / schema_migrations 都还不存在。"""
+
+    async def fetchval(self, query, *args):
+        if "FROM schema_meta" in query:
+            raise AssertionError("read_db_version 在 schema_meta 不存在时不应直接查询它")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_read_db_version_returns_none_on_empty_db() -> None:
+    """空库迁移必须能继续走 init_db.sql，而不是先抛 UndefinedTableError。"""
+    assert await read_db_version(_EmptySchemaConn()) is None
+
+
 def test_plan_rejects_modified_history() -> None:
     """已记录的迁移文件被改动（checksum 变化）时必须中止。"""
     with pytest.raises(SystemExit):
