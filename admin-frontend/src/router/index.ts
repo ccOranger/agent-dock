@@ -23,6 +23,8 @@ const children: RouteRecordRaw[] = [
   { path: 'integrations', component: () => import('@/views/IntegrationsView.vue'), meta: { title: '接入方管理', roles: ['admin'] } },
   { path: 'staff', component: () => import('@/views/StaffQuotaView.vue'), meta: { title: '人员与配额', perm: 'staff' } },
   { path: 'roles', component: () => import('@/views/RoleView.vue'), meta: { title: '角色与权限', perm: 'roles' } },
+  // 兜底 404：未知路径仍留在后台外壳里，避免只渲染出侧栏和一片空白
+  { path: ':pathMatch(.*)*', component: () => import('@/views/NotFoundView.vue'), meta: { title: '页面不存在' } },
 ]
 
 const routes: RouteRecordRaw[] = [
@@ -49,6 +51,26 @@ function firstAllowed(): string {
   }
   return '/inquiries'
 }
+
+// ===== 发版后的 chunk 失效兜底 =====
+// 旧标签页里的懒加载路由仍指向上一版的文件名，部署后点击会动态导入失败并白屏。
+// 这里捕获一次并自动刷新；用 sessionStorage 标记防止「刷新后仍然失败」变成死循环。
+const RELOAD_FLAG = 'cs-admin:chunk-reload'
+
+router.onError((err) => {
+  const message = String((err as Error)?.message || '')
+  if (!/dynamically imported module|Importing a module script failed/i.test(message)) return
+  if (sessionStorage.getItem(RELOAD_FLAG)) return
+  sessionStorage.setItem(RELOAD_FLAG, '1')
+  location.reload()
+})
+
+router.afterEach(() => {
+  // 导航成功后清掉标记，下一次发版仍可自动刷新
+  if (sessionStorage.getItem(RELOAD_FLAG)) {
+    setTimeout(() => sessionStorage.removeItem(RELOAD_FLAG), 8000)
+  }
+})
 
 router.beforeEach(async (to) => {
   if (to.meta.public) return true
