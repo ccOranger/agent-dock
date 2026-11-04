@@ -47,6 +47,14 @@ export const apiSessionMessages = (
     }),
   )
 
+/** 单会话详情：进入历史会话前先确认状态（已结束的只能看，不能续聊） */
+export const apiGetSession = (sessionId: string, sceneCode?: string | null) =>
+  unwrap(
+    http.get<never, { data: { data: SessionInfo } }>(`/sessions/${sessionId}`, {
+      params: sceneCode ? { scene_code: sceneCode } : {},
+    }),
+  )
+
 export const apiDeleteSession = (sessionId: string, sceneCode?: string | null) =>
   http.delete(`/sessions/${sessionId}`, {
     params: sceneCode ? { scene_code: sceneCode } : {},

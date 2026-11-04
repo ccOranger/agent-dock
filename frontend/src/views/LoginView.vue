@@ -42,7 +42,7 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 
@@ -51,12 +51,23 @@ const loading = ref(false)
 const mode = ref<'login' | 'register'>('login')
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+
+/**
+ * 登录后的落点：优先回到被拦截前的页面（?redirect=），
+ * 只接受站内绝对路径，避免被拼成外链。
+ */
+function afterLoginPath(): string {
+  const raw = route.query.redirect
+  const target = typeof raw === 'string' ? raw : ''
+  return target.startsWith('/') && !target.startsWith('//') ? target : '/chat'
+}
 
 async function onLogin() {
   loading.value = true
   try {
     await auth.login(form.username, form.password)
-    router.push('/chat')
+    router.push(afterLoginPath())
   } catch (e: any) {
     // code 2004：账号不存在，引导切换到注册并保留已输入的用户名
     if (e?.code === 2004) {
@@ -75,7 +86,7 @@ async function onRegister() {
   try {
     await auth.register(form.username, form.password)
     ElMessage.success('注册成功，已自动登录')
-    router.push('/chat')
+    router.push(afterLoginPath())
   } catch (e: any) {
     ElMessage.error(e?.message || '注册失败')
   } finally {
@@ -86,19 +97,71 @@ async function onRegister() {
 
 <style scoped>
 .login-page {
-  height: 100%;
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 20px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f0f2f5;
+  overflow: hidden;
+  background:
+    radial-gradient(720px 420px at 8% 0%, rgba(122, 92, 255, 0.22), transparent 62%),
+    radial-gradient(680px 420px at 100% 10%, rgba(79, 107, 255, 0.24), transparent 62%),
+    linear-gradient(180deg, #f7f8ff 0%, #e9edff 100%);
 }
+
 .login-card {
-  width: 360px;
+  width: 100%;
+  max-width: 380px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 24px 60px rgba(31, 42, 80, 0.18);
 }
+
+.login-card :deep(.el-card__body) {
+  padding: 24px;
+}
+
+/* 标题用品牌渐变，正文仍是深色，避免整页都在发光 */
+.login-card h2 {
+  margin: 2px 0 14px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  background: linear-gradient(120deg, #1b1f2a 18%, var(--fc-brand) 68%, var(--fc-brand-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.login-card :deep(.el-input__wrapper) {
+  min-height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.login-card :deep(.el-button--primary) {
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--fc-brand), var(--fc-brand-2));
+  box-shadow: 0 10px 24px var(--fc-glow);
+}
+
+.login-card :deep(.el-button--primary:hover) {
+  background: linear-gradient(135deg, #5f79ff, #8a6bff);
+}
+
 .hint {
   margin-top: 12px;
   font-size: 12px;
-  color: #909399;
+  color: var(--fc-text-2);
   text-align: center;
 }
 </style>

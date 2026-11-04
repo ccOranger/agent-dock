@@ -3,14 +3,34 @@
     <el-container>
       <el-header class="header">
         <span class="title">AgentDock</span>
-        <el-tag v-if="sceneCode" size="small" type="info">场景 {{ sceneCode }}</el-tag>
+        <el-tag v-if="sceneCode" class="scene-tag" size="small" type="info">场景 {{ sceneCode }}</el-tag>
         <AgentBadge v-if="store.currentAgent" :agent="store.currentAgent" />
         <div class="spacer" />
-        <el-button size="small" @click="onClose" :disabled="!store.sessionId || store.streaming">结束会话</el-button>
-        <el-button size="small" @click="onNew">新建会话</el-button>
-        <el-button size="small" @click="goHistory">历史</el-button>
-        <el-button size="small" @click="goAdmin" v-if="isAdminOrAgent()">管理后台</el-button>
-        <el-button size="small" type="danger" plain @click="onLogout">退出</el-button>
+        <el-button class="header-btn" @click="goHistory">
+          <svg class="hc-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="8.2" />
+            <path d="M12 7.6v4.6l3.1 1.9" />
+          </svg>
+          历史
+        </el-button>
+        <el-dropdown trigger="click" popper-class="cs-header-menu" @command="onHeaderCommand">
+          <el-button class="header-btn">
+            更多
+            <svg class="hc-caret" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6.5 9.5 12 15l5.5-5.5" />
+            </svg>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="new">新建会话</el-dropdown-item>
+              <el-dropdown-item command="close" :disabled="readOnly || !store.sessionId || store.streaming">
+                结束会话
+              </el-dropdown-item>
+              <el-dropdown-item v-if="isAdminOrAgent()" command="admin">管理后台</el-dropdown-item>
+              <el-dropdown-item command="logout" divided>退出</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </el-header>
       <el-main class="main">
         <div class="messages" ref="listRef">
@@ -29,18 +49,20 @@
           />
         </div>
       </el-main>
-      <el-footer class="footer">
+      <el-footer v-if="readOnly" class="footer readonly-bar">
+        <span class="readonly-text">该会话已结束，只能查看</span>
+        <el-button class="send-btn" @click="onNew">开始新对话</el-button>
+      </el-footer>
+      <el-footer v-else class="footer">
         <el-input
           v-model="input"
+          class="composer"
           placeholder="请输入您的问题，Enter 发送"
           :disabled="store.streaming"
           @keyup.enter="send"
-        >
-          <template #append>
-            <el-button v-if="!store.streaming" type="primary" @click="send">发送</el-button>
-            <el-button v-else type="warning" @click="abort">停止</el-button>
-          </template>
-        </el-input>
+        />
+        <el-button v-if="!store.streaming" class="send-btn" @click="send">发送</el-button>
+        <el-button v-else class="send-btn stop" @click="abort">停止</el-button>
       </el-footer>
     </el-container>
   </div>
@@ -50,7 +72,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiChatPoll, apiCloseSession } from '@/api'
+import { apiChatPoll, apiCloseSession, apiGetSession, apiSessionMessages } from '@/api'
 import { streamChat } from '@/api/chat'
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
@@ -67,6 +89,8 @@ const sceneCode = computed(() => {
   return typeof raw === 'string' && raw.trim() ? raw.trim() : null
 })
 const input = ref('')
+// 历史会话：已结束的只读，未结束的可以直接续聊
+const readOnly = ref(false)
 const listRef = ref<HTMLElement>()
 const handoverReason = ref('')
 let controller: AbortController | null = null
@@ -132,10 +156,44 @@ function scrollBottom() {
   })
 }
 
+// 顶部「更多」：把低频操作收进下拉，窄屏顶栏才能保持一行
+function onHeaderCommand(cmd: string) {
+  if (cmd === 'new') onNew()
+  else if (cmd === 'close') void onClose()
+  else if (cmd === 'admin') goAdmin()
+  else if (cmd === 'logout') onLogout()
+}
+
+// 从历史页带 ?session= 进来：先确认状态，再决定是续聊还是只读
+async function restoreSession(id: string) {
+  try {
+    const [sess, page] = await Promise.all([
+      apiGetSession(id, sceneCode.value),
+      apiSessionMessages(id, 1, 100, sceneCode.value),
+    ])
+    store.hydrate(id, page.items)
+    readOnly.value = sess.status === 'closed'
+    scrollBottom()
+  } catch {
+    ElMessage.error('历史会话加载失败')
+  }
+}
+
+// 移动端键盘弹起/收起时可视高度会变化，顺手把列表贴回底部，避免新消息被遮住
+function onViewportResize() {
+  scrollBottom()
+}
+
 // 打字机每揭示一段文本后自动滚动到底部
-onMounted(() => store.setRevealHook(scrollBottom))
+onMounted(() => {
+  store.setRevealHook(scrollBottom)
+  window.visualViewport?.addEventListener('resize', onViewportResize)
+  const sid = route.query.session
+  if (typeof sid === 'string' && sid) void restoreSession(sid)
+})
 onBeforeUnmount(() => {
   store.setRevealHook(null)
+  window.visualViewport?.removeEventListener('resize', onViewportResize)
   // 卸载时中断仍在读的流，避免后台继续消费与旧流的收尾回调干扰后续新流
   controller?.abort()
   controller = null
@@ -214,7 +272,13 @@ function onNew() {
   abort()
   resetTakeover()
   store.reset()
+  readOnly.value = false
   handoverReason.value = ''
+  // 清掉 URL 上的 session，避免刷新后又回到那个只读的历史会话
+  if (route.query.session) {
+    const query = route.query.scene ? { scene: route.query.scene } : {}
+    void router.replace({ path: '/chat', query })
+  }
 }
 
 async function onClose() {
@@ -253,29 +317,243 @@ function goAdmin() {
 </script>
 
 <style scoped>
+/* 撑满视口并锁住高度：否则整页会随消息变长，输入框被推到屏幕外 */
+.chat-layout {
+  height: 100vh;
+  height: 100dvh;
+  /* 双色光晕铺底，代替纯灰背景 */
+  background:
+    radial-gradient(900px 420px at 10% -8%, rgba(122, 92, 255, 0.18), transparent 60%),
+    radial-gradient(760px 420px at 96% 2%, rgba(79, 107, 255, 0.2), transparent 62%),
+    linear-gradient(180deg, #f7f8ff 0%, #ecefff 100%);
+}
+
+.chat-layout :deep(.el-container) {
+  height: 100%;
+}
+
 .header {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 8px;
-  border-bottom: 1px solid #ebeef5;
-  background: #fff;
+  background: var(--fc-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--fc-border);
 }
+
+/* 顶栏底部一道渐变线，比 1px 灰边更有“光” */
+.header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(79, 107, 255, 0.5),
+    rgba(122, 92, 255, 0.5),
+    transparent
+  );
+}
+
 .title {
   font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .spacer {
   flex: 1;
 }
+
+/* ---------- 顶栏按钮：药丸玻璃，和渐变背景、气泡同一套语言 ---------- */
+.header-btn {
+  height: 32px;
+  margin-left: 0;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(79, 107, 255, 0.18);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--fc-text);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(31, 42, 80, 0.05);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease,
+    color 0.16s ease, background 0.16s ease;
+}
+
+.header-btn:hover,
+.header-btn:focus {
+  background: #fff;
+  border-color: rgba(79, 107, 255, 0.42);
+  color: var(--fc-brand);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(79, 107, 255, 0.16);
+}
+
+.header-btn:active {
+  transform: translateY(0);
+}
+
+/* Element Plus 给相邻按钮加了 12px margin，这里由 flex gap 统一接管 */
+.header .el-button + .el-button {
+  margin-left: 0;
+}
+
+.hc-ico,
+.hc-caret {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.hc-ico {
+  margin-right: 4px;
+}
+
+.hc-caret {
+  margin-left: 2px;
+  opacity: 0.65;
+}
 .main {
-  background: #f5f7fa;
+  background: transparent;
   overflow: hidden;
+  min-height: 0;
 }
 .messages {
   height: 100%;
   overflow-y: auto;
   padding: 12px 4%;
 }
+
+/* 新消息轻微上浮进场；流式追加只改文本，不会重复播放 */
+.messages > * {
+  animation: msg-in 0.28s cubic-bezier(0.22, 0.7, 0.3, 1) both;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .footer {
-  padding: 12px 4%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* el-footer 默认写死 60px，这里内容更高，取消固定高度 */
+  height: auto;
+  padding: 12px 4% calc(12px + env(safe-area-inset-bottom));
+  background: var(--fc-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--fc-border);
+}
+
+.composer {
+  flex: 1;
+}
+
+.composer :deep(.el-input__wrapper) {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 0 1px var(--fc-border) inset;
+  transition: box-shadow 0.2s ease;
+}
+
+.composer :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--fc-brand) inset, 0 0 0 4px var(--fc-glow);
+}
+
+/* 主按钮：品牌渐变 + 柔光投影 */
+.footer .send-btn {
+  height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--fc-brand), var(--fc-brand-2));
+  box-shadow: 0 8px 20px var(--fc-glow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.footer .send-btn:hover {
+  background: linear-gradient(135deg, #5f79ff, #8a6bff);
+  transform: translateY(-1px);
+}
+
+.footer .send-btn:active {
+  transform: translateY(0);
+}
+
+.footer .send-btn.stop {
+  background: linear-gradient(135deg, #f3a83c, #ef8140);
+  box-shadow: 0 8px 20px rgba(240, 140, 60, 0.28);
+}
+
+/* 只读历史会话：底部换成说明 + 新建入口 */
+.readonly-bar {
+  justify-content: space-between;
+}
+
+.readonly-text {
+  margin-left: 8px;
+  font-size: 13px;
+  color: var(--fc-text-2);
+}
+
+/* ---------- 移动端 ---------- */
+@media (max-width: 768px) {
+  .header {
+    height: 52px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+  .title {
+    font-size: 15px;
+  }
+  .main {
+    padding: 0;
+  }
+  .messages {
+    padding: 12px 10px;
+  }
+  .footer {
+    gap: 8px;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+  .footer .send-btn {
+    padding: 0 16px;
+  }
+  /* 触控目标放大：手机上按钮高度抬到 34px */
+  .header-btn {
+    height: 34px;
+    padding: 0 12px;
+  }
+}
+
+/* 极窄屏（≤420px）：场景码让位给标题，避免挤掉「历史」 */
+@media (max-width: 420px) {
+  .scene-tag {
+    display: none;
+  }
 }
 </style>

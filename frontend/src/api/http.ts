@@ -11,7 +11,9 @@ export const API_BASE = env.VITE_API_BASE || '/api/v1'
 const client = createHttpClient({
   tokenKey: 'cs_access_token',
   refreshKey: 'cs_refresh_token',
-  loginPath: '/login',
+  // 与 Vite base 对齐：部署在 /smart-cs/ 时 401 要跳 /smart-cs/login，
+  // 用裸 '/login' 会跑到域名根，子路径部署下就是一个 404。
+  loginPath: `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/login`,
   baseURL: API_BASE,
 })
 

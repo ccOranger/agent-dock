@@ -16,8 +16,15 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  if (to.meta.public) return true
-  if (!getToken()) return '/login'
+  if (to.meta.public) {
+    // 已登录还去登录页：直接回聊天首页，避免重复登录
+    if (to.path === '/login' && getToken()) return '/chat'
+    return true
+  }
+  // 未登录一律先去登录页，并记住原目标（登录后跳回来，而不是永远落在 /chat）
+  if (!getToken()) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
   return true
 })
 

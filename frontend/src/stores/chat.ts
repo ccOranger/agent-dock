@@ -50,6 +50,23 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+  /** 打开历史会话：整体替换当前对话，不保留上一轮的缓冲与状态 */
+  function hydrate(id: string, list: Message[]) {
+    reset()
+    sessionId.value = id
+    messages.value = list.map((m) => ({
+      ...m,
+      id: String(m.id),
+      streaming: false,
+      statusText: '',
+      // 接口是 snake_case，气泡组件用的是 senderType，这里统一一次
+      senderType: (m as Message & { sender_type?: string | null }).sender_type ?? m.senderType ?? null,
+    }))
+    // 徽标显示最近一次应答的 Agent，历史会话里也能看到“上次是谁在答”
+    const lastRouted = [...list].reverse().find((m) => m.routed_to)?.routed_to
+    if (lastRouted) currentAgent.value = lastRouted
+  }
+
   /** status 事件：更新占位气泡的阶段文案（已开始出正文则不再覆盖） */
   function setStatus(text: string) {
     const msg = currentStreamMessage()
@@ -189,6 +206,7 @@ export const useChatStore = defineStore('chat', () => {
     pushResolvedAssistant,
     finishStreaming,
     forceFinish,
+    hydrate,
     setRevealHook,
   }
 })
