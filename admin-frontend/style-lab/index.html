@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="clay">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AgentDock 管理后台 · 风格对比实验</title>
+<style>
+/* ============================================================
+   风格对比实验（纯静态，无构建、无依赖）
+   同一屏内容，五套令牌：clay / enterprise / m3 / minimal / brutal
+   改主题只换 <html data-theme>，其余组件样式全部引用令牌。
+   ============================================================ */
+
+:root {
+  --font: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --mono: 'Cascadia Mono', Consolas, Menlo, monospace;
+
+  /* 语义色（各主题覆盖） */
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --text-1: #16181d;
+  --text-2: #4b5563;
+  --text-3: #6f7681;
+  --border: #e8eaed;
+  --border-w: 1px;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --accent-weak: rgba(37, 99, 235, 0.09);
+
+  --ok: #0f7b45;
+  --ok-weak: rgba(15, 123, 69, 0.1);
+  --warn: #9a5b00;
+  --warn-weak: rgba(154, 91, 0, 0.1);
+  --info: #55606f;
+  --info-weak: rgba(85, 96, 111, 0.09);
+  --danger: #b42318;
+
+  /* 形状 */
+  --radius-card: 10px;
+  --radius-control: 8px;
+  --radius-tag: 6px;
+
+  /* 阴影 */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-btn: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-pop: 0 8px 24px rgba(16, 24, 40, 0.12);
+  --shadow-field: none;
+
+  /* 侧栏 */
+  --sidebar-bg: #14161a;
+  --sidebar-text: #cfd4dc;
+  --sidebar-muted: #7c838f;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.09);
+  --sidebar-active-text: #ffffff;
+  --sidebar-border: #14161a;
+  --sidebar-radius: 8px;
+}
+
+/* ---------- 主题 A：粘土外壳（Clay Chrome，表格保持扁平） ---------- */
+[data-theme='clay'] {
+  --bg: #f2ece3;
+  --surface: #fbf6ef;
+  --surface-2: #f5eee4;
+  --text-1: #3b332b;
+  --text-2: #5f5346;
+  --text-3: #7b6d5d;
+  --border: #e4d8c8;
+  --border-w: 1px;
+  --accent: #b25a35;
+  --accent-fg: #fff8f2;
+  --accent-weak: rgba(178, 90, 53, 0.1);
+
+  --ok: #4c7a4a;
+  --ok-weak: rgba(76, 122, 74, 0.12);
+  --warn: #94672d;
+  --warn-weak: rgba(148, 103, 45, 0.13);
+  --info: #6d6357;
+  --info-weak: rgba(109, 99, 87, 0.11);
+  --danger: #a83a2c;
+
+  --radius-card: 18px;
+  --radius-control: 13px;
+  --radius-tag: 9px;
+
+  --shadow-card:
+    8px 8px 18px rgba(163, 144, 121, 0.2),
+    -8px -8px 18px rgba(255, 255, 255, 0.75),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.85);
+  --shadow-btn:
+    3px 3px 7px rgba(163, 144, 121, 0.24),
+    -3px -3px 7px rgba(255, 255, 255, 0.8);
+  --shadow-pop: 12px 12px 30px rgba(120, 100, 80, 0.24);
+  --shadow-field:
+    inset 2px 2px 5px rgba(163, 144, 121, 0.22),
+    inset -2px -2px 5px rgba(255, 255, 255, 0.8);
+
+  --sidebar-bg: #ece3d6;
+  --sidebar-text: #4a4036;
+  --sidebar-muted: #8a7b69;
+  --sidebar-active-bg: #fbf6ef;
+  --sidebar-active-text: #2f2822;
+  --sidebar-border: #e0d3c1;
+  --sidebar-radius: 13px;
+}
+
+/* ---------- 主题 B：极简高密度（Linear / Vercel 风） ---------- */
+[data-theme='minimal'] {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --text-1: #111318;
+  --text-2: #4b5563;
+  --text-3: #6f7681;
+  --border: #e6e8ec;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --accent-weak: rgba(37, 99, 235, 0.08);
+  --radius-card: 10px;
+  --radius-control: 8px;
+  --radius-tag: 6px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-btn: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --sidebar-bg: #101216;
+  --sidebar-text: #c9ced6;
+  --sidebar-muted: #737b87;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.07);
+  --sidebar-active-text: #ffffff;
+  --sidebar-border: #101216;
+  --sidebar-radius: 7px;
+}
+
+/* ---------- 主题 C：企业蓝（Ant Design 稳重款） ---------- */
+[data-theme='enterprise'] {
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --surface-2: #fafafa;
+  --text-1: #1f2329;
+  --text-2: #4e5969;
+  --text-3: #6b7785;
+  --border: #dce0e6;
+  --border-w: 1px;
+  --accent: #1677ff;
+  --accent-fg: #ffffff;
+  --accent-weak: rgba(22, 119, 255, 0.09);
+
+  --ok: #237804;
+  --ok-weak: #f6ffed;
+  --warn: #ad4e00;
+  --warn-weak: #fff7e6;
+  --info: #0958d9;
+  --info-weak: #e6f4ff;
+  --danger: #cf1322;
+
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --radius-tag: 4px;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.03), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-pop: 0 6px 16px rgba(0, 0, 0, 0.12);
+  --shadow-field: none;
+
+  --sidebar-bg: #001529;
+  --sidebar-text: #a6adb4;
+  --sidebar-muted: #6b7785;
+  --sidebar-active-bg: #1677ff;
+  --sidebar-active-text: #ffffff;
+  --sidebar-border: #001529;
+  --sidebar-radius: 6px;
+}
+
+/* ---------- 主题 D：Material You（动态取色 + 药丸控件） ---------- */
+[data-theme='m3'] {
+  --bg: #f4f1fa;
+  --surface: #fdfaff;
+  --surface-2: #f1ecf9;
+  --text-1: #1b1b21;
+  --text-2: #46464f;
+  --text-3: #6f6d78;
+  --border: #e6e0f0;
+  --border-w: 1px;
+  --accent: #2f5da8;
+  --accent-fg: #ffffff;
+  --accent-weak: #dbe3ff;
+
+  --ok: #2c6b4c;
+  --ok-weak: #c9f0dc;
+  --warn: #7a5600;
+  --warn-weak: #ffdf9e;
+  --info: #4a4a52;
+  --info-weak: #e6e2ee;
+  --danger: #b3261e;
+
+  --radius-card: 20px;
+  --radius-control: 12px;
+  --radius-tag: 999px;
+
+  --shadow-card: 0 1px 2px rgba(27, 27, 33, 0.06), 0 2px 8px rgba(27, 27, 33, 0.05);
+  --shadow-btn: 0 1px 2px rgba(27, 27, 33, 0.06);
+  --shadow-pop: 0 10px 28px rgba(27, 27, 33, 0.16);
+  --shadow-field: none;
+
+  --sidebar-bg: #ece6f7;
+  --sidebar-text: #3f3d4a;
+  --sidebar-muted: #7a7687;
+  --sidebar-active-bg: #dbe3ff;
+  --sidebar-active-text: #0b1c3d;
+  --sidebar-border: #ece6f7;
+  --sidebar-radius: 999px;
+}
+
+/* ---------- 主题 E：新粗野（Neo-brutalism） ---------- */
+[data-theme='brutal'] {
+  --bg: #fdfbf3;
+  --surface: #ffffff;
+  --surface-2: #fff7dd;
+  --text-1: #12100c;
+  --text-2: #3a352c;
+  --text-3: #57503f;
+  --border: #12100c;
+  --border-w: 2px;
+  --accent: #ffd43b;
+  --accent-fg: #12100c;
+  --accent-weak: #fff0b8;
+
+  --ok: #0f6b3d;
+  --ok-weak: #c9f2d6;
+  --warn: #7a4a00;
+  --warn-weak: #ffe6b0;
+  --info: #2b2b2b;
+  --info-weak: #e8e6df;
+  --danger: #b42318;
+
+  --radius-card: 4px;
+  --radius-control: 4px;
+  --radius-tag: 2px;
+
+  --shadow-card: 5px 5px 0 #12100c;
+  --shadow-btn: 3px 3px 0 #12100c;
+  --shadow-pop: 8px 8px 0 #12100c;
+
+  --sidebar-bg: #12100c;
+  --sidebar-text: #f5f1e6;
+  --sidebar-muted: #a49c88;
+  --sidebar-active-bg: #ffd43b;
+  --sidebar-active-text: #12100c;
+  --sidebar-border: #12100c;
+  --sidebar-radius: 2px;
+}
+
+/* ---------- 基础 ---------- */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.25s ease;
+}
+.ico { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--text-3); font-size: 12px; }
+
+/* ---------- 外壳 ---------- */
+.shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+
+.sidebar {
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  padding: 14px 12px;
+  border-right: var(--border-w) solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 16px; }
+.brand-mark {
+  width: 32px; height: 32px; border-radius: var(--radius-control);
+  background: var(--accent); color: var(--accent-fg);
+  display: grid; place-items: center; font-weight: 700; font-size: 13px;
+  box-shadow: var(--shadow-btn);
+}
+.brand-text { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+
+.nav-title {
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--sidebar-muted); padding: 14px 10px 6px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 10px; border-radius: var(--sidebar-radius);
+  font-size: 13px; cursor: pointer; color: var(--sidebar-text);
+  border: 1px solid transparent;
+}
+.nav-item:hover { background: rgba(127, 127, 127, 0.12); }
+.nav-item.is-active {
+  background: var(--sidebar-active-bg); color: var(--sidebar-active-text);
+  font-weight: 600; border-color: var(--sidebar-border);
+}
+[data-theme='brutal'] .nav-item.is-active { border: 2px solid #12100c; }
+.nav-badge {
+  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 999px; background: var(--danger); color: #fff;
+  font-size: 11px; font-weight: 600; display: grid; place-items: center;
+}
+[data-theme='brutal'] .nav-badge { border-radius: 2px; border: 2px solid #12100c; }
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  height: 56px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px; gap: 16px;
+  background: var(--surface);
+  border-bottom: var(--border-w) solid var(--border);
+}
+.crumb { font-size: 13px; color: var(--text-3); }
+.crumb b { color: var(--text-1); font-weight: 600; }
+.user { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent-weak); color: var(--accent);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+}
+[data-theme='brutal'] .avatar { border-radius: 2px; border: 2px solid var(--border); }
+
+/* ---------- 页面 ---------- */
+.page { padding: 20px 22px 40px; display: flex; flex-direction: column; gap: 16px; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.page-head h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+.title-row { display: flex; align-items: center; gap: 10px; }
+.count-pill {
+  height: 20px; padding: 0 8px; border-radius: 999px;
+  background: var(--accent-weak); color: var(--accent);
+  font-size: 12px; font-weight: 600; display: inline-grid; place-items: center;
+}
+[data-theme='brutal'] .count-pill { border-radius: 2px; border: 2px solid var(--border); }
+.desc { margin: 6px 0 0; font-size: 13px; color: var(--text-3); }
+.actions { display: flex; gap: 8px; }
+
+/* ---------- 统计卡 ---------- */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.stat {
+  background: var(--surface); border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-card);
+  padding: 15px 16px;
+}
+.stat-label { font-size: 12px; color: var(--text-3); }
+.stat-value { font-size: 27px; font-weight: 700; margin-top: 8px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.stat-hint { font-size: 12px; color: var(--text-3); margin-top: 6px; }
+
+/* ---------- 卡片 ---------- */
+.card {
+  background: var(--surface); border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 13px 16px; border-bottom: var(--border-w) solid var(--border);
+  font-size: 14px; font-weight: 600;
+}
+.card-body { padding: 14px 16px; }
+
+/* ---------- 控件 ---------- */
+.filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.field {
+  height: 34px; min-width: 132px; padding: 0 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 13px; color: var(--text-2);
+  background: var(--surface); border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-control); box-shadow: var(--shadow-field);
+}
+.field .chev { font-size: 9px; color: var(--text-3); transform: scaleY(0.8); }
+.btn {
+  height: 34px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  color: var(--text-1); background: var(--surface);
+  border: var(--border-w) solid var(--border); border-radius: var(--radius-control);
+  box-shadow: var(--shadow-btn); cursor: pointer;
+}
+.btn--primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+[data-theme='brutal'] .btn--primary { border-color: #12100c; }
+[data-theme='brutal'] .btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0 #12100c; }
+[data-theme='clay'] .btn:active { box-shadow: var(--shadow-field); }
+
+/* ---------- 表格（数据面，保持扁平） ---------- */
+.table-wrap { padding: 4px 8px 8px; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th {
+  text-align: left; font-size: 12px; font-weight: 600; color: var(--text-2);
+  padding: 9px 10px; background: var(--surface-2);
+  border-bottom: var(--border-w) solid var(--border);
+}
+table.data td {
+  padding: 10px; color: var(--text-2);
+  border-bottom: var(--border-w) solid var(--border);
+}
+table.data tbody tr:hover td { background: var(--surface-2); }
+table.data td:last-child { white-space: nowrap; }
+.link { color: var(--accent); cursor: pointer; font-size: 13px; }
+
+/* 反例：把表格也捏成粘土（勾选后启用） */
+[data-table-clay='1'] table.data { border-collapse: separate; border-spacing: 0 7px; margin-top: 4px; }
+[data-table-clay='1'] table.data th { background: transparent; border-bottom: none; }
+[data-table-clay='1'] table.data td {
+  background: var(--surface); border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); padding: 14px 10px;
+}
+[data-table-clay='1'] table.data td:first-child { border-left: 1px solid var(--border); border-radius: 12px 0 0 12px; }
+[data-table-clay='1'] table.data td:last-child { border-right: 1px solid var(--border); border-radius: 0 12px 12px 0; }
+[data-table-clay='1'] table.data tbody tr:hover td { background: var(--surface-2); }
+
+/* ---------- 标签 ---------- */
+.tag {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
+  border-radius: var(--radius-tag); font-size: 12px; line-height: 1;
+}
+.tag--ok { background: var(--ok-weak); color: var(--ok); }
+.tag--warn { background: var(--warn-weak); color: var(--warn); }
+.tag--info { background: var(--info-weak); color: var(--info); }
+[data-theme='brutal'] .tag { border: 2px solid var(--border); font-weight: 600; }
+
+/* 企业蓝：斑马行 + 主按钮薄高光（贴近 Ant 的默认观感） */
+[data-theme='enterprise'] table.data tbody tr:nth-child(even) td { background: #fbfcfe; }
+[data-theme='enterprise'] .btn--primary { box-shadow: 0 2px 0 rgba(22, 119, 255, 0.14); }
+[data-theme='enterprise'] .link,
+[data-theme='enterprise'] .count-pill { color: #0958d9; }
+
+/* Material You：药丸按钮、填充式输入、去边框卡片（靠色阶分层） */
+[data-theme='m3'] .btn { border-radius: 999px; border-color: transparent; }
+[data-theme='m3'] .btn--primary { border-color: transparent; }
+[data-theme='m3'] .field,
+[data-theme='m3'] .reply { background: var(--surface-2); border-color: transparent; box-shadow: none; }
+[data-theme='m3'] .card,
+[data-theme='m3'] .stat { border-color: transparent; }
+[data-theme='m3'] .nav-item.is-active { border-color: transparent; }
+[data-theme='m3'] .card-head { border-bottom-color: transparent; }
+
+/* ---------- 右栏：会话详情（抽屉/面板质感） ---------- */
+.work { display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 16px; align-items: start; }
+.detail { position: sticky; top: 16px; }
+.detail-head { display: flex; align-items: center; gap: 8px; }
+.thread { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow: auto; }
+.bubble {
+  max-width: 90%; padding: 9px 12px; font-size: 13px; line-height: 1.55;
+  border: var(--border-w) solid var(--border); border-radius: var(--radius-control);
+  background: var(--surface-2); color: var(--text-1);
+}
+.bubble-meta { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--text-3); margin-bottom: 5px; }
+.bubble.customer { background: var(--accent-weak); border-color: transparent; }
+.bubble.staff { background: var(--ok-weak); border-color: transparent; }
+.bubble.bot { background: var(--surface-2); }
+.composer { display: flex; gap: 8px; padding: 12px 16px; border-top: var(--border-w) solid var(--border); }
+.reply {
+  flex: 1; height: 36px; padding: 0 10px; display: flex; align-items: center;
+  font-size: 13px; color: var(--text-3);
+  background: var(--surface); border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-control); box-shadow: var(--shadow-field);
+}
+
+/* ---------- 底部实验条 ---------- */
+.lab-bar {
+  position: fixed; right: 18px; bottom: 18px; z-index: 20;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  max-width: calc(100vw - 36px); padding: 10px 12px;
+  background: var(--surface); border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-pop);
+}
+.seg { display: flex; border: var(--border-w) solid var(--border); border-radius: var(--radius-control); overflow: hidden; }
+.seg button {
+  border: 0; background: transparent; cursor: pointer; font-family: inherit;
+  padding: 7px 11px; font-size: 12px; color: var(--text-2);
+}
+.seg button.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.lab-note { flex: 1 1 220px; min-width: 180px; font-size: 12px; line-height: 1.5; color: var(--text-3); }
+
+@media (max-width: 1180px) {
+  .work { grid-template-columns: minmax(0, 1fr); }
+  .detail { position: static; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 860px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { display: none; }
+  .lab-note { display: none; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5.5h16v10.5h-9L6.5 20v-4H4z"/></symbol>
+  <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M4 7h16v4a2 2 0 0 0 0 4v2H4v-2a2 2 0 0 0 0-4z"/><path d="M11 7v10"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4.5h9.5A2.5 2.5 0 0 1 17 7v13H7.5A2.5 2.5 0 0 1 5 17.5z"/><path d="M9 8.5h4"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M7 16V9M12 16V5M17 16v-5"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v3M14 3v3M10 18v3M14 18v3M3 10h3M3 14h3M18 10h3M18 14h3"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></symbol>
+</svg>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">AD</div>
+      <div class="brand-text">AgentDock</div>
+    </div>
+
+    <div class="nav-item is-active">
+      <svg class="ico"><use href="#i-chat"/></svg><span>咨询管理</span>
+    </div>
+    <div class="nav-item">
+      <svg class="ico"><use href="#i-ticket"/></svg><span>工单管理</span>
+    </div>
+    <div class="nav-item">
+      <svg class="ico"><use href="#i-gear"/></svg><span>人工接管</span>
+      <span class="nav-badge">3</span>
+    </div>
+
+    <div class="nav-title">知识与记忆</div>
+    <div class="nav-item"><svg class="ico"><use href="#i-book"/></svg><span>知识库维护</span></div>
+    <div class="nav-item"><svg class="ico"><use href="#i-chat"/></svg><span>固定话术</span></div>
+
+    <div class="nav-title">监控与分析</div>
+    <div class="nav-item"><svg class="ico"><use href="#i-chart"/></svg><span>链路追踪</span></div>
+    <div class="nav-item"><svg class="ico"><use href="#i-chart"/></svg><span>数据分析</span></div>
+
+    <div class="nav-title">场景与 Agent</div>
+    <div class="nav-item"><svg class="ico"><use href="#i-chip"/></svg><span>Agent 管理</span></div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <div class="crumb">咨询与工单 / <b>咨询管理</b></div>
+      <div class="user">
+        <span class="avatar">运</span>
+        <span>运营 · 小林</span>
+        <span class="tag tag--info">admin</span>
+      </div>
+    </header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="title-row">
+            <h1>客户咨询信息</h1>
+            <span class="count-pill">1,284</span>
+          </div>
+          <p class="desc">全部会话记录：按状态 / 场景 / 路由 Agent / 时间筛选，查看完整对话并跳转链路追踪。</p>
+        </div>
+        <div class="actions">
+          <button class="btn">刷新</button>
+          <button class="btn btn--primary">导出 CSV</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">进行中咨询</div>
+          <div class="stat-value">126</div>
+          <div class="stat-hint">较昨日 +12</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">待处理工单</div>
+          <div class="stat-value">18</div>
+          <div class="stat-hint">超 24h 未处理 3 条</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">近 7 天工具调用</div>
+          <div class="stat-value">9,431</div>
+          <div class="stat-hint">Top：订单查询</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">待接入会话</div>
+          <div class="stat-value">3</div>
+          <div class="stat-hint">最长等待 6 分钟</div>
+        </div>
+      </div>
+
+      <div class="work">
+        <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <div class="card">
+            <div class="card-body">
+              <div class="filter-row">
+                <div class="field">状态<span class="chev">▼</span></div>
+                <div class="field">场景<span class="chev">▼</span></div>
+                <div class="field" style="min-width:170px">路由 Agent<span class="chev">▼</span></div>
+                <div class="field" style="min-width:210px">2026-11-01 至 2026-11-04<span class="chev">▦</span></div>
+                <div style="flex:1"></div>
+                <button class="btn">重置</button>
+                <button class="btn btn--primary">查询</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <span>会话列表</span>
+              <span class="muted">共 1,284 条 · 每页 20</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data">
+                <thead>
+                  <tr>
+                    <th>会话 ID</th>
+                    <th>客户</th>
+                    <th>场景</th>
+                    <th>状态</th>
+                    <th>消息数</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="mono">4f1c9a7e-2b3d</td>
+                    <td>张女士</td>
+                    <td><span class="tag tag--info">售后</span></td>
+                    <td><span class="tag tag--ok">进行中</span></td>
+                    <td>24</td>
+                    <td class="mono">11-04 10:12</td>
+                    <td><span class="link">查看</span></td>
+                  </tr>
+                  <tr>
+                    <td class="mono">9d2e40b1-77ac</td>
+                    <td>匿名访客</td>
+                    <td><span class="tag tag--info">售前</span></td>
+                    <td><span class="tag tag--warn">转人工</span></td>
+                    <td>9</td>
+                    <td class="mono">11-04 09:58</td>
+                    <td><span class="link">查看</span></td>
+                  </tr>
+                  <tr>
+                    <td class="mono">b7a3c158-0e6f</td>
+                    <td>李先生</td>
+                    <td><span class="tag tag--info">售后</span></td>
+                    <td><span class="tag tag--ok">进行中</span></td>
+                    <td>37</td>
+                    <td class="mono">11-04 09:31</td>
+                    <td><span class="link">查看</span></td>
+                  </tr>
+                  <tr>
+                    <td class="mono">1c8f5d22-9b40</td>
+                    <td>王女士</td>
+                    <td><span class="tag tag--info">物流</span></td>
+                    <td><span class="tag tag--ok">已关闭</span></td>
+                    <td>12</td>
+                    <td class="mono">11-03 21:47</td>
+                    <td><span class="link">查看</span></td>
+                  </tr>
+                  <tr>
+                    <td class="mono">e60b2a94-3cd1</td>
+                    <td>赵先生</td>
+                    <td><span class="tag tag--info">售前</span></td>
+                    <td><span class="tag tag--ok">已关闭</span></td>
+                    <td>6</td>
+                    <td class="mono">11-03 18:05</td>
+                    <td><span class="link">查看</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="card detail">
+          <div class="card-head">
+            <div class="detail-head">
+              <span>会话详情</span>
+              <span class="tag tag--ok">进行中</span>
+            </div>
+            <span class="muted">4f1c9a7e</span>
+          </div>
+          <div class="thread">
+            <div class="bubble customer">
+              <div class="bubble-meta"><span class="tag tag--info">客户</span><span>10:12</span></div>
+              我上周买的洗地机，充电指示灯一直红色，充不满。
+            </div>
+            <div class="bubble bot">
+              <div class="bubble-meta"><span class="tag tag--ok">机器人 · 售后</span><span>10:12</span></div>
+              抱歉给您添麻烦。红灯常亮通常表示电池温度保护或充电座接触异常，我先帮您查订单。
+            </div>
+            <div class="bubble customer">
+              <div class="bubble-meta"><span class="tag tag--info">客户</span><span>10:14</span></div>
+              能直接换新吗？刚买一周。
+            </div>
+            <div class="bubble staff">
+              <div class="bubble-meta"><span class="tag tag--warn">人工 · 小林</span><span>10:16</span></div>
+              可以的，7 天内支持换新。我这就给您建一条换新工单，稍后把单号发您。
+            </div>
+          </div>
+          <div class="composer">
+            <div class="reply">以人工客服身份回复客户…</div>
+            <button class="btn btn--primary">发送</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="lab-bar">
+  <div class="seg" role="group" aria-label="切换风格">
+    <button data-set="clay">粘土外壳</button>
+    <button data-set="enterprise">企业蓝</button>
+    <button data-set="m3">Material You</button>
+    <button data-set="minimal">极简</button>
+    <button data-set="brutal">新粗野</button>
+  </div>
+  <label class="chk"><input type="checkbox" id="clayTable" /> 表格也捏成粘土（反例）</label>
+  <div class="lab-note" id="note"></div>
+</div>
+
+<script>
+  const NOTES = {
+    clay: '粘土外壳：暖米色底、大圆角、双层柔光阴影，只作用于外壳；表格与筛选保持硬边。勾选右侧复选框可对比“整张表都捏软”的代价。',
+    enterprise: '企业蓝：深海军蓝侧栏 + 中蓝主色 + 斑马行，最接近客户对“正规后台”的预期。改造量最小，但也是最不容易被记住的那套。',
+    m3: 'Material You：淡紫调表面 + 主色容器（pill 选中态）+ 药丸按钮 + 填充式输入，没有硬边框，靠色阶分层。',
+    minimal: '极简高密度：近白底、发丝边框、单一强调色。信息密度最高、渲染最省、改造量最小。',
+    brutal: '新粗野：2px 硬边 + 实心错位阴影 + 高对比色块。辨识度最强、渲染最轻，但需要严格的栅格与字号纪律。',
+  };
+  const root = document.documentElement;
+  const btns = [...document.querySelectorAll('.seg button')];
+  const note = document.getElementById('note');
+  const clayTable = document.getElementById('clayTable');
+
+  function apply(theme) {
+    root.dataset.theme = theme;
+    btns.forEach((b) => b.classList.toggle('on', b.dataset.set === theme));
+    note.textContent = NOTES[theme] || '';
+    try { history.replaceState(null, '', '?' + new URLSearchParams({ theme }).toString()); } catch (e) {}
+  }
+
+  btns.forEach((b) => b.addEventListener('click', () => apply(b.dataset.set)));
+
+  clayTable.addEventListener('change', () => {
+    root.dataset.tableClay = clayTable.checked ? '1' : '0';
+  });
+
+  const initial = new URLSearchParams(location.search).get('theme');
+  apply(NOTES[initial] ? initial : 'clay');
+</script>
+</body>
+</html>

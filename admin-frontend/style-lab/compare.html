@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AgentDock 后台 · 五风格并排对比</title>
+<style>
+  :root { --ink: #16181d; --muted: #6f7681; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px;
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    background: #eceef1; color: var(--ink);
+  }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { margin: 0; font-size: 16px; font-weight: 650; }
+  .hint { font-size: 12px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; }
+  .col { background: #fff; border: 1px solid #dfe3e8; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+  .col h2 { margin: 0; padding: 10px 12px; font-size: 13px; font-weight: 600; border-bottom: 1px solid #eef0f3; display: flex; justify-content: space-between; gap: 8px; }
+  .col h2 span { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .shot { position: relative; overflow: hidden; background: #f7f8fa; }
+  iframe { border: 0; position: absolute; top: 0; left: 0; transform-origin: top left; }
+  @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>五风格并排对比</h1>
+  <span class="hint">等比例缩略图，用于看整体气质与信息密度；细节（阴影、对比度、标签配色）请单开 <code>index.html</code> 看实物，右下角可切换五套风格。</span>
+</header>
+
+<div class="grid">
+  <section class="col">
+    <h2>粘土外壳 <span>外壳软化 · 数据面扁平</span></h2>
+    <div class="shot"><iframe src="./index.html?theme=clay" title="粘土外壳"></iframe></div>
+  </section>
+  <section class="col">
+    <h2>企业蓝 <span>客户预期 · 最省心</span></h2>
+    <div class="shot"><iframe src="./index.html?theme=enterprise" title="企业蓝"></iframe></div>
+  </section>
+  <section class="col">
+    <h2>Material You <span>动态取色 · 药丸控件</span></h2>
+    <div class="shot"><iframe src="./index.html?theme=m3" title="Material You"></iframe></div>
+  </section>
+  <section class="col">
+    <h2>极简高密度 <span>改动最小 · 密度最高</span></h2>
+    <div class="shot"><iframe src="./index.html?theme=minimal" title="极简高密度"></iframe></div>
+  </section>
+  <section class="col">
+    <h2>新粗野 <span>硬边 · 高对比</span></h2>
+    <div class="shot"><iframe src="./index.html?theme=brutal" title="新粗野"></iframe></div>
+  </section>
+</div>
+
+<script>
+  const PAGE_W = 1440, PAGE_H = 1080;
+
+  function fit() {
+    document.querySelectorAll('.shot').forEach((shot) => {
+      const frame = shot.querySelector('iframe');
+      const s = shot.clientWidth / PAGE_W;
+      shot.style.height = Math.round(PAGE_H * s) + 'px';
+      frame.style.width = PAGE_W + 'px';
+      frame.style.height = PAGE_H + 'px';
+      frame.style.transform = 'scale(' + s + ')';
+    });
+  }
+
+  fit();
+  addEventListener('resize', fit);
+</script>
+</body>
+</html>
