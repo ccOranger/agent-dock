@@ -26,6 +26,12 @@ const el = ref<HTMLDivElement>()
 let chart: ReturnType<typeof echarts.init> | null = null
 let observer: ResizeObserver | null = null
 
+// ECharts 走 canvas，无法解析 CSS 变量，色值需与 theme.css 的品牌色保持一致
+const BRAND = '#1677ff'
+const TEXT_3 = '#6b7785'
+const AXIS = '#e5e8ec'
+const SPLIT = '#f0f0f0'
+
 function buildOption(): EChartsCoreOption {
   const rows = props.rows
   return {
@@ -34,7 +40,7 @@ function buildOption(): EChartsCoreOption {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line', lineStyle: { color: '#c0c4cc', type: 'dashed' } },
-      backgroundColor: 'rgba(48, 49, 51, 0.9)',
+      backgroundColor: 'rgba(31, 35, 41, 0.92)',
       borderWidth: 0,
       padding: [6, 10],
       textStyle: { color: '#fff', fontSize: 12 },
@@ -50,17 +56,17 @@ function buildOption(): EChartsCoreOption {
       type: 'category',
       boundaryGap: false,
       data: rows.map((r) => r.day.slice(5)),
-      axisLine: { lineStyle: { color: '#e4e7ed' } },
+      axisLine: { lineStyle: { color: AXIS } },
       axisTick: { show: false },
-      axisLabel: { color: '#909399', fontSize: 12, hideOverlap: true, margin: 10 },
+      axisLabel: { color: TEXT_3, fontSize: 12, hideOverlap: true, margin: 10 },
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#909399', fontSize: 12 },
-      splitLine: { lineStyle: { color: '#f0f2f5', type: 'dashed' } },
+      axisLabel: { color: TEXT_3, fontSize: 12 },
+      splitLine: { lineStyle: { color: SPLIT, type: 'dashed' } },
     },
     // 长区间用滚轮缩放，不占额外高度（slider 会压掉图表本身）
     dataZoom: rows.length > 62 ? [{ type: 'inside', throttle: 60 }] : [],
@@ -73,9 +79,9 @@ function buildOption(): EChartsCoreOption {
         showSymbol: rows.length <= 31,
         symbol: 'circle',
         symbolSize: 6,
-        lineStyle: { width: 2, color: '#409eff' },
-        itemStyle: { color: '#409eff', borderColor: '#fff', borderWidth: 2 },
-        areaStyle: { color: 'rgba(64, 158, 255, 0.14)' },
+        lineStyle: { width: 2, color: BRAND },
+        itemStyle: { color: BRAND, borderColor: '#fff', borderWidth: 2 },
+        areaStyle: { color: 'rgba(22, 119, 255, 0.12)' },
         emphasis: { focus: 'series' },
       },
     ],

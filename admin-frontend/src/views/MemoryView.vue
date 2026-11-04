@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="客户记忆查看"
-      description="按客户 UUID 查登录客户的记忆，嵌入渠道的匿名访客用 visitor:<UUID>；可从咨询列表点「记忆」直接带参跳转。"
       :count="queried && filtered.length ? `${filtered.length} 条` : undefined"
     >
       <template #actions>

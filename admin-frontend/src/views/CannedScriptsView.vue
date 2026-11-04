@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="固定话术"
-      description="命中规则的话术会在路由与大模型之前逐字接住；支持问法、关键词两种匹配，也可挂知识库做检索拼接。"
       :count="`${enabledCount} / ${scripts.length} 启用`"
     >
       <template #actions>
@@ -28,8 +27,7 @@
         type="warning"
         :closable="false"
         show-icon
-        title="命中的客户提问会在路由与大模型之前被这句话逐字接住"
-        description="匹配只开放两种规则：问法（归一化后整句相同才算命中，不会吞掉带后半句的业务问法）与关键词（句中出现即命中，判定更宽），不开放正则。话术全部存在这张表里（代码里没有兜底规则）：停用或删除某条，这类提问就正常交给路由与大模型。新增关键词请先用下方命中测试验证，误吞的代价是把真实业务诉求用一句模板打发掉。"
+        title="问法需整句相同才命中，关键词句中出现即命中；不开放正则"
         style="margin-bottom: 12px"
       />
 
@@ -105,7 +103,7 @@
             <el-tag v-else size="small" type="info">全局</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="标识" width="150">
+        <el-table-column label="标识" width="152">
           <template #default="{ row }">
             <span>{{ row.key }}</span>
             <el-tooltip
@@ -124,13 +122,13 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="回答来源" width="110">
+        <el-table-column label="回答来源" width="112">
           <template #default="{ row }">
             <el-tag v-if="row.answer_source === 'kb'" size="small" type="warning">知识库</el-tag>
             <el-tag v-else size="small" type="info">文本</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="title" label="名称" width="150" show-overflow-tooltip>
+        <el-table-column prop="title" label="名称" width="152" show-overflow-tooltip>
           <template #default="{ row }">{{ row.title || '—' }}</template>
         </el-table-column>
         <el-table-column label="规则" min-width="220">
@@ -141,7 +139,7 @@
         <el-table-column label="正文" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">{{ oneLine(row.reply_text) }}</template>
         </el-table-column>
-        <el-table-column label="启用" width="70">
+        <el-table-column label="启用" width="80">
           <template #default="{ row }">
             <el-switch v-model="row.enabled" @change="() => onToggle(row)" />
           </template>

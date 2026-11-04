@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="接入方管理"
-      description="服务端调用凭证按接入方管理：Key 归接入方，接入方再被授权到场景。"
       :count="integrations.length ? `${integrations.length} 个` : undefined"
     >
       <template #actions>
@@ -16,8 +15,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="服务端调用凭证按接入方管理：Key 归接入方，接入方再被授权到场景"
-        description="一个接入方可持多把 Key（轮换过渡期新旧并存），停用接入方会让名下所有 Key 立即失效。访客会话按接入方命名空间隔离，不同接入方下相同的客户标识互不干扰。"
+        title="Key 归接入方；停用接入方会让名下所有 Key 立即失效"
         style="margin-bottom: 12px"
       />
 
@@ -53,12 +51,12 @@
             <span v-if="!row.scenes.length" class="muted">未授权任何场景</span>
           </template>
         </el-table-column>
-        <el-table-column label="Key" width="90">
+        <el-table-column label="Key" width="96">
           <template #default="{ row }">
             <span :class="{ muted: !row.key_count }">{{ row.key_count }} 把</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="操作" width="232" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button link type="primary" size="small" @click="openKeys(row)">Key 管理</el-button>
@@ -127,7 +125,7 @@
     </template>
   </el-dialog>
 
-  <el-drawer v-model="keysVisible" :title="keysTitle" size="620px" @closed="issuedKey = ''">
+  <DetailDrawer v-model="keysVisible" :title="keysTitle" size="620px" @closed="issuedKey = ''">
     <div v-loading="keysLoading" class="keys-body">
       <el-alert
         type="warning"
@@ -151,15 +149,15 @@
       </div>
 
       <el-table :data="keys" size="small" v-loading="keysLoading">
-        <el-table-column label="尾号" width="150">
+        <el-table-column label="尾号" width="152">
           <template #default="{ row }">
             <code>…{{ row.hint }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" min-width="180">
+        <el-table-column label="创建时间" min-width="168">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="90">
+        <el-table-column label="操作" width="96">
           <template #default="{ row }">
             <el-button link type="danger" size="small" @click="revokeKey(row)">吊销</el-button>
           </template>
@@ -172,10 +170,11 @@
     <template #footer>
       <el-button @click="keysVisible = false">关闭</el-button>
     </template>
-  </el-drawer>
+  </DetailDrawer>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -427,14 +426,14 @@ onMounted(load)
 .issued-key {
   margin-bottom: 12px;
   padding: 10px 12px;
-  border: 1px solid rgba(230, 162, 60, 0.28);
+  border: 1px solid var(--cs-warning-line);
   border-radius: var(--cs-radius-sm);
-  background: rgba(230, 162, 60, 0.08);
+  background: var(--cs-warning-soft);
 }
 
 .issued-title {
   margin-bottom: 4px;
-  color: #b88230;
+  color: var(--cs-warning-text);
   font-size: 12px;
 }
 

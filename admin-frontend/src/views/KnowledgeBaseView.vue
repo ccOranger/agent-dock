@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="知识库维护"
-      description="命名空间即检索隔离单元：一个库对应一个 namespace，可被多个场景的 Agent 复用；检索范围由 Agent 声明。"
       :count="bases.length ? `${bases.length} 个库` : undefined"
     >
       <template #actions>
@@ -16,8 +15,8 @@
         <el-table-column prop="namespace" label="Namespace" width="180" />
         <el-table-column prop="display_name" label="名称" width="160" />
         <el-table-column prop="description" label="描述" min-width="180" />
-        <el-table-column prop="document_count" label="文档数" width="90" />
-        <el-table-column label="启用" width="90">
+        <el-table-column prop="document_count" label="文档数" width="96" />
+        <el-table-column label="启用" width="80">
           <template #default="{ row }">
             <el-switch :model-value="row.is_active" @change="(v: boolean) => toggleActive(row, v)" />
           </template>
@@ -75,8 +74,8 @@
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column prop="chunk_count" label="分块数" width="90" />
-        <el-table-column prop="created_at" label="创建时间" width="200">
+        <el-table-column prop="chunk_count" label="分块数" width="96" />
+        <el-table-column prop="created_at" label="创建时间" width="168">
           <template #default="{ row }">{{ fmt(row.created_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="300">
@@ -162,7 +161,7 @@
     </el-dialog>
 
     <!-- 分块查看 -->
-    <el-drawer v-model="chunkDrawer" title="已索引分块" size="60%">
+    <DetailDrawer v-model="chunkDrawer" title="已索引分块" size="60%">
       <div v-loading="chunkLoading" class="chunks">
         <div v-for="c in chunks" :key="c.id" class="chunk">
           <div class="chunk-meta">#{{ c.chunk_index ?? '-' }} · {{ c.id }}</div>
@@ -173,11 +172,12 @@
           <el-button v-if="nextOffset" size="small" @click="loadMoreChunks">加载更多</el-button>
         </div>
       </div>
-    </el-drawer>
+    </DetailDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'

@@ -7,6 +7,10 @@ import 'element-plus/dist/index.css'
 import './styles/theme.css'
 import App from './App.vue'
 import router from './router'
+import { initDensity } from './composables/useDensity'
+
+// 表格密度在挂载前应用，避免首屏先按舒适密度渲染再跳变
+initDensity()
 
 // Element Plus 默认英文语言包，内置文案（表格空态、确认框按钮、日期面板等）会呈现英文。
 // 以 zh-cn 为基线统一成中文，分页再按产品口径覆盖为「总数 N」/「N/页」。

@@ -1,12 +1,9 @@
 <template>
   <header class="page-header">
-    <div class="ph-main">
-      <div class="ph-title-row">
-        <h1 class="ph-title">{{ title }}</h1>
-        <span v-if="count !== undefined && count !== null" class="ph-count">{{ count }}</span>
-        <slot name="tags" />
-      </div>
-      <p v-if="description" class="ph-desc">{{ description }}</p>
+    <div class="ph-title-row">
+      <h1 class="ph-title">{{ title }}</h1>
+      <span v-if="count !== undefined && count !== null" class="ph-count">{{ count }}</span>
+      <slot name="tags" />
     </div>
     <div v-if="$slots.actions" class="ph-actions">
       <slot name="actions" />
@@ -16,13 +13,13 @@
 
 <script setup lang="ts">
 /**
- * 页面标题栏：标题 + 数量徽标 + 描述 + 右侧操作区
- * 用于替代各页面 el-card header 里手写的 <b>标题</b> + 按钮，
- * 让 18 个页面的层级、间距、字号保持一致。
+ * 页面标题栏：标题 + 数量徽标 + 右侧操作区。
+ *
+ * 刻意不提供 description：页面用途由标题、筛选与表格本身表达，
+ * 避免每个页面顶部再挂一句复述性的副标题。
  */
 defineProps<{
   title: string
-  description?: string
   /** 标题右侧的数量/统计徽标，传 undefined 不显示 */
   count?: number | string
 }>()
@@ -31,7 +28,7 @@ defineProps<{
 <style scoped>
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--cs-space-4);
   padding: 2px 2px 0;
@@ -57,17 +54,10 @@ defineProps<{
   height: 20px;
   padding: 0 8px;
   border-radius: 10px;
-  background: rgba(64, 158, 255, 0.1);
-  color: var(--cs-brand);
+  background: var(--cs-brand-fill);
+  color: var(--cs-brand-strong);
   font-size: 12px;
   font-weight: 600;
-}
-
-.ph-desc {
-  margin: 4px 0 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--cs-text-3);
 }
 
 .ph-actions {

@@ -401,13 +401,13 @@ onBeforeUnmount(() => {
 }
 
 .queue-item:hover {
-  border-color: rgba(64, 158, 255, 0.35);
-  background: rgba(64, 158, 255, 0.03);
+  border-color: var(--cs-brand-line);
+  background: var(--cs-brand-soft);
 }
 
 .queue-item.active {
   border-color: var(--cs-brand);
-  background: rgba(64, 158, 255, 0.08);
+  background: var(--cs-brand-soft);
   box-shadow: inset 3px 0 0 var(--cs-brand);
 }
 
@@ -487,14 +487,14 @@ onBeforeUnmount(() => {
 /* 坐席工作台视角：客户在左、我方（人工/机器人）在右 */
 .msg.customer {
   align-self: flex-start;
-  background: rgba(64, 158, 255, 0.08);
-  border-color: rgba(64, 158, 255, 0.18);
+  background: var(--cs-brand-soft);
+  border-color: var(--cs-brand-line);
 }
 
 .msg.staff {
   align-self: flex-end;
-  background: rgba(103, 194, 58, 0.1);
-  border-color: rgba(103, 194, 58, 0.2);
+  background: var(--cs-success-soft);
+  border-color: var(--cs-success-line);
 }
 
 .msg.bot {

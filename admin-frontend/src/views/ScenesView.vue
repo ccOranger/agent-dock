@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="业务场景"
-      description="场景把「谁能回答」圈定在绑定的 Agent 里；路由模式决定直连还是走路由 LLM。"
       :count="scenes.length ? `${scenes.length} 个` : undefined"
     >
       <template #actions>
@@ -16,8 +15,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="一套代码、一个聊天入口：请求带 scene_code 就落到对应场景，不带就是默认场景"
-        description="场景只做一件事——把「谁能回答」圈定在绑定的 Agent 里。路由不是独立实体：auto 下 1 个 Agent 直连、2 个及以上才调用路由 LLM；llm 强制路由；direct 强制直连。默认场景固定直连 default_assistant，避免通用提问被业务 Agent 抢答。"
+        title="路由模式：auto 时单 Agent 直连、多 Agent 走路由 LLM；llm / direct 强制其中一种"
         style="margin-bottom: 12px"
       />
 
@@ -38,7 +36,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="路由模式" width="170">
+        <el-table-column label="路由模式" width="168">
           <template #default="{ row }">
             <el-tag size="small" :type="modeTagType(row.router_mode)">
               {{ modeLabel(row.router_mode) }}
@@ -46,12 +44,12 @@
             <div class="muted small">{{ modeHint(row) }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="绑定 Agent" width="110">
+        <el-table-column label="绑定 Agent" width="112">
           <template #default="{ row }">
             <span :class="{ muted: !row.agent_count }">{{ row.agent_count }} 个</span>
           </template>
         </el-table-column>
-        <el-table-column label="今日请求" width="150">
+        <el-table-column label="今日请求" width="152">
           <template #default="{ row }">
             <span :class="quotaTextClass(row)">{{ row.today_requests ?? 0 }}</span>
             <span class="muted small"> / {{ row.quota_daily ? row.quota_daily : '不限' }}</span>
@@ -65,7 +63,7 @@
             {{ row.description || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="70">
+        <el-table-column label="启用" width="80">
           <template #default="{ row }">
             <el-switch
               v-model="row.status"
@@ -249,7 +247,7 @@
     </template>
   </el-dialog>
 
-  <el-drawer v-model="bindVisible" :title="bindTitle" size="720px">
+  <DetailDrawer v-model="bindVisible" :title="bindTitle" size="720px">
     <div v-loading="bindLoading" class="bind-body">
       <el-alert
         type="warning"
@@ -301,9 +299,9 @@
       <el-button @click="bindVisible = false">取消</el-button>
       <el-button type="primary" :loading="bindSaving" @click="saveBind">保存绑定</el-button>
     </template>
-  </el-drawer>
+  </DetailDrawer>
 
-  <el-drawer v-model="embedVisible" :title="embedTitle" size="760px">
+  <DetailDrawer v-model="embedVisible" :title="embedTitle" size="760px">
     <div v-loading="embedLoading" class="embed-body">
       <el-alert
         type="info"
@@ -431,16 +429,16 @@
       <el-button @click="embedVisible = false">关闭</el-button>
       <el-button type="primary" :loading="embedSaving" @click="saveEmbed">保存接入配置</el-button>
     </template>
-  </el-drawer>
+  </DetailDrawer>
 
-  <el-drawer v-model="scriptsVisible" :title="scriptsTitle" size="820px">
+  <DetailDrawer v-model="scriptsVisible" :title="scriptsTitle" size="820px">
     <div v-loading="scriptsLoading" class="scripts-body">
       <el-alert
         type="info"
         :closable="false"
         show-icon
         title="身份/能力话术按场景独立：本场景没有自己的行时，继承全局文案"
-        description="固定话术在路由与大模型之前命中并逐字下发；回答来源选知识库时，检索结果按固定格式拼接，不经过模型改写。同标识的场景行会覆盖全局行。"
+        description="同标识的场景行会覆盖全局行。"
         style="margin-bottom: 12px"
       />
       <el-alert
@@ -489,7 +487,7 @@
             <div class="script-text">{{ scriptSummary(row) }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="70">
+        <el-table-column label="启用" width="80">
           <template #default="{ row }">
             <el-switch v-model="row.enabled" @change="() => toggleSceneScript(row)" />
           </template>
@@ -500,10 +498,11 @@
       <el-button @click="scriptsVisible = false">关闭</el-button>
       <el-button type="primary" @click="gotoCannedScripts">去固定话术页维护</el-button>
     </template>
-  </el-drawer>
+  </DetailDrawer>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

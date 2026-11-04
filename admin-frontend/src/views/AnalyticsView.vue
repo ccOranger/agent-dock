@@ -1,9 +1,6 @@
 <template>
   <div class="page">
-    <PageHeader
-      title="数据分析 · 成效指标"
-      description="全量三率来自日聚合（可对账）；链路三率来自采样链路，仅作参考。"
-    >
+    <PageHeader title="数据分析 · 成效指标">
       <template #actions>
         <el-button :loading="loading" @click="load">刷新</el-button>
       </template>
@@ -45,7 +42,7 @@
 
       <div class="group-title">
         <span class="group-label"><el-icon><DataLine /></el-icon>全量三率</span>
-        <span class="muted">源：chat_usage_daily · 区间 {{ fmtNum(meta?.requests) }} 次请求</span>
+        <span class="muted">区间 {{ fmtNum(meta?.requests) }} 次请求</span>
       </div>
       <el-row :gutter="16">
         <el-col v-for="m in FULL_METRICS" :key="m.key" :span="8">
@@ -70,7 +67,7 @@
 
       <div class="group-title">
         <span class="group-label"><el-icon><Connection /></el-icon>链路三率</span>
-        <span class="muted">源：request_traces · 区间 {{ fmtNum(meta?.traces_covered) }} 条走完链路</span>
+        <span class="muted">采样链路 · 区间 {{ fmtNum(meta?.traces_covered) }} 条</span>
         <el-tooltip
           :content="
             meta?.sampled
@@ -108,7 +105,7 @@
 
       <div class="group-title">
         <span class="group-label"><el-icon><TrendCharts /></el-icon>每日请求量</span>
-        <span class="muted">源：chat_usage_daily · 按天升序 · 共 {{ fmtNum(dailyRows.length) }} 天</span>
+        <span class="muted">按天升序 · 共 {{ fmtNum(dailyRows.length) }} 天</span>
       </div>
       <el-card shadow="never" v-loading="loading">
         <p v-if="!dailyRows.length" class="muted empty-day">
@@ -327,22 +324,22 @@ onMounted(async () => {
 }
 
 .metric-icon.is-success {
-  background: rgba(103, 194, 58, 0.1);
+  background: var(--cs-success-soft);
   color: var(--cs-success);
 }
 
 .metric-icon.is-warning {
-  background: rgba(230, 162, 60, 0.1);
-  color: var(--cs-warning);
+  background: var(--cs-warning-soft);
+  color: var(--cs-warning-text);
 }
 
 .metric-icon.is-danger {
-  background: rgba(245, 108, 108, 0.1);
+  background: var(--cs-danger-soft);
   color: var(--cs-danger);
 }
 
 .metric-icon.is-primary {
-  background: rgba(64, 158, 255, 0.1);
+  background: var(--cs-brand-soft);
   color: var(--cs-brand);
 }
 

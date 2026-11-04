@@ -1,38 +1,52 @@
 /* ============================================================
-   管理后台设计令牌与基础样式
+   管理后台设计令牌与基础样式 · 企业蓝（对齐 Ant Design 语义）
+   - 主色 #1677ff，深海军蓝侧栏 #001529，白底卡片 + 细边框 + 极弱阴影
    - 页面里不再散落硬编码色值/圆角，统一走 CSS 变量
-   - 视觉方向：深色侧栏 + 浅色内容，细边框、弱阴影、8px 圆角
+   - 语义色同时覆盖 Element Plus 变量，保证 el-tag / el-button / el-message 一致
    ============================================================ */
 :root {
-  /* 品牌与语义色 */
-  --cs-brand: #409eff;
-  --cs-brand-strong: #2b6cd4;
-  --cs-success: #67c23a;
-  --cs-warning: #e6a23c;
-  --cs-danger: #f56c6c;
-  --cs-info: #909399;
+  /* ---------- 品牌色 ---------- */
+  --cs-brand: #1677ff;
+  --cs-brand-strong: #0958d9;
+  --cs-brand-hover: #4096ff;
+  /* 品牌色派生：品牌底色 / 描边 / 最浅填充，替代各页面里的 rgba(64,158,255,…) */
+  --cs-brand-soft: rgba(22, 119, 255, 0.08);
+  --cs-brand-line: rgba(22, 119, 255, 0.28);
+  --cs-brand-fill: #e6f4ff;
 
-  /* 深色侧栏 */
-  --cs-sidebar-bg: #1f2d3d;
-  --cs-sidebar-bg-sub: #1a2634;
-  --cs-sidebar-border: #2c3e50;
-  --cs-sidebar-text: #cfd8e3;
+  /* ---------- 语义色 ---------- */
+  --cs-success: #52c41a;
+  --cs-success-soft: rgba(82, 196, 26, 0.1);
+  --cs-success-line: rgba(82, 196, 26, 0.24);
+  --cs-warning: #faad14;
+  --cs-warning-text: #d48806;
+  --cs-warning-soft: rgba(250, 173, 20, 0.12);
+  --cs-warning-line: rgba(250, 173, 20, 0.3);
+  --cs-danger: #ff4d4f;
+  --cs-danger-soft: rgba(255, 77, 79, 0.1);
+  --cs-info: #8c8c8c;
+
+  /* ---------- 深色侧栏（Ant Pro 深色菜单） ---------- */
+  --cs-sidebar-bg: #001529;
+  --cs-sidebar-bg-sub: #000c17;
+  --cs-sidebar-border: #001529;
+  --cs-sidebar-text: #a6adb4;
   --cs-sidebar-text-active: #ffffff;
-  --cs-sidebar-hover: rgba(255, 255, 255, 0.06);
-  --cs-sidebar-active-bg: rgba(64, 158, 255, 0.16);
+  --cs-sidebar-hover: rgba(255, 255, 255, 0.08);
+  --cs-sidebar-active-bg: #1677ff;
 
-  /* 表面与文字 */
-  --cs-bg: #f5f7fa;
+  /* ---------- 表面与文字 ---------- */
+  --cs-bg: #f0f2f5;
   --cs-surface: #ffffff;
-  --cs-surface-sub: #fafbfc;
-  --cs-border: #e6e8eb;
-  --cs-border-light: #eef0f3;
-  --cs-text-1: #303133;
-  --cs-text-2: #606266;
-  --cs-text-3: #909399;
+  --cs-surface-sub: #fafafa;
+  --cs-border: #e5e8ec;
+  --cs-border-light: #f0f0f0;
+  --cs-text-1: #1f2329;
+  --cs-text-2: #4e5969;
+  --cs-text-3: #6b7785;
 
-  /* 圆角 / 间距 / 阴影 */
-  --cs-radius-sm: 6px;
+  /* ---------- 圆角 / 间距 / 阴影 ---------- */
+  --cs-radius-sm: 4px;
   --cs-radius-md: 8px;
   --cs-radius-lg: 12px;
   --cs-space-1: 4px;
@@ -41,22 +55,83 @@
   --cs-space-4: 16px;
   --cs-space-5: 20px;
   --cs-space-6: 24px;
-  --cs-shadow-card: 0 1px 2px rgba(29, 41, 57, 0.04), 0 2px 8px rgba(29, 41, 57, 0.04);
-  --cs-shadow-pop: 0 6px 24px rgba(29, 41, 57, 0.12);
+  --cs-shadow-card: 0 1px 2px rgba(31, 35, 41, 0.03), 0 2px 8px rgba(31, 35, 41, 0.04);
+  --cs-shadow-pop: 0 6px 16px rgba(31, 35, 41, 0.08), 0 9px 28px 8px rgba(31, 35, 41, 0.05);
 
-  /* 布局尺寸 */
+  /* ---------- 布局尺寸 ---------- */
   --cs-header-h: 56px;
   --cs-aside-w: 220px;
   --cs-aside-w-collapsed: 64px;
 
-  /* 对齐 Element Plus 内建变量 */
+  /* ---------- 表格密度（舒适档；紧凑档见 [data-density='compact']） ---------- */
+  --cs-cell-py: 9px;
+  --cs-table-font: 13px;
+  --cs-card-pad: 18px;
+
+  /* ---------- 对齐 Element Plus 内建变量 ---------- */
+  --el-color-primary: #1677ff;
+  --el-color-primary-light-3: #4096ff;
+  --el-color-primary-light-5: #69b1ff;
+  --el-color-primary-light-7: #91caff;
+  --el-color-primary-light-8: #bae0ff;
+  --el-color-primary-light-9: #e6f4ff;
+  --el-color-primary-dark-2: #0958d9;
+
+  --el-color-success: #52c41a;
+  --el-color-success-light-3: #73d13d;
+  --el-color-success-light-5: #95de64;
+  --el-color-success-light-7: #b7eb8f;
+  --el-color-success-light-8: #d9f7be;
+  --el-color-success-light-9: #f6ffed;
+  --el-color-success-dark-2: #389e0d;
+
+  --el-color-warning: #faad14;
+  --el-color-warning-light-3: #ffc53d;
+  --el-color-warning-light-5: #ffd666;
+  --el-color-warning-light-7: #ffe58f;
+  --el-color-warning-light-8: #fff1b8;
+  --el-color-warning-light-9: #fffbe6;
+  --el-color-warning-dark-2: #d48806;
+
+  --el-color-danger: #ff4d4f;
+  --el-color-danger-light-3: #ff7875;
+  --el-color-danger-light-5: #ffa39e;
+  --el-color-danger-light-7: #ffccc7;
+  --el-color-danger-light-8: #ffd8d6;
+  --el-color-danger-light-9: #fff2f0;
+  --el-color-danger-dark-2: #d9363e;
+
+  --el-color-info: #8c8c8c;
+  --el-color-info-light-8: #e0e0e0;
+  --el-color-info-light-9: #f5f5f5;
+  --el-color-info-dark-2: #595959;
+
+  --el-text-color-primary: #1f2329;
+  --el-text-color-regular: #4e5969;
+  --el-text-color-secondary: #6b7785;
+  --el-text-color-placeholder: #a9b0b8;
+  --el-text-color-disabled: #c9cdd4;
+
+  --el-border-color: #d9d9d9;
+  --el-border-color-light: #e5e8ec;
+  --el-border-color-lighter: #f0f0f0;
+  --el-border-color-extra-light: #f5f6f8;
+
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f0f2f5;
+  --el-bg-color-overlay: #ffffff;
+
   --el-border-radius-base: 6px;
   --el-border-radius-small: 4px;
-  --el-color-primary: #409eff;
-  --el-text-color-primary: #303133;
-  --el-text-color-regular: #606266;
-  --el-border-color-lighter: #eef0f3;
-  --el-box-shadow-light: 0 1px 2px rgba(29, 41, 57, 0.04), 0 2px 8px rgba(29, 41, 57, 0.04);
+  --el-box-shadow-light: 0 1px 2px rgba(31, 35, 41, 0.03), 0 2px 8px rgba(31, 35, 41, 0.04);
+  --el-box-shadow: 0 6px 16px rgba(31, 35, 41, 0.08), 0 9px 28px 8px rgba(31, 35, 41, 0.05);
+}
+
+/* ---------- 紧凑密度：只压缩表格行高与内边距，字号略收，不改信息结构 ---------- */
+[data-density='compact'] {
+  --cs-cell-py: 5px;
+  --cs-table-font: 12.5px;
+  --cs-card-pad: 12px;
 }
 
 /* ---------- 基础 ---------- */
@@ -85,10 +160,10 @@ body {
   background: transparent;
 }
 
-/* ---------- 卡片：细边框 + 弱阴影，去掉默认重投影 ---------- */
+/* ---------- 卡片：细边框 + 极弱阴影，去掉默认重投影 ---------- */
 .el-card {
   border-radius: var(--cs-radius-md);
-  border: 1px solid var(--cs-border);
+  border: 1px solid var(--cs-border-light);
 }
 
 /* shadow="never" 的嵌套卡片不加投影，避免盒中盒双层阴影 */
@@ -104,20 +179,39 @@ body {
 }
 
 .el-card__body {
-  padding: 18px;
+  padding: var(--cs-card-pad);
 }
 
-/* ---------- 表格：表头轻量、行分隔柔和 ---------- */
+/* ---------- 表格：表头轻灰底、行分隔柔和、悬停泛品牌色 ---------- */
+/* 列宽口径（8px 栅格，全部落在 4 的倍数上）：
+   - 开关 / 计数：72–96
+   - 标签 / 枚举：96–112
+   - 标识 / 时间：128–168
+   - 操作列按按钮数：96 / 152 / 208 / 232 / 300 / 380
+   - 自由文本一律用 min-width（160 / 180 / 200 / 220 / 240），不给固定宽，让内容自己撑开 */
 .el-table {
   --el-table-border-color: var(--cs-border-light);
   --el-table-header-bg-color: var(--cs-surface-sub);
-  --el-table-header-text-color: var(--cs-text-2);
-  --el-table-row-hover-bg-color: #f7f9fc;
-  font-size: 13px;
+  --el-table-header-text-color: var(--cs-text-1);
+  --el-table-text-color: var(--cs-text-2);
+  --el-table-row-hover-bg-color: #f5f8ff;
+  font-size: var(--cs-table-font);
 }
 
 .el-table th.el-table__cell {
   font-weight: 600;
+}
+
+/* 表头与数据行的垂直留白：由密度变量控制，舒适 9px / 紧凑 5px */
+.el-table .el-table__cell {
+  padding: var(--cs-cell-py) 0;
+}
+
+/* ---------- 表单控件：聚焦时品牌色描边 + 极淡外发光 ---------- */
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus,
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--cs-brand) inset, 0 0 0 3px rgba(22, 119, 255, 0.08);
 }
 
 /* ---------- 抽屉：头部/底部固定分隔，正文留白 ---------- */
@@ -152,6 +246,18 @@ body {
 
 .el-dialog__body {
   padding: 4px 20px 18px;
+}
+
+/* ---------- 标签 ---------- */
+.el-tag {
+  --el-tag-border-radius: 4px;
+  font-weight: 400;
+}
+
+/* 文字型主按钮/链接：品牌色加深一档，保证 12–13px 下的对比度 */
+.el-button.is-link.el-button--primary,
+.el-button.is-text.el-button--primary {
+  color: var(--cs-brand-strong);
 }
 
 /* ---------- 侧栏折叠后的弹出菜单（挂在 body 上，需全局样式） ---------- */

@@ -1,10 +1,6 @@
 <template>
   <div class="page">
-    <PageHeader
-      title="客户咨询信息"
-      description="全部会话记录：按状态 / 场景 / 路由 Agent / 时间筛选，查看完整对话并跳转链路追踪。"
-      :count="total"
-    >
+    <PageHeader title="咨询管理" :count="total">
       <template #actions>
         <el-button :loading="loading" @click="load">刷新</el-button>
         <el-button type="success" plain :loading="exporting" @click="onExport">导出 CSV</el-button>
@@ -59,28 +55,31 @@
             <el-tag v-else size="small" type="info">匿名访客</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="场景" width="130">
+        <el-table-column label="场景" width="128">
           <template #default="{ row }">
             <el-tag size="small" type="info">{{ sceneName(row.scene_code) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="title" label="会话标题" min-width="160" />
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="96">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="last_route_to" label="路由 Agent" width="150" />
-        <el-table-column prop="message_count" label="消息数" width="90" />
-        <el-table-column prop="created_at" label="创建时间" width="200">
+        <el-table-column prop="last_route_to" label="路由 Agent" width="152" />
+        <el-table-column prop="message_count" label="消息数" width="96" />
+        <el-table-column prop="created_at" label="创建时间" width="168">
           <template #default="{ row }">{{ fmt(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="152" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="openDetail(row)">查看</el-button>
             <el-button link @click="openMemory(row)">记忆</el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <TableState :error="error" :loading="loading" @retry="reload" />
+        </template>
       </el-table>
 
       <el-pagination
@@ -95,7 +94,7 @@
       />
     </el-card>
 
-    <el-drawer v-model="drawerVisible" :title="drawerTitle" size="45%">
+    <DetailDrawer v-model="drawerVisible" :title="drawerTitle" size="45%">
       <div v-if="current" class="detail-meta">
         <el-tag size="small" type="info">{{ sceneName(current.session.scene_code) }}</el-tag>
         <span class="muted" v-if="current.session.scene_code">{{ current.session.scene_code }}</span>
@@ -120,11 +119,13 @@
         </div>
         <el-empty v-if="current && !current.messages.length" description="暂无消息" />
       </div>
-    </el-drawer>
+    </DetailDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
+import TableState from '@/components/TableState.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -142,7 +143,7 @@ function fmt(v?: string | null) {
   return v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-'
 }
 
-const { rows, total, page, pageSize, loading, load: fetchPage, reload: reloadPage } =
+const { rows, total, page, pageSize, loading, error, load: fetchPage, reload: reloadPage } =
   usePagedList<InquirySession>((params, p, size) =>
     apiListInquiries({ ...params, page: p, page_size: size } as any),
   )
@@ -305,8 +306,8 @@ onMounted(async () => {
 
 .msg.user {
   align-self: flex-end;
-  background: rgba(64, 158, 255, 0.08);
-  border-color: rgba(64, 158, 255, 0.18);
+  background: var(--cs-brand-soft);
+  border-color: var(--cs-brand-line);
 }
 
 .msg.assistant {

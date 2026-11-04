@@ -149,18 +149,19 @@ function barStyle(s: TraceSpan) {
   }
 }
 
+// 分类色板与 theme.css 的语义色对齐：品牌色取 #1677ff 系，灰阶取中性色，其余保持可区分
 const TYPE_META: Record<string, { label: string; color: string }> = {
-  'router.llm': { label: '路由', color: '#e6a23c' },
+  'router.llm': { label: '路由', color: '#faad14' },
   'route.intent': { label: '意图', color: '#f0a020' },
   'canned.script': { label: '固定话术', color: '#13c2c2' },
-  'context.memory': { label: '记忆检索', color: '#909399' },
-  'context.rag': { label: 'RAG 检索', color: '#909399' },
-  'context.budget': { label: '上下文预算', color: '#c0c4cc' },
-  'agent.resolve': { label: '解析 Agent', color: '#409eff' },
-  'agent.build': { label: '构建 Agent', color: '#66b1ff' },
-  'agent.run': { label: '执行 Agent', color: '#67c23a' },
-  'tool.call': { label: '工具调用', color: '#b88230' },
-  'memory.persist': { label: '记忆归档', color: '#a0a4ab' },
+  'context.memory': { label: '记忆检索', color: '#8c8c8c' },
+  'context.rag': { label: 'RAG 检索', color: '#8c8c8c' },
+  'context.budget': { label: '上下文预算', color: '#bfbfbf' },
+  'agent.resolve': { label: '解析 Agent', color: '#1677ff' },
+  'agent.build': { label: '构建 Agent', color: '#4096ff' },
+  'agent.run': { label: '执行 Agent', color: '#52c41a' },
+  'tool.call': { label: '工具调用', color: '#ad6800' },
+  'memory.persist': { label: '记忆归档', color: '#a6a6a6' },
 }
 
 const HIDDEN_KEYS = new Set(['intent_index'])
@@ -181,7 +182,7 @@ function typeLabel(t: string) {
   return TYPE_META[t]?.label || t
 }
 function typeColor(t: string) {
-  return TYPE_META[t]?.color || '#909399'
+  return TYPE_META[t]?.color || '#8c8c8c'
 }
 
 function attrEntries(s: TraceSpan) {
@@ -278,11 +279,11 @@ function outcomeTag(outcome?: string | null) {
   margin-right: 4px;
 }
 .hint {
-  color: #909399;
+  color: var(--cs-text-3);
   font-size: 12px;
 }
 .err {
-  color: #f56c6c;
+  color: var(--cs-danger);
   font-size: 12px;
   margin-left: 6px;
 }
@@ -300,18 +301,18 @@ function outcomeTag(outcome?: string | null) {
   gap: 6px;
 }
 .span {
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
+  border: 1px solid var(--cs-border-light);
+  border-radius: var(--cs-radius-sm);
   padding: 6px 10px;
-  background: #fff;
+  background: var(--cs-surface);
 }
 .span.is-error {
-  border-color: #f56c6c;
-  background: #fef0f0;
+  border-color: var(--cs-danger);
+  background: var(--cs-danger-soft);
 }
 .span.is-skipped,
 .span.is-empty {
-  background: #f7f8fa;
+  background: var(--cs-surface-sub);
 }
 .row {
   display: flex;
@@ -328,14 +329,14 @@ function outcomeTag(outcome?: string | null) {
 }
 .name {
   font-weight: 600;
-  color: #303133;
+  color: var(--cs-text-1);
 }
 .spacer {
   flex: 1;
 }
 .time,
 .dur {
-  color: #909399;
+  color: var(--cs-text-3);
   font-size: 12px;
   font-family: Consolas, Menlo, monospace;
 }
@@ -345,7 +346,7 @@ function outcomeTag(outcome?: string | null) {
 }
 .bar-track {
   height: 4px;
-  background: #f0f2f5;
+  background: var(--cs-bg);
   border-radius: 2px;
   margin-top: 6px;
   overflow: hidden;
@@ -356,7 +357,7 @@ function outcomeTag(outcome?: string | null) {
 }
 .attrs {
   margin-top: 6px;
-  border-top: 1px dashed #ebeef5;
+  border-top: 1px dashed var(--cs-border-light);
   padding-top: 6px;
   display: flex;
   flex-direction: column;
@@ -366,8 +367,8 @@ function outcomeTag(outcome?: string | null) {
 .evidence {
   margin-top: 6px;
   padding: 6px 8px;
-  border-radius: 4px;
-  background: #fdf6ec;
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-warning-soft);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -380,7 +381,7 @@ function outcomeTag(outcome?: string | null) {
 }
 .ev-item {
   font-size: 12px;
-  color: #606266;
+  color: var(--cs-text-2);
 }
 .ev-reason {
   display: flex;
@@ -389,11 +390,11 @@ function outcomeTag(outcome?: string | null) {
   font-size: 12px;
 }
 .ev-reason .k {
-  color: #909399;
+  color: var(--cs-text-3);
   flex: none;
 }
 .ev-reason .v {
-  color: #303133;
+  color: var(--cs-text-1);
   word-break: break-all;
   white-space: pre-wrap;
 }
@@ -408,12 +409,12 @@ function outcomeTag(outcome?: string | null) {
   font-size: 12px;
 }
 .attr .k {
-  color: #909399;
+  color: var(--cs-text-3);
   flex: none;
   width: 120px;
 }
 .attr .v {
-  color: #303133;
+  color: var(--cs-text-1);
   word-break: break-all;
   white-space: pre-wrap;
   font-family: Consolas, Menlo, monospace;

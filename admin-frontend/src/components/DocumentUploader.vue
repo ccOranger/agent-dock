@@ -36,6 +36,6 @@ async function onChange(file: UploadFile) {
 <style scoped>
 .uploader {
   padding: 24px;
-  color: #606266;
+  color: var(--cs-text-2);
 }
 </style>

@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="角色与权限"
-      description="按角色配置菜单模块的读/写授权；一人多角色取并集，管理员恒为全部读写。"
       :count="roles.length ? `${roles.length} 个` : undefined"
     >
       <template #actions>
@@ -17,8 +16,7 @@
         :closable="false"
         show-icon
         style="margin-bottom: 12px"
-        title="给角色配置「菜单模块 + 读/写」授权；人员挂上角色即可获得对应能力，一人多角色取并集"
-        description="读=可浏览/查询该模块，写=可新增修改（含读）。「管理员」是超级角色，恒为全模块读写、不可删除，也不需要在矩阵里勾选。"
+        title="读 = 浏览查询，写 = 新增修改（含读）；管理员恒为全模块读写"
       />
 
       <el-table :data="roles" v-loading="loading">
@@ -42,7 +40,7 @@
             <span v-else>{{ grantCount(row) }} 项</span>
           </template>
         </el-table-column>
-        <el-table-column label="在册人数" prop="user_count" width="100" />
+        <el-table-column label="在册人数" prop="user_count" width="96" />
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openPerms(row)">配置权限</el-button>
@@ -74,7 +72,7 @@
   </el-dialog>
 
   <!-- 权限矩阵 -->
-  <el-drawer v-model="permVisible" :title="`配置权限：${permTarget?.name || ''}`" size="52%">
+  <DetailDrawer v-model="permVisible" :title="`配置权限：${permTarget?.name || ''}`" size="52%">
     <el-alert
       v-if="isAdminRole"
       type="warning"
@@ -105,10 +103,11 @@
         保存授权
       </el-button>
     </template>
-  </el-drawer>
+  </DetailDrawer>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {

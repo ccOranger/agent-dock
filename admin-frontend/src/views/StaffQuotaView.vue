@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="人员与配额"
-      description="管理后台账号、角色集合与资源创建配额；配额只统计本人创建的资源，删除即释放。"
       :count="staff.length ? `${staff.length} 人` : undefined"
     >
       <template #actions>
@@ -16,8 +15,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="配额只统计「当前登录人自己创建」的资源，删除即释放；留空表示不限，0 表示禁止创建"
-        description="默认场景、seed 的代码 Agent 与演示数据 created_by 为空，不占用任何人的额度。管理员自身默认也不受限，但可以被另一个管理员配置额度——为了避免把自己锁死，后端不允许修改自己的配额、角色与启停状态。"
+        title="配额只统计本人创建的资源，删除即释放；留空不限，0 表示禁止创建"
         style="margin-bottom: 12px"
       />
 
@@ -49,7 +47,7 @@
           v-for="item in quotaColumns"
           :key="item.key"
           :label="item.label"
-          width="150"
+          width="152"
         >
           <template #default="{ row }">
             <span :class="quotaClass(row, item.key)">

@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="路由档案"
-      description="路由是派生视图：每个场景的候选池、阈值与兜底都不同；这里看到的提示词与参数就是请求真正会用的。"
       :count="scenes.length ? `${scenes.length} 个场景` : undefined"
     >
       <template #actions>
@@ -140,7 +139,7 @@
                   线索完整度为「仅描述」的 Agent 在提示词里只有一行适用范围，抢注意愿天然更弱。
                 </div>
                 <el-table :data="detail.candidates || []" size="small" border>
-                  <el-table-column label="Agent" min-width="170">
+                  <el-table-column label="Agent" min-width="168">
                     <template #default="{ row }">
                       <div class="agent-name">{{ row.name }}</div>
                       <el-tag size="small" :type="row.source === 'code' ? 'info' : 'success'">
@@ -213,7 +212,7 @@
                   </el-descriptions>
                   <el-table :data="testResult.intents" size="small" border class="result">
                     <el-table-column prop="agent_name" label="Agent" width="160" />
-                    <el-table-column prop="confidence" label="置信度" width="90" />
+                    <el-table-column prop="confidence" label="置信度" width="96" />
                     <el-table-column label="依据" min-width="220">
                       <template #default="{ row }">
                         <div>{{ row.reason || '—' }}</div>
@@ -512,12 +511,12 @@ onMounted(async () => {
 }
 
 .scene-item:hover {
-  background: rgba(64, 158, 255, 0.04);
+  background: var(--cs-brand-soft);
 }
 
 .scene-item.active {
-  background: rgba(64, 158, 255, 0.08);
-  border-color: rgba(64, 158, 255, 0.28);
+  background: var(--cs-brand-soft);
+  border-color: var(--cs-brand-line);
   box-shadow: inset 3px 0 0 var(--cs-brand);
 }
 

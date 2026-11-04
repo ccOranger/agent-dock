@@ -1,10 +1,6 @@
 <template>
   <div class="page">
-    <PageHeader
-      title="请求链路"
-      description="逐次请求的意图、RAG、记忆、工具与耗时归因；行可点开查看时间线。"
-      :count="total"
-    >
+    <PageHeader title="链路追踪" :count="total">
       <template #actions>
         <el-button :loading="loading" @click="load">刷新</el-button>
       </template>
@@ -56,28 +52,28 @@
       </el-alert>
 
       <el-table :data="rows" v-loading="loading" style="margin-top: 12px" @row-click="openDetail">
-        <el-table-column prop="created_at" label="时间" width="160">
+        <el-table-column prop="created_at" label="时间" width="168">
           <template #default="{ row }">{{ fmt(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="场景" width="130">
+        <el-table-column label="场景" width="128">
           <template #default="{ row }">
             <el-tag size="small" type="info">{{ row.scene_code || '默认' }}</el-tag>
             <el-tag v-if="row.router_skipped" size="small" class="chip">直连</el-tag>
             <el-tag v-else-if="row.router_fallback" size="small" type="warning" class="chip">兜底</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="outcome" label="结局" width="90">
+        <el-table-column prop="outcome" label="结局" width="96">
           <template #default="{ row }">
             <el-tag :type="outcomeTag(row.outcome).type" size="small">{{ outcomeTag(row.outcome).text }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Agent" min-width="170">
+        <el-table-column label="Agent" min-width="168">
           <template #default="{ row }">
             <el-tag v-for="n in row.agent_names" :key="n" size="small" class="chip">{{ n }}</el-tag>
             <span v-if="!row.agent_names?.length" class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="工具" min-width="170">
+        <el-table-column label="工具" min-width="168">
           <template #default="{ row }">
             <el-tag v-for="n in row.tool_names" :key="n" size="small" type="success" class="chip">{{ n }}</el-tag>
             <span v-if="!row.tool_names?.length" class="muted">-</span>
@@ -96,7 +92,7 @@
             <span class="mono">{{ row.memory_hit_count }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="total_latency_ms" label="耗时" width="90" sortable>
+        <el-table-column prop="total_latency_ms" label="耗时" width="96" sortable>
           <template #default="{ row }">{{ fmtMs(row.total_latency_ms) }}</template>
         </el-table-column>
         <el-table-column prop="confidence" label="置信" width="80">
@@ -109,12 +105,15 @@
             <span v-else class="muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="152" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click.stop="openDetail(row)">链路详情</el-button>
             <el-button link @click.stop="gotoInquiry(row)">咨询</el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <TableState :error="error" :loading="loading" @retry="reload" />
+        </template>
       </el-table>
 
       <el-pagination
@@ -129,17 +128,19 @@
       />
     </el-card>
 
-    <el-drawer v-model="drawerVisible" :title="drawerTitle" size="60%">
+    <DetailDrawer v-model="drawerVisible" :title="drawerTitle" size="60%">
       <TraceTimeline :detail="detail" :loading="detailLoading" />
       <div class="drawer-actions" v-if="detail">
         <el-button link type="primary" @click="copyTraceId">复制 trace_id</el-button>
         <el-button link type="primary" @click="gotoInquiry(detail)">跳到该会话的咨询记录</el-button>
       </div>
-    </el-drawer>
+    </DetailDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
+import TableState from '@/components/TableState.vue'
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -154,12 +155,9 @@ import FilterBar from '@/components/FilterBar.vue'
 const route = useRoute()
 const router = useRouter()
 
-const { rows, total, page, pageSize, loading, load: fetchPage, reload: reloadPage } =
+const { rows, total, page, pageSize, loading, error, load: fetchPage, reload: reloadPage } =
   usePagedList<RequestTraceSummary>((params, p, size) =>
-    apiListTraces(params, p, size).catch((e: any) => {
-      ElMessage.error(e?.message || '加载链路失败')
-      throw e
-    }),
+    apiListTraces(params, p, size),
   )
 const agents = ref<AgentInfo[]>([])
 const scenes = ref<SceneOption[]>([])

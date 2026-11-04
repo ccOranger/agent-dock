@@ -1,10 +1,6 @@
 <template>
   <div class="page">
-    <PageHeader
-      title="工单管理"
-      description="客户问题沉淀成的工单：按状态、紧急度与时间筛选，抽屉内可改状态并补录处理进展。"
-      :count="total"
-    >
+    <PageHeader title="工单管理" :count="total">
       <template #actions>
         <el-button :loading="loading" @click="load">刷新</el-button>
       </template>
@@ -32,30 +28,33 @@
       </FilterBar>
 
       <el-table :data="rows" v-loading="loading" style="margin-top: 16px">
-        <el-table-column prop="ticket_no" label="工单号" width="150">
+        <el-table-column prop="ticket_no" label="工单号" width="152">
           <template #default="{ row }"><span class="mono">{{ row.ticket_no }}</span></template>
         </el-table-column>
         <el-table-column prop="content" label="问题描述" min-width="220" show-overflow-tooltip />
         <el-table-column prop="category" label="分类" width="120" />
-        <el-table-column prop="urgency" label="紧急度" width="90">
+        <el-table-column prop="urgency" label="紧急度" width="96">
           <template #default="{ row }">
             <el-tag :type="urgencyType(row.urgency)" size="small">{{ urgencyLabel(row.urgency) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="110">
+        <el-table-column prop="status" label="状态" width="96">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="update_count" label="补录数" width="80" align="right" />
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="update_count" label="补录数" width="96" align="right" />
+        <el-table-column prop="created_at" label="创建时间" width="168">
           <template #default="{ row }">{{ fmt(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column label="操作" width="96" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="openDetail(row.ticket_no)">查看</el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <TableState :error="error" :loading="loading" @retry="reload" />
+        </template>
       </el-table>
 
       <el-pagination
@@ -70,7 +69,7 @@
       />
     </el-card>
 
-    <el-drawer v-model="drawerVisible" :title="`工单 ${current?.ticket_no || ''}`" size="45%">
+    <DetailDrawer v-model="drawerVisible" :title="`工单 ${current?.ticket_no || ''}`" size="45%">
       <div v-loading="detailLoading" class="detail">
         <el-descriptions :column="1" border v-if="current">
           <el-descriptions-item label="状态">
@@ -108,11 +107,13 @@
           </el-button>
         </div>
       </div>
-    </el-drawer>
+    </DetailDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
+import TableState from '@/components/TableState.vue'
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
@@ -140,7 +141,7 @@ function statusLabel(s: string) {
   return TICKET_STATUS_LABELS[s as keyof typeof TICKET_STATUS_LABELS] ?? s
 }
 
-const { rows, total, page, pageSize, loading, load: fetchPage, reload: reloadPage } =
+const { rows, total, page, pageSize, loading, error, load: fetchPage, reload: reloadPage } =
   usePagedList<TicketSummary>((params, p, size) => apiListTickets(params as TicketFilters, p, size))
 
 const filters = ref<{ status?: string; urgency?: string; category?: string; keyword?: string }>({})

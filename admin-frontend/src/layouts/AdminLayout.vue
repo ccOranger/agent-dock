@@ -55,6 +55,15 @@
         <div class="user">
           <el-tag size="small" type="info" effect="plain">{{ auth.user?.role }}</el-tag>
           <span class="name">{{ auth.user?.display_name || auth.user?.username }}</span>
+          <el-button
+            text
+            class="density-btn"
+            :title="density === 'compact' ? '表格密度：紧凑（点击切换为舒适）' : '表格密度：舒适（点击切换为紧凑）'"
+            aria-label="切换表格密度"
+            @click="toggleDensity"
+          >
+            <el-icon :size="16"><Operation /></el-icon>
+          </el-button>
           <el-button size="small" text @click="onLogout">退出</el-button>
         </div>
       </el-header>
@@ -85,6 +94,7 @@ import {
   Lock,
   Memo,
   Odometer,
+  Operation,
   Service,
   Setting,
   Share,
@@ -96,10 +106,12 @@ import {
 } from '@element-plus/icons-vue'
 import { apiListTakeovers } from '@/api'
 import { canAccess, useAuthStore } from '@/stores/auth'
+import { useDensity } from '@/composables/useDensity'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+const { density, toggle: toggleDensity } = useDensity()
 
 const activePath = computed(() => route.path)
 
@@ -297,7 +309,7 @@ function onLogout() {
   width: 28px;
   height: 28px;
   border-radius: var(--cs-radius-sm);
-  background: linear-gradient(135deg, #409eff, #2b6cd4);
+  background: linear-gradient(135deg, var(--cs-brand), var(--cs-brand-strong));
   color: #fff;
   font-size: 13px;
   font-weight: 700;
@@ -344,12 +356,12 @@ function onLogout() {
   color: #fff;
 }
 
-/* 选中态：淡蓝底 + 左侧强调条，比整块深蓝更轻 */
+/* 选中态：品牌色实底（Ant Pro 深色菜单口径），不再用左侧强调条 */
 .menu :deep(.el-menu-item.is-active) {
   background: var(--cs-sidebar-active-bg);
   color: var(--cs-sidebar-text-active);
-  box-shadow: inset 3px 0 0 var(--cs-brand);
-  font-weight: 600;
+  font-weight: 500;
+  box-shadow: none;
 }
 
 .menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
@@ -408,6 +420,11 @@ function onLogout() {
 }
 
 .collapse-btn {
+  color: var(--cs-text-2);
+  padding: 6px;
+}
+
+.density-btn {
   color: var(--cs-text-2);
   padding: 6px;
 }

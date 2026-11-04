@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="Agent 管理"
-      description="代码 Agent 全局可用；动态 Agent 由后台创建、只在所属场景内可绑定。知识库与工具绑定均在此维护。"
       :count="agents.length ? `${agents.length} 个` : undefined"
     >
       <template #actions>
@@ -14,7 +13,7 @@
     <el-card>
     <el-table :data="agents" v-loading="loading">
       <el-table-column prop="name" label="名称" width="160" />
-      <el-table-column label="来源" width="90">
+      <el-table-column label="来源" width="96">
         <template #default="{ row }">
           <el-tag v-if="row.stale" type="danger" size="small">已失效</el-tag>
           <el-tag v-else :type="row.source === 'code' ? 'info' : 'success'" size="small">
@@ -79,7 +78,7 @@
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column label="操作" width="208" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openDetail(row)">详情</el-button>
           <template v-if="row.source === 'dynamic'">
@@ -229,7 +228,7 @@
     </template>
   </el-dialog>
 
-  <el-drawer v-model="detailVisible" title="Agent 详情" size="52%">
+  <DetailDrawer v-model="detailVisible" title="Agent 详情" size="52%">
     <div v-loading="detailLoading">
       <el-descriptions v-if="detail" :column="2" border size="small">
         <el-descriptions-item label="名称">{{ detail.name }}</el-descriptions-item>
@@ -289,11 +288,12 @@
         </el-descriptions-item>
       </el-descriptions>
     </div>
-  </el-drawer>
+  </DetailDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {

@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="自定义工具"
-      description="代码目录工具与后台在线源码工具统一登记，动态 Agent 按名绑定；启用与源码变更即时生效，无需重启。"
       :count="tools.length ? `${tools.length} 个` : undefined"
     >
       <template #actions>
@@ -35,7 +34,7 @@
             <span class="muted">{{ paramNames(row.parameters) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="来源" width="90">
+        <el-table-column label="来源" width="96">
           <template #default="{ row }">
             <el-tag :type="row.source === 'dynamic' ? 'warning' : 'info'" size="small">
               {{ row.source === 'dynamic' ? '动态' : '代码' }}
@@ -54,12 +53,12 @@
             <el-switch v-model="row.enabled" :disabled="!row.registered" @change="() => onToggle(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="源码更新" width="170">
+        <el-table-column label="源码更新" width="168">
           <template #default="{ row }">
             <span class="muted">{{ row.code_updated_at ? fmt(row.code_updated_at) : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="168" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.source === 'code' && !row.registered" link type="primary" size="small" @click="openRegister(row)">
               登记

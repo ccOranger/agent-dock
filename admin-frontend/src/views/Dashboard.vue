@@ -1,9 +1,6 @@
 <template>
   <div class="page">
-    <PageHeader
-      title="概览"
-      description="资源总量、近 7 天调用排行与 Agent 状态一览；明细可前往对应管理页。"
-    />
+    <PageHeader title="概览" />
 
     <!-- 顶部资源统计卡片 -->
     <el-row :gutter="16">
@@ -103,20 +100,19 @@
       <template #header>
         <div class="card-head">
           <span class="card-head-title">Agent 概览</span>
-          <span class="card-head-hint">详情与开关请前往「Agent 管理」页</span>
         </div>
       </template>
       <el-table :data="agents">
         <el-table-column prop="name" label="Agent" />
         <el-table-column prop="model" label="模型" width="180" />
-        <el-table-column label="来源" width="90">
+        <el-table-column label="来源" width="96">
           <template #default="{ row }">
             <el-tag size="small" :type="row.source === 'code' ? 'info' : 'warning'">
               {{ row.source === 'code' ? '代码' : '动态' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="96">
           <template #default="{ row }">
             <el-tag size="small" :type="row.enabled ? 'success' : 'danger'">
               {{ row.enabled ? '启用' : '禁用' }}

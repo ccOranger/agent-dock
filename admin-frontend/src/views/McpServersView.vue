@@ -2,7 +2,6 @@
   <div class="page">
     <PageHeader
       title="MCP 服务管理"
-      description="登记外部 MCP 服务并绑定到 Agent；支持 sse / http / stdio 三种传输。"
       :count="servers.length ? `${servers.length} 个` : undefined"
     >
       <template #actions>
@@ -20,7 +19,7 @@
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="传输" width="90">
+        <el-table-column label="传输" width="96">
           <template #default="{ row }">
             <el-tag size="small">{{ row.config.transport }}</el-tag>
           </template>
@@ -103,7 +102,7 @@
     </template>
   </el-dialog>
 
-  <el-drawer v-model="toolsDialogVisible" :title="`工具列表 · ${toolsServerName}`" size="55%">
+  <DetailDrawer v-model="toolsDialogVisible" :title="`工具列表 · ${toolsServerName}`" size="55%">
     <div v-loading="toolsLoading" element-loading-text="连接 MCP 服务中…">
       <el-alert v-if="toolsError" :title="`获取失败：${toolsError}`" type="error" :closable="false" show-icon />
       <template v-else>
@@ -124,10 +123,11 @@
       <el-button @click="toolsDialogVisible = false">关闭</el-button>
       <el-button type="primary" :loading="toolsLoading" @click="loadTools(toolsServerId)">刷新</el-button>
     </template>
-  </el-drawer>
+  </DetailDrawer>
 </template>
 
 <script setup lang="ts">
+import DetailDrawer from '@/components/DetailDrawer.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
