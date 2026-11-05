@@ -19,15 +19,16 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-import asyncpg  # noqa: E402
-
-from app.core.config import settings  # noqa: E402
-from app.core.security import hash_password  # noqa: E402
-from app.schemas.scene import DEFAULT_ASSISTANT_NAME, DEFAULT_SCENE_ID  # noqa: E402
+import asyncpg
+from app.core.config import settings
+from app.core.security import hash_password
+from app.schemas.scene import DEFAULT_ASSISTANT_NAME, DEFAULT_SCENE_ID
 
 # 复用 seed_data.py 的种子定义，避免重复维护
 sys.path.insert(0, os.path.dirname(__file__))
-from seed_data import (  # noqa: E402
+from app.agents.canned_scripts import SEED_RULES
+from app.services.canned_templates import TEMPLATE_KEYS
+from seed_data import (
     ACTIVE_CUSTOMERS,
     ACTIVE_DOCUMENTS,
     ACTIVE_DYNAMIC_AGENTS,
@@ -51,9 +52,6 @@ from seed_data import (  # noqa: E402
     SEED_AGENTS,
     ingest_demo_documents,
 )
-
-from app.agents.canned_scripts import SEED_RULES  # noqa: E402
-from app.services.canned_templates import TEMPLATE_KEYS  # noqa: E402
 
 # 需要删除的表（含遗留单表 users）；先删子表再删父表，CASCADE 兜底依赖
 DROP_TABLES = [

@@ -10,11 +10,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "lint": "eslint . --fix && prettier --write src"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@cs/shared": "*",
     "@element-plus/icons-vue": "^2.3.2",
     "axios": "^1.7.7",
     "dayjs": "^1.11.13",

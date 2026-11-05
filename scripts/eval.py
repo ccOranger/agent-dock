@@ -39,15 +39,14 @@ sys.path.insert(0, str(_ROOT / "backend"))
 if not Path(".env").is_file() and (_ROOT / "backend" / ".env").is_file():
     os.chdir(_ROOT / "backend")
 
-import httpx  # noqa: E402
-from sqlalchemy import select  # noqa: E402
-
-from app.core.config import settings  # noqa: E402
-from app.core.constants import API_PREFIX  # noqa: E402
-from app.core.database import SessionLocal, engine  # noqa: E402
-from app.models.entities import ChatEvent, EvalRun, RequestTrace  # noqa: E402
-from app.schemas.eval import EvalObservation, EvalRunSummary  # noqa: E402
-from app.services import eval_runner  # noqa: E402
+import httpx
+from app.core.config import settings
+from app.core.constants import API_PREFIX
+from app.core.database import SessionLocal, engine
+from app.models.entities import ChatEvent, EvalRun, RequestTrace
+from app.schemas.eval import EvalObservation, EvalRunSummary
+from app.services import eval_runner
+from sqlalchemy import select
 
 EXIT_OK = 0
 EXIT_FAILED = 1

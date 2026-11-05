@@ -20,11 +20,10 @@ import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-import asyncpg  # noqa: E402
-
-from app.core.migrate import init_sql_path, load_migrations  # noqa: E402
-from app.core.schema import SCHEMA_VERSION  # noqa: E402
-from app.schemas.scene import (  # noqa: E402
+import asyncpg
+from app.core.migrate import init_sql_path, load_migrations
+from app.core.schema import SCHEMA_VERSION
+from app.schemas.scene import (
     DEFAULT_ASSISTANT_NAME,
     DEFAULT_SCENE_CODE,
     DEFAULT_SCENE_ID,

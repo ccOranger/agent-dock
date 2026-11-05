@@ -1,4 +1,4 @@
-// 基础类型由 @cs/shared 维护，这里集中转出，业务代码继续从 '@/types' 导入
+// 基础类型由 @shared 维护，这里集中转出，业务代码继续从 '@/types' 导入
 import type { ApiResponse, LoginResult, MemoryItem, User } from '@shared'
 
 export type { ApiResponse, LoginResult, MemoryItem, User }

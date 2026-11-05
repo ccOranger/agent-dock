@@ -17,11 +17,10 @@ from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-from sqlalchemy import delete, func, select  # noqa: E402
-
-from app.core.config import settings  # noqa: E402
-from app.core.database import engine  # noqa: E402
-from app.models.entities import RequestTrace  # noqa: E402
+from app.core.config import settings
+from app.core.database import engine
+from app.models.entities import RequestTrace
+from sqlalchemy import delete, func, select
 
 
 async def main(days: int, dry_run: bool) -> None:

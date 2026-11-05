@@ -18,11 +18,10 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-from sqlalchemy import func, select  # noqa: E402
-
-from app.core.database import SessionLocal, engine  # noqa: E402
-from app.models.entities import CannedScript, Scene  # noqa: E402
-from app.services.canned_templates import TEMPLATE_KEYS, backfill_all_scenes  # noqa: E402
+from app.core.database import SessionLocal, engine
+from app.models.entities import CannedScript, Scene
+from app.services.canned_templates import TEMPLATE_KEYS, backfill_all_scenes
+from sqlalchemy import func, select
 
 
 async def _dry_run() -> None:

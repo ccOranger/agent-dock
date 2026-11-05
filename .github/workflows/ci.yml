@@ -91,7 +91,7 @@ jobs:
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
-    # 观察模式，不阻塞合并：前端 devDependencies 的 vitest / vite 链与 hello-agents 的许可问题
+    # 观察模式，不阻塞合并：前端 devDependencies 的 vite / esbuild 链与 hello-agents 的许可问题
     # 都不是一天能清掉的（见 SECURITY.md「依赖漏洞与许可证」）。基线稳定后删掉 continue-on-error。
     continue-on-error: true
     steps:

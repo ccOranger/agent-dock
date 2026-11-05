@@ -5,18 +5,14 @@
   "license": "CC-BY-NC-SA-4.0",
   "type": "module",
   "engines": {
-    "node": ">=18.18.0",
-    "pnpm": ">=8.0.0"
+    "node": ">=18.18.0"
   },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "test": "vitest",
-    "lint": "eslint . --fix && prettier --write src"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@cs/shared": "*",
     "vue": "^3.5.10",
     "vue-router": "^4.4.5",
     "pinia": "^2.2.4",
@@ -28,13 +24,9 @@
     "nanoid": "^5.0.7"
   },
   "devDependencies": {
-    "vite": "^5.4.8",
+    "@vitejs/plugin-vue": "^5.1.4",
     "typescript": "^5.6.2",
-    "vue-tsc": "^2.1.6",
-    "eslint": "^9.11.1",
-    "prettier": "^3.3.3",
-    "vitest": "^2.1.2",
-    "@playwright/test": "^1.47.2",
-    "@vitejs/plugin-vue": "^5.1.4"
+    "vite": "^5.4.8",
+    "vue-tsc": "^2.1.6"
   }
 }

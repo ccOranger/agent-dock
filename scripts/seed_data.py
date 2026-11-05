@@ -20,11 +20,9 @@ os.environ.setdefault("PYTHONPATH", "backend")
 # 种子里的相对路径（docs/demo/*.md）以仓库根为基准，与执行时的 CWD 无关
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
-
-from app.core.database import engine  # noqa: E402
-from app.core.security import hash_password  # noqa: E402
-from app.models.entities import (  # noqa: E402
+from app.core.database import engine
+from app.core.security import hash_password
+from app.models.entities import (
     AgentMeta,
     CannedScript,
     CustomerUser,
@@ -37,12 +35,13 @@ from app.models.entities import (  # noqa: E402
     Ticket,
     ToolMeta,
 )
-from app.schemas.scene import (  # noqa: E402
+from app.schemas.scene import (
     DEFAULT_ASSISTANT_NAME,
     DEFAULT_SCENE_CODE,
     DEFAULT_SCENE_ID,
     DEFAULT_SCENE_NAME,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ===== 种子模式 =====
 # 默认关闭演示数据：开源/生产部署不应带固定口令账号。
@@ -393,10 +392,9 @@ async def ingest_demo_documents(force: bool = False) -> tuple[int, int, int]:
     - embedding 报错 → 中断，已入库的不受影响。
     返回 (入库, 跳过, 失败)。
     """
-    from sqlalchemy import select
-
     from app.services import qdrant_helper
     from app.services.document_service import DocumentService
+    from sqlalchemy import select
 
     if not DEMO_DOCUMENTS:
         return 0, 0, 0

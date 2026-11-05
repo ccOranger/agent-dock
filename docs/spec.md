@@ -218,21 +218,20 @@ testcontainers==4.8.2
     "dayjs": "^1.11.13",
     "markdown-it": "^14.1.0",
     "highlight.js": "^11.10.0",
-    "nanoid": "^5.0.7",
-    "@cs/shared": "*"
+    "nanoid": "^5.0.7"
   },
   "devDependencies": {
     "vite": "^5.4.8",
     "@vitejs/plugin-vue": "^5.1.4",
     "typescript": "^5.6.2",
-    "vue-tsc": "^2.1.6",
-    "eslint": "^9.11.1",
-    "prettier": "^3.3.3",
-    "vitest": "^2.1.2",
-    "@playwright/test": "^1.47.2"
+    "vue-tsc": "^2.1.6"
   }
 }
 ```
+
+> `packages/shared`（`@cs/shared`）不是 npm 依赖：两端都通过 `tsconfig` 的 `paths` 与 Vite `resolve.alias`
+> 以 `@shared` 引入其 TS 源码，构建时直接打包，无需注册为 workspace 依赖。
+> 前端不做单元测试也不跑 eslint/prettier（无配置文件、无测试文件），质量门禁只在后端 `ruff` 与两端 `vue-tsc`。
 
 > 上表为 `frontend/`（客户对话端 5173）。`admin-frontend/`（运营台 5174）不含 markdown-it / highlight.js / nanoid，
 > 另依赖 `@element-plus/icons-vue`（菜单与指标卡图标）与 `echarts`（仅「数据分析」的每日请求量折线图，按需注册组件）；
