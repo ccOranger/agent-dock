@@ -74,10 +74,22 @@ function Resolve-Config {
     return $Default
 }
 
-$Registry = Resolve-Config $Registry "ACR_REGISTRY" "ACR_REGISTRY" "registry.cn-hangzhou.aliyuncs.com"
-$Username = Resolve-Config $Username "ACR_USERNAME" "ACR_USERNAME" "your-acr-username"
-$Namespace = Resolve-Config $Namespace "ACR_NAMESPACE" "ACR_NAMESPACE" "licc"
+$Registry = Resolve-Config $Registry "ACR_REGISTRY" "ACR_REGISTRY" ""
+$Username = Resolve-Config $Username "ACR_USERNAME" "ACR_USERNAME" ""
+$Namespace = Resolve-Config $Namespace "ACR_NAMESPACE" "ACR_NAMESPACE" ""
 $Repository = Resolve-Config $Repository "ACR_REPOSITORY" "ACR_REPOSITORY" "agentdock-backend"
+
+# Registry / 用户名 / 命名空间没有通用默认值：缺了就报错。
+# 仓库是公开的，这里不能出现任何具体账号——配置一律从 .acr.local 或环境变量取。
+if ([string]::IsNullOrWhiteSpace($Registry)) {
+    throw "缺少 ACR_REGISTRY：请在 .acr.local 写入 ACR_REGISTRY=registry.<region>.aliyuncs.com，或设置同名环境变量"
+}
+if ([string]::IsNullOrWhiteSpace($Username)) {
+    throw "缺少 ACR_USERNAME：请在 .acr.local 写入 ACR_USERNAME=<你的阿里云账号>，或设置同名环境变量"
+}
+if ([string]::IsNullOrWhiteSpace($Namespace)) {
+    throw "缺少 ACR_NAMESPACE：请在 .acr.local 写入 ACR_NAMESPACE=<你的命名空间>，或设置同名环境变量"
+}
 
 # 默认 tag 取 backend/pyproject.toml 的 version
 if ([string]::IsNullOrWhiteSpace($Tag)) {

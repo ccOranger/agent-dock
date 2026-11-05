@@ -174,7 +174,7 @@ COMPOSE_FILE="docker-compose.yml:docker-compose.prod.yml" bash scripts/backup.sh
 
 完整的 HTTPS、升级、恢复与安全清单见 [部署指南](docs/deployment.md) 与 [运维手册](docs/runbook.md)。
 
-宝塔 + 阿里云 ACR 的实际部署记录（客户前端 `/smart-cs/`、管理后台 `/smart-cs/admin/`、后端 `/cs/`）见 [宝塔部署记录](docs/baota-deploy.md)。
+宝塔 + 镜像仓库（以阿里云 ACR 为例）的部署样例（客户前端 `/smart-cs/`、管理后台 `/smart-cs/admin/`、后端 `/cs/`）见 [宝塔 + ACR 部署参考](docs/baota-deploy.md)。
 
 ## 本地开发
 
@@ -216,7 +216,7 @@ docs/             快速开始、架构说明、配置、部署、评测、FAQ�
 | [架构说明](docs/architecture.md) | 组件拓扑、一轮对话链路、上下文工程、记忆生命周期、追踪模型与扩展点 |
 | [配置说明](docs/configuration.md) | `.env` 全量配置、默认值与生效优先级 |
 | [部署指南](docs/deployment.md) | Compose、生产叠加、HTTPS、备份恢复 |
-| [宝塔部署记录](docs/baota-deploy.md) | 阿里云 ACR、宝塔 Nginx、客户前端/管理后台/后端路径 |
+| [宝塔 + ACR 部署参考](docs/baota-deploy.md) | 云服务器 + 宝塔 Nginx + 镜像仓库，客户前端/管理后台/后端路径样例 |
 | [常见问题](docs/faq.md) | 模型接入、Qdrant、MCP、Windows 编码、端口冲突 |
 | [运维手册](docs/runbook.md) | 服务清单、排障、数据维护、发布前评测回归、安全 |
 | [评测与回归](docs/evaluation.md) | 用例集、指标口径、基线对比与退化判定、报告与退出码 |

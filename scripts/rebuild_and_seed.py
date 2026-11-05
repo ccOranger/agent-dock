@@ -1,6 +1,6 @@
 """重建数据库并写入种子数据（适配远端 DB 代理：单次 simple query 往返完成全部 DDL+DML）
 
-背景：云库 203.0.113.10 位于事务级连接池代理之后，命名 prepared statement 会被回收，
+背景：部分云数据库位于事务级连接池代理之后，命名 prepared statement 会被回收，
 导致 SQLAlchemy/asyncpg 的多次扩展协议往返报 "connection was closed in the middle of operation"。
 本脚本把「删除旧表 + 依据 init_db.sql 建表 + 种子 INSERT」拼成一条多语句字符串，
 用 asyncpg 的 simple query 协议一次性执行（单个网络往返），规避该问题。
