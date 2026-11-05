@@ -5,11 +5,14 @@ HelloAgents 框架启动初始化
 import logging
 import os
 
-from hello_agents import HelloAgentsLLM
-from hello_agents.agents import SimpleAgent
-from hello_agents.tools import MemoryTool, RAGTool, ToolRegistry
-
 from app.core.config import settings
+from app.core.ports.adapters.hello_agents import (
+    HelloAgentsLLM,
+    MemoryTool,
+    RAGTool,
+    SimpleAgent,
+    ToolRegistry,
+)
 
 logger = logging.getLogger(__name__)
 

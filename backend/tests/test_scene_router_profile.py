@@ -262,6 +262,24 @@ class _FakeSimpleAgent:
         return _FakeSimpleAgent.response
 
 
+class _FakeLLM:
+    """LLMPort 的最小实现（路由层只用到 ``.raw``，不会真的调模型）。
+
+    P1 起 ``get_llm`` 返回端口适配器，``SimpleAgent(llm=...)`` 需要的是 ``.raw``；
+    假对象必须满足同一契约，否则就是在测试里放过了真实的类型变化。
+    真的发生模型调用时这里直接炸，避免用例"看起来通过但偷偷打了网络"。
+    """
+
+    model = None
+    raw = object()
+
+    def invoke(self, messages, **kwargs):
+        raise AssertionError("路由场景档案用例不应触发真实模型调用")
+
+    def stream_invoke(self, messages, **kwargs):
+        raise AssertionError("路由场景档案用例不应触发真实模型调用")
+
+
 class _Collector:
     def __init__(self):
         self.spans = []
@@ -291,7 +309,7 @@ class _Collector:
 
 @pytest.fixture
 def fake_router_llm(monkeypatch):
-    monkeypatch.setattr(ra, "get_llm", lambda model=None: object())
+    monkeypatch.setattr(ra, "get_llm", lambda model=None: _FakeLLM())
     monkeypatch.setattr(ra, "SimpleAgent", _FakeSimpleAgent)
 
 

@@ -8,12 +8,11 @@ import asyncio
 import json
 import logging
 
-from hello_agents.agents import SimpleAgent
-
 from app.agents.llm_factory import get_llm
 from app.agents.prompts.router import GLOBAL_SCENE_RULES, ROUTER_SYSTEM_PROMPT, render_system_prompt
 from app.agents.registry import AGENT_REGISTRY, list_agents, list_effective_agents
 from app.core.config import settings
+from app.core.ports.adapters.hello_agents import SimpleAgent
 from app.core.tracing import SPAN_ROUTER, clip_payload
 from app.schemas.scene import DEFAULT_ASSISTANT_NAME, SceneRouterProfile
 
@@ -114,7 +113,7 @@ class RouterAgent:
         # 默认提示词（仅代码注册表、无上下文）：保证无 DB 时仍可工作，也供测试直接读取
         self.agent = SimpleAgent(
             name=ROUTER_AGENT_NAME,
-            llm=self.llm,
+            llm=self.llm.raw,
             system_prompt=self._build_prompt(),
             tool_registry=None,  # 不加载任何工具
         )
@@ -314,8 +313,8 @@ class RouterAgent:
             system_prompt = self._render_prompt(agents, history, query, last_route_to)
         agent = SimpleAgent(
             name=ROUTER_AGENT_NAME,
-            # 场景可覆盖路由模型：不同模型共用一个进程级客户端缓存
-            llm=self.llm if model == settings.router_model else get_llm(model),
+            # 场景可覆盖路由模型：不同模型共用一个进程级客户端缓存；.raw 为框架互操作点
+            llm=(self.llm if model == settings.router_model else get_llm(model)).raw,
             system_prompt=system_prompt,
             tool_registry=None,
         )

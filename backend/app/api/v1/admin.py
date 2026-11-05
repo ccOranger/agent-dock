@@ -336,7 +336,7 @@ async def test_mcp_server(body: MCPServerCreate, user=Depends(require_perm("mcp-
     if not source:
         raise ParamError("缺少 endpoint/command，无法测试")
     try:
-        from hello_agents.protocols.mcp.client import MCPClient
+        from app.core.ports.adapters.hello_agents import MCPClient
 
         async def _probe() -> list:
             async with MCPClient(source) as client:
@@ -362,7 +362,7 @@ async def list_mcp_server_tools(server_id: str, user=Depends(require_staff)):
         raise ParamError("缺少 endpoint/command，无法连接")
     timeout = int((row.config or {}).get("timeout_seconds") or 15)
     try:
-        from hello_agents.protocols.mcp.client import MCPClient
+        from app.core.ports.adapters.hello_agents import MCPClient
 
         async def _fetch() -> list:
             async with MCPClient(source) as client:

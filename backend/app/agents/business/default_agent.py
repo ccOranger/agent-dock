@@ -5,9 +5,8 @@
 - 只检索默认知识库 cs_default，不跨场景读库；
 - 单 Agent 直连，不参与路由（默认场景 router_mode=direct）。
 """
-from hello_agents.tools import ToolRegistry
-
 from app.agents.base_business_agent import BaseBusinessAgent
+from app.core.ports.adapters.hello_agents import ToolRegistry
 from app.schemas.scene import DEFAULT_ASSISTANT_NAME, DEFAULT_KNOWLEDGE_NAMESPACE
 from app.tools.memory_factory import get_memory_tool
 from app.tools.rag_factory import get_rag_tool

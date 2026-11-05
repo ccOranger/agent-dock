@@ -7,9 +7,8 @@ DynamicBusinessAgent：由管理后台在 DB 中配置的动态业务 Agent
   （自定义工具可以是代码目录里预先写好的，也可以是后台在线写源码的动态工具）
 - 按需求默认挂载 memory 工具（与所有代码 Agent 保持一致）
 """
-from hello_agents.tools import ToolRegistry
-
 from app.agents.base_business_agent import BaseBusinessAgent
+from app.core.ports.adapters.hello_agents import ToolRegistry
 from app.tools.custom_loader import register_custom_tools
 from app.tools.memory_factory import get_memory_tool
 from app.tools.rag_factory import get_rag_tool

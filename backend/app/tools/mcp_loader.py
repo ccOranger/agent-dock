@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from hello_agents.tools import MCPTool, ToolRegistry
+from app.core.ports.adapters.hello_agents import MCPTool, ToolRegistry
 
 logger = logging.getLogger(__name__)
 

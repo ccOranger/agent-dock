@@ -16,9 +16,6 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any
 
-from hello_agents import Message
-from hello_agents.agents import SimpleAgent
-
 from app.agents.canned_scripts import (
     ANSWER_SOURCE_KB,
     match_canned_script,
@@ -29,6 +26,7 @@ from app.agents.router_agent import RouterAgent
 from app.agents.scene_router import build_scene_router_profile
 from app.core.config import settings
 from app.core.context_engineer import ContextEngineer
+from app.core.ports.adapters.hello_agents import Message, SimpleAgent
 from app.core.tracing import (
     OUTCOME_ANSWERED,
     OUTCOME_ERROR,

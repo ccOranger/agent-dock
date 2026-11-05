@@ -18,8 +18,7 @@ build_tools/register_custom_tools（工作线程内同步执行），避免跨�
 import logging
 from typing import Any
 
-from hello_agents.tools import ToolRegistry
-
+from app.core.ports.adapters.hello_agents import ToolRegistry
 from app.tools import custom_catalog, tool_code_loader
 
 logger = logging.getLogger(__name__)

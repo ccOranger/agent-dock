@@ -4,11 +4,9 @@ BaseBusinessAgent：所有业务 Agent 的抽象基类
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 
-from hello_agents.agents import SimpleAgent
-from hello_agents.tools import ToolRegistry
-
 from app.agents.llm_factory import get_llm
 from app.core.config import settings
+from app.core.ports.adapters.hello_agents import SimpleAgent, ToolRegistry
 
 
 class BaseBusinessAgent(ABC):
@@ -81,7 +79,8 @@ class BaseBusinessAgent(ABC):
         available_tool_names = list(self.registered_custom_tools) + mcp_tool_names
         return SimpleAgent(
             name=self.name,
-            llm=get_llm(model),
+            # .raw：SimpleAgent 要的是上游 HelloAgentsLLM 实例（唯一保留的互操作点）
+            llm=get_llm(model).raw,
             system_prompt=self._final_system_prompt(available_tool_names),
             tool_registry=registry,
         )

@@ -11,7 +11,7 @@ orchestrator 的异步执行链），故在此对 `Tool` 做一层薄适配：
 """
 from typing import Any
 
-from hello_agents.tools import Tool, ToolParameter
+from app.core.ports.adapters.hello_agents import Tool, ToolParameter
 
 
 class BaseTool(Tool):
